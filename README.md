@@ -18,7 +18,7 @@ SaaS-платформа: преподаватель загружает PPTX/PDF 
 | БД           | PostgreSQL 17                       | пользователи, курсы, уроки, прогресс       |
 | Очередь      | Celery 5.6 + Redis 7                | пайплайн генерации видео в фоне            |
 | LLM          | OpenAI-совместимый (Ollama/YandexGPT)| разбиение текста, генерация скриптов и тестов |
-| TTS          | заглушка (готов интерфейс)          | синтез речи                                |
+| TTS          | Sileroшка                           | синтез речи                                |
 | Конвертация  | LibreOffice headless + FFmpeg       | PPTX → PNG → MP4                           |
 | Frontend     | Nuxt 3 + Tailwind CSS               | SPA-кабинет преподавателя и студента       |
 
@@ -157,7 +157,7 @@ LLM_API_KEY=<ваш Yandex IAM-токен>
 
 `LLMService` использует `openai.AsyncOpenAI` — никакого кода менять не нужно.
 
-### TTS: заглушка → Yandex SpeechKit
+### TTS: Sileroшка → Yandex SpeechKit
 
 Откройте `backend/app/services/tts_service.py` и замените тело `synthesize()`:
 1. Вызовите `httpx.AsyncClient` к Yandex SpeechKit API.
@@ -169,7 +169,7 @@ LLM_API_KEY=<ваш Yandex IAM-токен>
 
 **MVP** (текущее)
 - Регистрация, базовый кабинет преподавателя и студента.
-- Загрузка PPTX, заглушка TTS, рабочий пайплайн → MP4.
+- Загрузка PPTX, Sileroшка TTS, рабочий пайплайн → MP4.
 - Простой плеер уроков, отметка прохождения.
 
 **Рост**
