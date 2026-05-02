@@ -1,0 +1,52 @@
+# Agent
+.claude
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Environment
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Storage
+backend/storage/*
+!backend/storage/.gitkeep
+
+# Alembic
+backend/alembic/versions/*
+!backend/alembic/versions/.gitkeep
+
+# Node
+node_modules/
+.output/
+dist/
+.cache/
+
+# Nuxt generated output — ignored everywhere ...
+.nuxt/
+# ... except the tsconfig stub that lets VS Code resolve types before the
+# container first runs (Nuxt overwrites it with the real config on startup).
+!frontend/.nuxt/
+frontend/.nuxt/*
+!frontend/.nuxt/tsconfig.json
+
+# Logs
+*.log
