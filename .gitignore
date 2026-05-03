@@ -29,6 +29,9 @@ Thumbs.db
 backend/storage/*
 !backend/storage/.gitkeep
 
+#Pylance
+backend/.stubs/
+
 # Alembic
 backend/alembic/versions/*
 !backend/alembic/versions/.gitkeep
