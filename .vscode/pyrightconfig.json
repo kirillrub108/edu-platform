@@ -1,0 +1,10 @@
+{
+    "venvPath": ".",
+    "pythonVersion": "3.13",
+    "extraPaths": [
+        "backend",
+        "backend/app"
+    ],
+    "typeCheckingMode": "basic",
+    "useLibraryCodeForTypes": true
+}
