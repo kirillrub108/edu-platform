@@ -116,10 +116,20 @@ async def generate_video(
     db: AsyncSession = Depends(get_db),
 ):
     lesson = await _get_owned_lesson(lesson_id, user, db)
-    if not data.pptx_path:
-        raise HTTPException(status_code=400, detail="pptx_path is required")
 
-    task = generate_video_lesson.delay(str(lesson.id), data.pptx_path)
+    pptx_path = data.pptx_path or lesson.pptx_path
+    if not pptx_path:
+        raise HTTPException(
+            status_code=400,
+            detail="pptx_path is required (pass it in the body or upload a PPTX to the lesson first)",
+        )
+
+    # Persist pptx_path on the lesson so it can be reused on retries
+    if data.pptx_path and data.pptx_path != lesson.pptx_path:
+        lesson.pptx_path = data.pptx_path
+        await db.commit()
+
+    task = generate_video_lesson.delay(str(lesson.id), pptx_path)
     return {"task_id": task.id, "lesson_id": str(lesson.id)}
 
 
@@ -132,10 +142,15 @@ async def task_status(
 ):
     await _get_owned_lesson(lesson_id, user, db)
     result = AsyncResult(task_id, app=celery_app)
-    payload = {"task_id": task_id, "status": result.status, "result": None}
-    if result.ready():
+
+    payload: dict = {"task_id": task_id, "status": result.status, "result": None, "meta": None}
+
+    if result.state == "PROGRESS":
+        payload["meta"] = result.info  # {"step": ..., "done": ..., "total": ...}
+    elif result.ready():
         try:
             payload["result"] = result.result if isinstance(result.result, dict) else {"value": str(result.result)}
         except Exception:
             payload["result"] = None
+
     return payload

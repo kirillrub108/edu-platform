@@ -31,6 +31,7 @@ class LessonOut(BaseModel):
     title: str
     order: int
     content_type: ContentType
+    pptx_path: str | None
     video_url: str | None
     text_content: str | None
     script: str | None
@@ -61,7 +62,7 @@ class ScriptUpdateRequest(BaseModel):
 
 
 class VideoGenerateRequest(BaseModel):
-    lesson_id: UUID
+    # pptx_path is optional: if omitted, lesson.pptx_path is used
     pptx_path: str | None = None
 
 
@@ -69,3 +70,4 @@ class TaskStatusResponse(BaseModel):
     task_id: str
     status: str
     result: dict | None = None
+    meta: dict | None = None

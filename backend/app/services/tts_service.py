@@ -28,16 +28,13 @@ class TTSService:
     # ------------------------------------------------------------------
 
     def _synthesize_silero(self, text: str, output_path: str) -> str:
-        url = f"{settings.SILERO_TTS_URL}/api/tts"
+        url = f"{settings.SILERO_TTS_URL}/process"
         params = {
-            "text": text,
-            "speaker": "aidar",
-            "sample_rate": 48000,
-            "put_accent": 1,
-            "put_yo": 1,
+            "INPUT_TEXT": text,
+            "VOICE": "aidar",
         }
         try:
-            response = httpx.get(url, params=params, timeout=30)
+            response = httpx.get(url, params=params, timeout=60)
             response.raise_for_status()
         except httpx.HTTPError as exc:
             raise RuntimeError(

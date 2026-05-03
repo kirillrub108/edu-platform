@@ -56,6 +56,7 @@ class Lesson(Base):
         default=ContentType.video,
         nullable=False,
     )
+    pptx_path = Column(String(512), nullable=True)
     video_url = Column(String(512), nullable=True)
     text_content = Column(Text, nullable=True)
     script = Column(Text, nullable=True)

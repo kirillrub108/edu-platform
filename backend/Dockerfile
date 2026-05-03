@@ -8,8 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libreoffice \
     ffmpeg \
+    poppler-utils \
     wget \
     && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd -g 1000 appgroup && useradd -u 1000 -g appgroup -d /app -s /sbin/nologin appuser
 
 WORKDIR /app
 

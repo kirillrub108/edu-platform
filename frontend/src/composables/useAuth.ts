@@ -41,10 +41,15 @@ export const useAuth = () => {
     await fetchMe()
   }
 
-  const register = async (email: string, password: string, full_name?: string) => {
+  const register = async (
+    email: string,
+    password: string,
+    role: 'teacher' | 'student',
+    full_name?: string,
+  ) => {
     const tokens = await apiFetch<TokenResponse>('/auth/register', {
       method: 'POST',
-      body: { email, password, full_name },
+      body: { email, password, role, full_name },
     })
     persistTokens(tokens)
     await fetchMe()

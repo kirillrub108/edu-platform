@@ -58,7 +58,6 @@ class CourseOut(BaseModel):
     owner: UserOut
     created_at: datetime
     updated_at: datetime
-    lessons_count: int = 0
 
 
 class CourseDetail(CourseOut):

@@ -41,6 +41,7 @@ async def register(data: UserRegister, db: AsyncSession = Depends(get_db)) -> To
         email=data.email,
         hashed_password=hash_password(data.password),
         full_name=data.full_name,
+        role=data.role,
     )
     db.add(user)
     await db.commit()

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+definePageMeta({ middleware: ['auth'] })
+
 const { apiFetch } = useApi()
 const courses = ref<any[]>([])
 const loading = ref(true)

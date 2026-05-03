@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -32,8 +33,10 @@ class VideoService:
         os.makedirs(pdf_dir, exist_ok=True)
 
         logger.info("Converting PPTX to PDF: %s", pptx_path)
+        lo_user_dir = os.path.join(output_dir, "_lo_profile")
         _run([
             "libreoffice", "--headless",
+            f"-env:UserInstallation=file://{lo_user_dir}",
             "--convert-to", "pdf",
             "--outdir", pdf_dir,
             pptx_path,
@@ -70,7 +73,7 @@ class VideoService:
         image_paths: list[str],
         audio_paths: list[str],
         output_path: str,
-        progress_cb: "Callable[[int, int], None] | None" = None,
+        progress_cb: Callable[[int, int], None] | None = None,
     ) -> str:
         if len(image_paths) != len(audio_paths):
             raise ValueError(

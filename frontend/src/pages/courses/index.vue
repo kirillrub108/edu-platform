@@ -1,8 +1,8 @@
 <script setup lang="ts">
-definePageMeta({ middleware: [] })
-await navigateTo('/dashboard')
+// /courses → /dashboard (where the course list lives)
+await navigateTo('/dashboard', { replace: true })
 </script>
 
 <template>
-  <p>Перенаправление…</p>
+  <p class="text-gray-400">Перенаправление…</p>
 </template>

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -37,10 +38,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS — allow all origins in development so browser never sees CORS errors
+# on internal crashes. Switch to specific origins in production.
+_cors_origins = settings.CORS_ORIGINS
+_allow_all = "*" in _cors_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
-    allow_credentials=True,
+    allow_origins=["*"] if _allow_all else _cors_origins,
+    allow_credentials=False if _allow_all else True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -49,7 +55,21 @@ app.add_middleware(
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.perf_counter()
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception as exc:
+        elapsed_ms = (time.perf_counter() - start) * 1000
+        logger.exception(
+            "Unhandled error in %s %s (%.1fms): %s",
+            request.method,
+            request.url.path,
+            elapsed_ms,
+            exc,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Internal server error"},
+        )
     elapsed_ms = (time.perf_counter() - start) * 1000
     logger.info(
         "%s %s -> %d (%.1fms)",

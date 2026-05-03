@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field
 
+from app.models.user import UserRole
 from app.schemas.user import UserOut
 
 
@@ -7,6 +8,7 @@ class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
     full_name: str | None = None
+    role: UserRole = UserRole.teacher
 
 
 class UserLogin(BaseModel):
