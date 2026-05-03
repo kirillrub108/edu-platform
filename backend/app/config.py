@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     # TTS
     TTS_PROVIDER: str = "silero"
     SILERO_TTS_URL: str = "http://silero-tts:9898"
+    SILERO_TTS_VOICE: str = "xenia"
 
     # Storage
     STORAGE_PATH: str = "/app/storage"

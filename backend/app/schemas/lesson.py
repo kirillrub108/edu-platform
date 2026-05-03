@@ -61,9 +61,12 @@ class ScriptUpdateRequest(BaseModel):
     script: str
 
 
+SILERO_VOICES = ["aidar", "baya", "kseniya", "xenia", "eugene"]
+
+
 class VideoGenerateRequest(BaseModel):
-    # pptx_path is optional: if omitted, lesson.pptx_path is used
     pptx_path: str | None = None
+    voice: str = Field(default="xenia", pattern="^(aidar|baya|kseniya|xenia|eugene)$")
 
 
 class TaskStatusResponse(BaseModel):

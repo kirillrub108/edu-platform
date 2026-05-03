@@ -9,7 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.config import settings
-from app.database import engine
+from app.database import Base, engine
+from app.models import Course, Enrollment, Lesson, LessonProgress, Module, QuizQuestion, User  # noqa: F401 – ensure models are registered before create_all
 from app.routers import auth, courses, lessons, students, uploads
 
 logging.basicConfig(
@@ -27,6 +28,9 @@ async def lifespan(app: FastAPI):
         logger.info("Database connection OK")
     except Exception as exc:
         logger.error("Database connection failed: %s", exc)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    logger.info("Database tables ensured")
     yield
     await engine.dispose()
 

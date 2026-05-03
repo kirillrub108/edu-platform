@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import re
 import shutil
 from uuid import UUID
 
@@ -17,6 +18,8 @@ from app.services.video_service import video_service
 
 logger = logging.getLogger(__name__)
 
+_TAG_RE = re.compile(r"<[^>]+>")
+
 _sync_url = settings.DATABASE_URL.replace("+asyncpg", "+psycopg2")
 sync_engine = create_engine(_sync_url, pool_pre_ping=True)
 SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
@@ -32,39 +35,28 @@ def _set_status(session: Session, lesson_id: UUID, status: LessonStatus, video_u
     session.commit()
 
 
-def _distribute_evenly(text: str, n: int) -> list[str]:
-    """Fallback: split text into n roughly equal chunks by sentences."""
-    import re
-    sentences = re.split(r"(?<=[.!?])\s+", text.strip())
-    if not sentences:
-        return [text] * n
-    chunk_size = max(1, len(sentences) // n)
-    chunks: list[str] = []
-    for i in range(n):
-        start = i * chunk_size
-        end = start + chunk_size if i < n - 1 else len(sentences)
-        chunk = " ".join(sentences[start:end]).strip()
-        chunks.append(chunk or f"Слайд {i + 1}")
-    return chunks
-
-
-def _split_script_by_slides(script: str, slides_count: int) -> list[str]:
-    """Call async LLM service from sync Celery context."""
+def _split_and_annotate(
+    script: str, slides_count: int, slide_texts: list[str] | None = None
+) -> list[str]:
+    """Call async LLM service from sync Celery context to get SSML-annotated chunks."""
     try:
-        chunks = asyncio.run(llm_service.split_text_by_slides(script, slides_count))
+        chunks = asyncio.run(
+            llm_service.split_and_annotate_ssml(script, slides_count, slide_texts)
+        )
         if len(chunks) == slides_count and all(chunks):
             return chunks
         logger.warning(
-            "LLM returned %d chunks for %d slides, using fallback", len(chunks), slides_count
+            "LLM returned %d SSML chunks for %d slides, using fallback", len(chunks), slides_count
         )
     except Exception:
-        logger.exception("LLM split failed, using fallback")
-    return _distribute_evenly(script, slides_count)
+        logger.exception("LLM SSML split failed, using fallback")
+    return llm_service._fallback_ssml(script, slides_count)
 
 
 @celery_app.task(bind=True, name="generate_video_lesson")
-def generate_video_lesson(self, lesson_id: str, pptx_relative_path: str) -> dict:
+def generate_video_lesson(self, lesson_id: str, pptx_relative_path: str, voice: str | None = None) -> dict:
     lesson_uuid = UUID(lesson_id)
+    effective_voice = voice or settings.SILERO_TTS_VOICE
     work_dir = os.path.join(settings.STORAGE_PATH, "video_jobs", lesson_id)
     os.makedirs(work_dir, exist_ok=True)
 
@@ -81,22 +73,39 @@ def generate_video_lesson(self, lesson_id: str, pptx_relative_path: str) -> dict
 
             pptx_full = storage_service.get_full_path(pptx_relative_path)
 
-            # ── 1. PPTX → PNG slides ──────────────────────────────────────
+            # ── 1. PPTX → PNG slides + extract slide texts ───────────────
             slides_dir = os.path.join(work_dir, "slides")
             image_paths = video_service.convert_pptx_to_images(pptx_full, slides_dir)
             total_slides = len(image_paths)
-            logger.info("Got %d slides", total_slides)
+            slide_texts = video_service.extract_slide_texts(pptx_full)
+            logger.info(
+                "Got %d slides (%d with extracted text)", total_slides, sum(1 for t in slide_texts if t)
+            )
             _progress("slides", total_slides, total_slides)
 
-            # ── 2. Split script via LLM ───────────────────────────────────
+            # ── 2. Split + SSML-annotate via LLM ─────────────────────────
             lesson = session.get(Lesson, lesson_uuid)
             base_script = (lesson.script or lesson.text_content or "").strip()
 
             _progress("llm", 0, 1)
             if base_script and len(base_script.split()) > 5:
-                slide_scripts = _split_script_by_slides(base_script, total_slides)
+                slide_scripts = _split_and_annotate(base_script, total_slides, slide_texts)
             else:
-                slide_scripts = [base_script or f"Слайд {i + 1}" for i in range(total_slides)]
+                slide_scripts = [f"<p>Слайд {i + 1}</p>" for i in range(total_slides)]
+
+            # Validate chunks: replace any that have no readable text after stripping SSML.
+            for i, chunk in enumerate(slide_scripts):
+                plain = _TAG_RE.sub("", chunk).strip()
+                if not plain:
+                    # Try to use the raw slide text as a fallback narration.
+                    fallback_text = (slide_texts[i].strip() if slide_texts and i < len(slide_texts) else "").strip()
+                    if not fallback_text:
+                        fallback_text = f"Слайд {i + 1}"
+                    slide_scripts[i] = f"<p>{fallback_text}</p>"
+                    logger.warning(
+                        "Slide %d had empty SSML chunk; replaced with: %r", i + 1, slide_scripts[i]
+                    )
+
             _progress("llm", 1, 1)
 
             # ── 3. TTS per slide ──────────────────────────────────────────
@@ -107,7 +116,8 @@ def generate_video_lesson(self, lesson_id: str, pptx_relative_path: str) -> dict
             for idx, slide_text in enumerate(slide_scripts):
                 _progress("tts", idx, total_slides)
                 audio_path = os.path.join(audio_dir, f"slide_{idx:04d}.wav")
-                tts_service.synthesize(slide_text, audio_path)
+                logger.info("TTS slide %d/%d — voice=%s", idx + 1, total_slides, effective_voice)
+                tts_service.synthesize(slide_text, audio_path, voice=effective_voice)
                 audio_paths.append(audio_path)
 
             _progress("tts", total_slides, total_slides)
@@ -133,6 +143,5 @@ def generate_video_lesson(self, lesson_id: str, pptx_relative_path: str) -> dict
             return {"status": "error", "error": str(exc)}
 
         finally:
-            # Clean up intermediate files regardless of outcome
             if os.path.exists(work_dir):
                 shutil.rmtree(work_dir, ignore_errors=True)

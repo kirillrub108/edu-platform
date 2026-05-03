@@ -35,6 +35,10 @@ services:
       NUMBER_OF_THREADS: 4
       LANGUAGE: ru
       SAMPLE_RATE: 48000
+    volumes:
+      - ./silero/config.py:/usr/app/app/config.py:ro
+      - silero_models:/usr/app/models
+      - silero_audios:/usr/app/audios
     restart: unless-stopped
     networks:
       - edu-network
@@ -104,6 +108,8 @@ services:
 
 volumes:
   postgres_data:
+  silero_models:
+  silero_audios:
 
 networks:
   edu-network:

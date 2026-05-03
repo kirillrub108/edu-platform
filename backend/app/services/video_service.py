@@ -5,6 +5,8 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from pptx import Presentation
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,6 +28,36 @@ def _slide_number(path: str) -> int:
 class VideoService:
     """Convert PPTX to per-slide images and assemble a final MP4 from images + audio."""
 
+    # Standard frame rate for output video — keeps concat segments uniform.
+    FRAME_RATE = 25
+
+    def extract_slide_texts(self, pptx_path: str) -> list[str]:
+        """Extract visible text from every slide. Used as alignment hints for the LLM."""
+        if Path(pptx_path).suffix.lower() not in {".pptx", ".ppt"}:
+            logger.info(
+                "Skipping text extraction for non-PPTX file: %s", pptx_path
+            )
+            return []
+
+        try:
+            prs = Presentation(pptx_path)
+        except Exception:
+            logger.exception("Failed to open PPTX for text extraction: %s", pptx_path)
+            return []
+
+        slide_texts: list[str] = []
+        for slide in prs.slides:
+            parts: list[str] = []
+            for shape in slide.shapes:
+                if not shape.has_text_frame:
+                    continue
+                for para in shape.text_frame.paragraphs:
+                    line = "".join(run.text for run in para.runs).strip()
+                    if line:
+                        parts.append(line)
+            slide_texts.append("\n".join(parts))
+        return slide_texts
+
     def convert_pptx_to_images(self, pptx_path: str, output_dir: str) -> list[str]:
         os.makedirs(output_dir, exist_ok=True)
 
@@ -42,11 +74,9 @@ class VideoService:
             pptx_path,
         ])
 
-        # LibreOffice names the output after the input stem
         pdf_name = Path(pptx_path).stem + ".pdf"
         pdf_path = os.path.join(pdf_dir, pdf_name)
         if not os.path.exists(pdf_path):
-            # Fallback: pick any .pdf in the dir (handles edge-case naming)
             pdfs = list(Path(pdf_dir).glob("*.pdf"))
             if not pdfs:
                 raise RuntimeError(f"LibreOffice produced no PDF from {pptx_path}")
@@ -54,7 +84,8 @@ class VideoService:
 
         logger.info("Rasterizing PDF: %s", pdf_path)
         _run([
-            "pdftoppm", "-png", "-r", "150",
+            "pdftoppm", "-png", "-r", "300",
+            "-aa", "yes", "-aaVector", "yes",
             pdf_path,
             os.path.join(output_dir, "slide"),
         ])
@@ -84,16 +115,21 @@ class VideoService:
         work_dir = Path(output_path).parent
         segment_paths: list[str] = []
         total = len(image_paths)
+        fr = self.FRAME_RATE
 
         for idx, (img, aud) in enumerate(zip(image_paths, audio_paths)):
-            seg_path = str(work_dir / f"_seg_{idx:04d}.mp4")
+            # MKV segments preserve exact timestamps; concat demuxer joins them
+            # without the PTS drift that the concat: protocol accumulates.
+            seg_path = str(work_dir / f"_seg_{idx:04d}.mkv")
             logger.info("Encoding segment %d/%d", idx + 1, total)
             _run([
                 "ffmpeg", "-y",
-                "-loop", "1", "-i", img,
+                "-loop", "1", "-framerate", str(fr), "-i", img,
                 "-i", aud,
-                "-c:v", "libx264", "-tune", "stillimage",
-                "-c:a", "aac", "-b:a", "192k",
+                "-c:v", "libx264", "-tune", "stillimage", "-preset", "medium",
+                "-r", str(fr),
+                "-bf", "0",  # no B-frames → zero encoder delay at segment boundaries
+                "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                 "-pix_fmt", "yuv420p",
                 "-shortest",
                 "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
@@ -103,17 +139,18 @@ class VideoService:
             if progress_cb:
                 progress_cb(idx + 1, total)
 
-        list_file = work_dir / "_concat.txt"
-        with open(list_file, "w", encoding="utf-8") as f:
-            for seg in segment_paths:
-                f.write(f"file '{seg}'\n")
-
         logger.info("Concatenating %d segments → %s", total, output_path)
+        list_path = str(work_dir / "_concat_list.txt")
+        with open(list_path, "w") as fh:
+            for seg in segment_paths:
+                fh.write(f"file '{seg}'\n")
+
         _run([
             "ffmpeg", "-y",
             "-f", "concat", "-safe", "0",
-            "-i", str(list_file),
+            "-i", list_path,
             "-c", "copy",
+            "-movflags", "+faststart",
             output_path,
         ])
 
@@ -123,7 +160,7 @@ class VideoService:
             except OSError:
                 pass
         try:
-            os.remove(list_file)
+            os.remove(list_path)
         except OSError:
             pass
 
