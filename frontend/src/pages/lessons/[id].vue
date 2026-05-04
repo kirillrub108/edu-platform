@@ -128,7 +128,7 @@ const pollStatus = async () => {
 
 const generateVideo = async () => {
   if (!lesson.value?.pptx_path) {
-    taskError.value = 'Сначала загрузите PPTX-файл'
+    taskError.value = 'Сначала загрузите презентацию'
     return
   }
   if (!script.value.trim()) {

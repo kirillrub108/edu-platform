@@ -18,3 +18,4 @@ psycopg2-binary==2.9.10
 numpy==2.2.1
 scipy==1.15.0
 python-pptx==1.0.2
+pdf2image

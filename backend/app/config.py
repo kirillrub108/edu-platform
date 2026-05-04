@@ -28,7 +28,7 @@ class Settings(BaseSettings):
 
     # LLM
     LLM_BASE_URL: str = "http://host.docker.internal:11434/v1"
-    LLM_MODEL: str = "llama3.1"
+    LLM_MODEL: str = "qwen3:14b"
     LLM_API_KEY: str = "ollama"
 
     # TTS

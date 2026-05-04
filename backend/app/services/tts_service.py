@@ -71,7 +71,7 @@ class TTSService:
         return output_path
 
     def _synthesize_stub(self, text: str, output_path: str) -> str:
-        sample_rate = 22050
+        sample_rate = 48000  # match Silero output rate → no resampling in FFmpeg
         words_per_second = 2.5
 
         logger.warning("TTS stub — generating silent placeholder for %s", output_path)

@@ -70,7 +70,7 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     user: "1000:1000"
-    command: celery -A app.celery_app worker --loglevel=info --pool=solo
+    command: celery -A app.celery_app worker --loglevel=info --pool=prefork -c 2
     env_file:
       - .env
     volumes:

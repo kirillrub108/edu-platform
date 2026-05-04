@@ -14,6 +14,8 @@ RUN set -eux; \
     sed -i 's|http://deb.debian.org/debian|http://mirror.yandex.ru/debian|g' /etc/apt/sources.list 2>/dev/null || true; \
     sed -i 's|http://deb.debian.org/debian-security|http://mirror.yandex.ru/debian-security|g' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
     sed -i 's|http://deb.debian.org/debian-security|http://mirror.yandex.ru/debian-security|g' /etc/apt/sources.list 2>/dev/null || true; \
+    sed -i 's/^Components: main$/Components: main contrib/' /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    sed -i 's/ main$/ main contrib/' /etc/apt/sources.list 2>/dev/null || true; \
     printf 'Acquire::Retries "10";\nAcquire::http::Timeout "120";\nAcquire::https::Timeout "120";\nAcquire::http::No-Cache "true";\nAcquire::Queue-Mode "access";\n' > /etc/apt/apt.conf.d/80-retries
 
 # LibreOffice + comprehensive font set so PPTX rendering preserves Cyrillic and
@@ -36,6 +38,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         fonts-dejavu-extra \
         fonts-noto \
         fonts-noto-core \
+        fonts-noto-color-emoji \
         fonts-freefont-ttf \
         fonts-croscore \
         fonts-crosextra-carlito \
@@ -43,8 +46,13 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
         fontconfig \
         ffmpeg \
         poppler-utils \
-        wget && \
-    fc-cache -fv
+        wget \
+        cabextract && \
+    fc-cache -fv && \
+    echo "ttf-mscorefonts-installer msttcorefonts/accepted-mscorefonts-eula select true" \
+        | debconf-set-selections && \
+    apt-get install -y --no-install-recommends ttf-mscorefonts-installer || true && \
+    fc-cache -f -v
 
 RUN groupadd -g 1000 appgroup && useradd -u 1000 -g appgroup -d /app -s /sbin/nologin appuser
 
@@ -53,6 +61,18 @@ WORKDIR /app
 COPY requirements.txt .
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
+
+# ── Custom .ttf fonts ─────────────────────────────────────────────────────
+# If the project ships its own typefaces (e.g. corporate branding fonts),
+# copy them before running fc-cache so LibreOffice picks them up:
+#
+#   COPY ./fonts/*.ttf /usr/local/share/fonts/
+#   RUN fc-cache -f -v
+#
+# The COPY line goes here (after pip install, before "COPY . .") so that
+# adding a new font does not invalidate the pip layer cache.
+
+COPY lo-emoji-substitution.xcu /app/lo-emoji-substitution.xcu
 
 COPY . .
 
