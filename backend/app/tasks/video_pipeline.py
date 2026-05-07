@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.models.lesson import Lesson, LessonStatus
+from app.models.lesson import CreationMode, Lesson, LessonStatus
+from app.models.slide_text import SlideText
 from app.services.llm_service import llm_service
 from app.services.storage_service import storage_service
 from app.services.tts_service import tts_service
@@ -103,13 +104,39 @@ def generate_video_lesson(
 
             # ── 2. Split + SSML-annotate via LLM ─────────────────────────────
             lesson = session.get(Lesson, lesson_uuid)
-            base_script = (lesson.script or lesson.text_content or "").strip()
+            mode = getattr(lesson, "creation_mode", CreationMode.presentation_and_text)
+
+            # When per-slide texts already exist (vision-generated and/or
+            # edited by the teacher), use them directly — wrap each in a <p>
+            # tag and skip the script-splitting LLM call entirely.
+            slide_rows = (
+                session.query(SlideText)
+                .filter(SlideText.lesson_id == lesson_uuid)
+                .order_by(SlideText.slide_number)
+                .all()
+            )
+            per_slide_texts = [
+                ((row.edited_text or row.generated_text or "").strip())
+                for row in slide_rows
+            ]
 
             _progress("llm", 0, 1)
-            if base_script and len(base_script.split()) > 5:
-                slide_scripts = _split_and_annotate(base_script, total_slides, slide_texts)
+
+            if (
+                mode == CreationMode.presentation_auto
+                and len(per_slide_texts) == total_slides
+                and any(per_slide_texts)
+            ):
+                slide_scripts = [
+                    f"<p>{t}</p>" if t else f"<p>Слайд {i + 1}</p>"
+                    for i, t in enumerate(per_slide_texts)
+                ]
             else:
-                slide_scripts = [f"<p>Слайд {i + 1}</p>" for i in range(total_slides)]
+                base_script = (lesson.script or lesson.text_content or "").strip()
+                if base_script and len(base_script.split()) > 5:
+                    slide_scripts = _split_and_annotate(base_script, total_slides, slide_texts)
+                else:
+                    slide_scripts = [f"<p>Слайд {i + 1}</p>" for i in range(total_slides)]
 
             for i, chunk in enumerate(slide_scripts):
                 plain = _TAG_RE.sub("", chunk).strip()

@@ -30,6 +30,19 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = "http://host.docker.internal:11434/v1"
     LLM_MODEL: str = "qwen3:14b"
     LLM_API_KEY: str = "ollama"
+    LLM_TEMPERATURE: float = 0.7
+    LLM_MAX_TOKENS: int = 2048
+
+    # Vision LLM
+    VISION_PROVIDER: str = "ollama"  # ollama | yandex
+    VISION_MODEL: str = "qwen2-vl:7b"
+    VISION_OLLAMA_BASE_URL: str = "http://host.docker.internal:11434/v1"
+    VISION_API_KEY: str = "ollama"
+
+    # Yandex Vision (prod)
+    YANDEX_VISION_MODEL: str = "yandexgpt-pro"
+    YANDEX_FOLDER_ID: str = ""
+    YANDEX_API_KEY: str = ""
 
     # TTS
     TTS_PROVIDER: str = "silero"

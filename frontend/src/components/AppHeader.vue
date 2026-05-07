@@ -8,7 +8,7 @@ onMounted(() => {
 
 <template>
   <header class="bg-white border-b border-gray-200">
-    <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+    <div class="w-full px-6 h-14 flex items-center justify-between">
       <NuxtLink to="/" class="font-semibold text-brand text-lg">Edu Platform</NuxtLink>
 
       <nav class="flex items-center gap-5 text-sm">

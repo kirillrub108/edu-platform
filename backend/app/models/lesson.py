@@ -17,9 +17,18 @@ class ContentType(str, enum.Enum):
 
 class LessonStatus(str, enum.Enum):
     draft = "draft"
+    analyzing = "analyzing"
+    ready_for_edit = "ready_for_edit"
     processing = "processing"
     published = "published"
     error = "error"
+
+
+class CreationMode(str, enum.Enum):
+    presentation_and_text = "presentation_and_text"
+    presentation_auto = "presentation_auto"
+    text_only = "text_only"
+    prompt = "prompt"
 
 
 class Module(Base):
@@ -60,6 +69,11 @@ class Lesson(Base):
     video_url = Column(String(512), nullable=True)
     text_content = Column(Text, nullable=True)
     script = Column(Text, nullable=True)
+    creation_mode = Column(
+        SAEnum(CreationMode, name="creation_mode"),
+        default=CreationMode.presentation_and_text,
+        nullable=False,
+    )
     status = Column(
         SAEnum(LessonStatus, name="lesson_status"),
         default=LessonStatus.draft,
@@ -79,6 +93,12 @@ class Lesson(Base):
         back_populates="lesson",
         cascade="all, delete-orphan",
         order_by="QuizQuestion.order",
+    )
+    slide_texts = relationship(
+        "SlideText",
+        back_populates="lesson",
+        cascade="all, delete-orphan",
+        order_by="SlideText.slide_number",
     )
 
 

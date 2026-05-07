@@ -6,7 +6,7 @@ celery_app = Celery(
     "edu_platform",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
-    include=["app.tasks.video_pipeline"],
+    include=["app.tasks.video_pipeline", "app.tasks.vision_pipeline"],
 )
 
 celery_app.conf.update(

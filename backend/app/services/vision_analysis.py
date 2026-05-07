@@ -1,0 +1,240 @@
+import base64
+import logging
+from typing import Any
+
+import httpx
+from openai import AsyncOpenAI
+
+from app.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+VISION_SYSTEM_PROMPT = """\
+Ты — опытный преподаватель-методист, создающий профессиональный учебный контент.
+Твоя задача: по изображению слайда написать текст озвучки для видеолекции.
+
+ТРЕБОВАНИЯ К ТЕКСТУ:
+1. ГЛУБИНА И ПОЛНОТА: Полностью раскрой тему слайда. Не пересказывай буллеты — объясняй суть.
+   Если на слайде написано «Преимущества микросервисов» — объясни ПОЧЕМУ они преимущества,
+   приведи конкретные примеры из практики, расскажи о контексте применения.
+
+2. СТРУКТУРА ОБЪЯСНЕНИЯ:
+   - Сначала — суть (что это и зачем)
+   - Потом — механизм (как это работает)
+   - Затем — применение (где и когда это нужно)
+   - Если уместно — сравнение с альтернативами
+
+3. ЯЗЫК: Разговорный, но профессиональный. Как объясняет хороший преподаватель студентам.
+   Избегай сухого перечисления. Используй связки, примеры, аналогии.
+
+4. ДЛИНА: 150–300 слов на слайд. Не меньше — текст должен быть развёрнутым.
+   Исключение — титульные слайды и слайды-разделители (50–80 слов).
+
+5. АНАЛИЗ ИЗОБРАЖЕНИЯ: Внимательно изучи всё что есть на слайде:
+   - Текстовые блоки, заголовки, буллеты
+   - Схемы, диаграммы, стрелки, связи между объектами
+   - Иконки, иллюстрации (описывай что они означают в контексте)
+   - Таблицы, графики (интерпретируй данные)
+
+6. КОНТЕКСТ КУРСА: Учитывай название курса и позицию слайда.
+   Обеспечивай логический переход от предыдущих тем.
+
+7. ТОЛЬКО ТЕКСТ ОЗВУЧКИ: Не добавляй метаданные, заголовки, нумерацию.
+   Выведи только сам текст, который будет озвучен.
+
+Язык вывода: русский (если на слайде не указан другой язык явно).
+"""
+
+
+SLIDE_USER_PROMPT_TEMPLATE = """\
+Курс: {course_title}
+Слайд {slide_number} из {total_slides}
+{context_section}
+
+Напиши текст озвучки для этого слайда.
+"""
+
+
+def _encode_image(image_path: str, max_dim: int = 1280) -> str:
+    """Resize image to max_dim on the longest side, convert to JPEG, return base64."""
+    from PIL import Image
+    import io as _io
+
+    with Image.open(image_path) as img:
+        img = img.convert("RGB")
+        w, h = img.size
+        if max(w, h) > max_dim:
+            scale = max_dim / max(w, h)
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+        buf = _io.BytesIO()
+        img.save(buf, format="JPEG", quality=85, optimize=True)
+        return base64.b64encode(buf.getvalue()).decode("utf-8")
+
+
+def _build_user_content(
+    image_path: str,
+    course_title: str,
+    slide_number: int,
+    total_slides: int,
+    previous_context: str,
+) -> list[dict[str, Any]]:
+    context_section = ""
+    if previous_context:
+        context_section = f"Контекст предыдущих слайдов:\n{previous_context}"
+
+    user_text = SLIDE_USER_PROMPT_TEMPLATE.format(
+        course_title=course_title,
+        slide_number=slide_number,
+        total_slides=total_slides,
+        context_section=context_section,
+    )
+    image_b64 = _encode_image(image_path)
+    return [
+        {
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+        },
+        {"type": "text", "text": user_text},
+    ]
+
+
+def _summarise_for_context(text: str, max_chars: int = 280) -> str:
+    """Cheap one-line summary used as accumulated context for next slides."""
+    cleaned = " ".join(text.split())
+    if len(cleaned) <= max_chars:
+        return cleaned
+    return cleaned[: max_chars - 1].rstrip() + "…"
+
+
+class VisionAnalysisService:
+    """Generate per-slide narration from rendered PNG images via a vision LLM."""
+
+    def __init__(self) -> None:
+        self.provider = (settings.VISION_PROVIDER or "ollama").lower()
+        if self.provider == "ollama":
+            self._ollama_client = AsyncOpenAI(
+                base_url=settings.VISION_OLLAMA_BASE_URL,
+                api_key=settings.VISION_API_KEY,
+            )
+            self._model = settings.VISION_MODEL
+        elif self.provider == "yandex":
+            self._ollama_client = None
+            self._model = settings.YANDEX_VISION_MODEL
+        else:
+            raise ValueError(f"Unknown VISION_PROVIDER: {self.provider!r}")
+
+    async def analyze_slide(
+        self,
+        slide_image_path: str,
+        slide_number: int,
+        total_slides: int,
+        course_title: str,
+        previous_context: str = "",
+    ) -> str:
+        """Return narration text for one slide."""
+        user_content = _build_user_content(
+            slide_image_path,
+            course_title,
+            slide_number,
+            total_slides,
+            previous_context,
+        )
+
+        if self.provider == "ollama":
+            return await self._call_ollama(user_content)
+        return await self._call_yandex(user_content)
+
+    async def analyze_presentation(
+        self,
+        slide_image_paths: list[str],
+        course_title: str,
+        progress_cb: Any = None,
+    ) -> list[str]:
+        """Analyse all slides sequentially with accumulated context."""
+        results: list[str] = []
+        context_lines: list[str] = []
+        total = len(slide_image_paths)
+
+        for idx, path in enumerate(slide_image_paths):
+            slide_number = idx + 1
+            previous_context = "\n".join(context_lines[-3:])  # last 3 slides only
+            try:
+                text = await self.analyze_slide(
+                    slide_image_path=path,
+                    slide_number=slide_number,
+                    total_slides=total,
+                    course_title=course_title,
+                    previous_context=previous_context,
+                )
+            except Exception:
+                logger.exception("Vision analysis failed for slide %d", slide_number)
+                text = ""
+
+            results.append(text)
+            if text:
+                context_lines.append(
+                    f"Слайд {slide_number}: {_summarise_for_context(text)}"
+                )
+
+            if progress_cb is not None:
+                try:
+                    progress_cb(slide_number, total)
+                except Exception:
+                    logger.exception("progress_cb raised")
+
+        return results
+
+    async def _call_ollama(self, user_content: list[dict[str, Any]]) -> str:
+        assert self._ollama_client is not None
+        resp = await self._ollama_client.chat.completions.create(
+            model=self._model,
+            messages=[
+                {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+        )
+        return (resp.choices[0].message.content or "").strip()
+
+    async def _call_yandex(self, user_content: list[dict[str, Any]]) -> str:
+        """YandexGPT Pro Foundation Models API call.
+
+        Uses the OpenAI-compatible v1/chat/completions endpoint exposed by
+        Yandex Foundation Models. The vision payload follows the same content
+        array format (image_url + text) as OpenAI Vision.
+        """
+        if not settings.YANDEX_API_KEY or not settings.YANDEX_FOLDER_ID:
+            raise RuntimeError(
+                "YANDEX_API_KEY and YANDEX_FOLDER_ID must be set for vision provider 'yandex'"
+            )
+
+        url = "https://llm.api.cloud.yandex.net/v1/chat/completions"
+        model_uri = f"gpt://{settings.YANDEX_FOLDER_ID}/{self._model}/latest"
+        headers = {
+            "Authorization": f"Api-Key {settings.YANDEX_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": model_uri,
+            "messages": [
+                {"role": "system", "content": VISION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_content},
+            ],
+            "temperature": settings.LLM_TEMPERATURE,
+            "max_tokens": settings.LLM_MAX_TOKENS,
+        }
+
+        async with httpx.AsyncClient(timeout=120) as client:
+            resp = await client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        try:
+            return (data["choices"][0]["message"]["content"] or "").strip()
+        except (KeyError, IndexError, TypeError):
+            logger.error("Unexpected YandexGPT response: %s", data)
+            return ""
+
+
+vision_analysis_service = VisionAnalysisService()

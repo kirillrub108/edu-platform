@@ -9,6 +9,36 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+LECTURE_ENHANCEMENT_PROMPT = """\
+Ты — методист и редактор образовательного контента.
+Получаешь черновик текста доклада и делаешь из него профессиональный текст лекции.
+
+ЗАДАЧА:
+Переработай или дополни черновой текст так, чтобы он:
+
+1. ПОЛНОСТЬЮ РАСКРЫВАЛ ТЕМУ: Каждый тезис объясни с нуля, не предполагая знаний у слушателя.
+   Добавь контекст: зачем это нужно, как появилось, какую проблему решает.
+
+2. БЫЛ САМОДОСТАТОЧНЫМ: Слушатель должен понять тему только из этого текста,
+   без дополнительного чтения. Никаких «как вы знаете» или «очевидно, что».
+
+3. ИМЕЛ СТРУКТУРУ ОБЪЯСНЕНИЯ для каждого ключевого понятия:
+   → Что это (определение простыми словами)
+   → Зачем нужно (проблема которую решает)
+   → Как работает (механизм, алгоритм, логика)
+   → Где применяется (конкретные примеры)
+   → Что важно знать (нюансы, подводные камни)
+
+4. ИСПОЛЬЗОВАЛ АНАЛОГИИ И ПРИМЕРЫ: Минимум 1-2 конкретных примера или аналогии
+   из реальной практики на каждый ключевой тезис.
+
+5. БЫЛ СВЯЗНЫМ ТЕКСТОМ: Не список буллетов, а связное повествование с логическими переходами.
+
+ФОРМАТ ВЫВОДА: Только готовый текст озвучки. Без метаданных.
+Объём: в 1.5–2 раза больше исходного черновика, но не короче 200 слов.
+"""
+
+
 _SSML_SYSTEM = """\
 You are a strict text formatter for an audio narration system. You DO NOT rewrite or paraphrase content. You DO NOT add new sentences or remove informational sentences.
 
@@ -24,7 +54,17 @@ B) Cleanup — only remove these meta-tokens that should not be spoken:
    - Editor notes in parentheses or brackets that clearly are NOT spoken content: (пауза), (слайд 3), [см. слайд], (note).
    - DO NOT remove any actual words of the lecture, even if they look redundant.
 
-C) SSML annotation — wrap the cleaned text with semantic markup. DO NOT wrap in <speak> (the system adds that). Allowed tags only:
+C) Number-to-words conversion — replace all digits and numeric expressions with their spoken Russian equivalents, choosing the grammatically correct form based on context:
+   - Cardinal/genitive by context: "до 7 метров" → "до семи метров", "100 человек" → "ста человек".
+   - Years: "в 2024 году" → "в две тысячи двадцать четвёртом году".
+   - Percentages: "35%" → "тридцать пять процентов".
+   - Ordinals: "3-й этап" → "третий этап", "1-е место" → "первое место".
+   - Ranges: "5–10 лет" → "от пяти до десяти лет".
+   - Decimals: "3.5 кг" → "три с половиной килограмма".
+   - Large numbers: "1 000 000" → "один миллион".
+   Apply to ALL digits in the output — no digit characters should remain in the final chunks.
+
+D) SSML annotation — wrap the cleaned text with semantic markup. DO NOT wrap in <speak> (the system adds that). Allowed tags only:
    - <p>...</p> around each paragraph / coherent thought.
    - <break time="500ms"/> between distinct points within a paragraph.
    - <break time="800ms"/> between major topic shifts.
@@ -109,6 +149,33 @@ class LLMService:
             "(~80-150 words), suitable for narration."
         )
         return await self._chat(system, slide_text)
+
+    async def enhance_lecture_text(
+        self,
+        draft: str,
+        course_title: str = "",
+    ) -> str:
+        """Take a draft lecture text and produce a deeper, self-contained narration.
+
+        Used in the "presentation_and_text" mode when the teacher uploads a
+        rough script that should be expanded for the audience.
+        """
+        system = LECTURE_ENHANCEMENT_PROMPT
+        user = (
+            (f"Курс: {course_title}\n\n" if course_title else "")
+            + f"Черновик доклада:\n{draft}"
+        )
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": settings.LLM_TEMPERATURE,
+            "max_tokens": settings.LLM_MAX_TOKENS,
+        }
+        response = await self.client.chat.completions.create(**kwargs)
+        return (response.choices[0].message.content or "").strip()
 
     async def generate_quiz(
         self, lesson_text: str, questions_count: int = 5

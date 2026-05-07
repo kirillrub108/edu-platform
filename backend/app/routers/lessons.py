@@ -52,6 +52,7 @@ async def create_lesson(
         module_id=data.module_id,
         content_type=data.content_type,
         order=data.order,
+        creation_mode=data.creation_mode,
     )
     db.add(lesson)
     await db.commit()

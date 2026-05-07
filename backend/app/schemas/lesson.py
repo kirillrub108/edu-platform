@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.lesson import ContentType, LessonStatus
+from app.models.lesson import ContentType, CreationMode, LessonStatus
 
 
 class LessonCreate(BaseModel):
@@ -11,6 +11,7 @@ class LessonCreate(BaseModel):
     module_id: UUID
     content_type: ContentType = ContentType.video
     order: int = 0
+    creation_mode: CreationMode = CreationMode.presentation_and_text
 
 
 class LessonUpdate(BaseModel):
@@ -21,6 +22,7 @@ class LessonUpdate(BaseModel):
     text_content: str | None = None
     script: str | None = None
     status: LessonStatus | None = None
+    creation_mode: CreationMode | None = None
 
 
 class LessonOut(BaseModel):
@@ -36,6 +38,7 @@ class LessonOut(BaseModel):
     text_content: str | None
     script: str | None
     status: LessonStatus
+    creation_mode: CreationMode
     created_at: datetime
     updated_at: datetime
 

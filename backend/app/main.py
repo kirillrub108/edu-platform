@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -9,15 +10,33 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.config import settings
-from app.database import Base, engine
-from app.models import Course, Enrollment, Lesson, LessonProgress, Module, QuizQuestion, User  # noqa: F401 – ensure models are registered before create_all
-from app.routers import auth, courses, lessons, students, uploads
+from app.database import engine
+from app.routers import auth, courses, lessons, slides, students, uploads
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+async def _ensure_schema_at_head() -> None:
+    """Run any pending Alembic migrations on startup so the schema always
+    matches the latest revision in code. Replaces the old metadata.create_all
+    bootstrap, which silently diverged from migration history and caused
+    'type already exists' errors on first `alembic upgrade head`.
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config("/app/alembic.ini")
+    cfg.set_main_option("script_location", "/app/alembic")
+    cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("+asyncpg", "+psycopg2"))
+
+    def _upgrade() -> None:
+        command.upgrade(cfg, "head")
+
+    await asyncio.to_thread(_upgrade)
 
 
 @asynccontextmanager
@@ -28,9 +47,14 @@ async def lifespan(app: FastAPI):
         logger.info("Database connection OK")
     except Exception as exc:
         logger.error("Database connection failed: %s", exc)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    logger.info("Database tables ensured")
+
+    try:
+        await _ensure_schema_at_head()
+        logger.info("Alembic migrations applied (head)")
+    except Exception:
+        logger.exception("Alembic upgrade failed; refusing to start with stale schema")
+        raise
+
     yield
     await engine.dispose()
 
@@ -88,6 +112,7 @@ async def log_requests(request: Request, call_next):
 app.include_router(auth.router)
 app.include_router(courses.router)
 app.include_router(lessons.router)
+app.include_router(slides.router)
 app.include_router(uploads.router)
 app.include_router(students.router)
 
