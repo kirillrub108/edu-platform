@@ -1,20 +1,23 @@
+from typing import Any
 from uuid import UUID
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.user import User, UserRole
+from app.redis_client import get_redis
 from app.services.auth_service import decode_token
 
 security = HTTPBearer()
 
 
-async def get_current_user(
+async def get_current_token_payload(
     credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db),
-) -> User:
+    redis: Redis = Depends(get_redis),
+) -> dict[str, Any]:
     payload = decode_token(credentials.credentials)
     if payload.get("type") != "access":
         raise HTTPException(
@@ -22,6 +25,19 @@ async def get_current_user(
             detail="Invalid token type",
         )
 
+    jti = payload.get("jti")
+    if jti and await redis.get(f"blacklist:{jti}"):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+        )
+    return payload
+
+
+async def get_current_user(
+    payload: dict[str, Any] = Depends(get_current_token_payload),
+    db: AsyncSession = Depends(get_db),
+) -> User:
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(

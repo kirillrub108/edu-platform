@@ -23,8 +23,14 @@ export const useAuth = () => {
     localStorage.setItem('refresh_token', tokens.refresh_token)
   }
 
+  const clearTokens = () => {
+    if (!import.meta.client) return
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+  }
+
   const fetchMe = async () => {
-    if (!import.meta.client) return  // не выполнять на сервере
+    if (!import.meta.client) return
     try {
       user.value = await apiFetch<UserOut>('/auth/me')
     } catch {
@@ -32,10 +38,10 @@ export const useAuth = () => {
     }
   }
 
-  const login = async (email: string, password: string) => {
+  const login = async (email: string, password: string, rememberMe: boolean = true) => {
     const tokens = await apiFetch<TokenResponse>('/auth/login', {
       method: 'POST',
-      body: { email, password },
+      body: { email, password, remember_me: rememberMe },
     })
     persistTokens(tokens)
     await fetchMe()
@@ -47,19 +53,31 @@ export const useAuth = () => {
     role: 'teacher' | 'student',
     full_name?: string,
   ) => {
-    const tokens = await apiFetch<TokenResponse>('/auth/register', {
+    // Backend /register only creates the user (returns UserOut). Log in
+    // immediately so the caller ends up authenticated like before.
+    await apiFetch<UserOut>('/auth/register', {
       method: 'POST',
       body: { email, password, role, full_name },
     })
-    persistTokens(tokens)
-    await fetchMe()
+    await login(email, password, true)
   }
 
   const logout = async () => {
     if (import.meta.client) {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
+      const refresh_token = localStorage.getItem('refresh_token')
+      // Best-effort revoke on the backend (blacklists access jti and
+      // deletes the refresh family). Ignore errors — local state is
+      // wiped regardless so the user always ends up logged out.
+      try {
+        await apiFetch('/auth/logout', {
+          method: 'POST',
+          body: { refresh_token },
+        })
+      } catch {
+        /* noop */
+      }
     }
+    clearTokens()
     user.value = null
     await navigateTo('/login')
   }

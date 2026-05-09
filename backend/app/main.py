@@ -13,6 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.database import engine
+from app.redis_client import close_redis
 from app.routers import auth, courses, lessons, slides, students, uploads
 
 logging.basicConfig(
@@ -59,6 +60,7 @@ async def lifespan(app: FastAPI):
 
     yield
     await engine.dispose()
+    await close_redis()
 
 
 app = FastAPI(

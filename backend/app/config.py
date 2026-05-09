@@ -23,9 +23,12 @@ class Settings(BaseSettings):
 
     # JWT
     SECRET_KEY: str = "change-me"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
-    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
     JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 14
+    REFRESH_TOKEN_ABSOLUTE_MAX_DAYS: int = 90
+    # Sliding-window TTL (in days) when remember_me=False on login.
+    REFRESH_TOKEN_SESSION_DAYS: int = 1
 
     # LLM
     LLM_BASE_URL: str = "http://host.docker.internal:11434/v1"

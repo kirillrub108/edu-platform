@@ -1,13 +1,51 @@
+"""Authentication service: password hashing, JWT issue/decode, and the
+session/token-rotation logic backed by Redis.
+
+Token model
+-----------
+Login mints a fresh "family" — a uuid4 grouping the rotating refresh tokens
+that share a single absolute lifetime. The currently-valid jti for the family
+is stored at `refresh:{user_id}:{family_id}`. Every refresh:
+
+  * looks up the family record;
+  * rejects the call (and burns the family) if the presented jti is not the
+    one we stored — that's a reuse signal, the original token was stolen;
+  * re-checks the absolute deadline (sliding window can't extend past it);
+  * mints a new pair, overwriting the family record with the new jti and
+    resetting the sliding TTL.
+
+Logout blacklists the access jti until its natural exp and (if the client
+sends it back) deletes the refresh family. Logout-all wipes every
+`refresh:{user_id}:*` key — already-issued access tokens stay valid until
+they expire on their own (≤ ACCESS_TOKEN_EXPIRE_MINUTES) which is the
+trade-off we accept to keep the access path stateless.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
-import hashlib
 
 import bcrypt
 import jwt
-from fastapi import HTTPException, status
+from fastapi import Depends, HTTPException, status
+from redis.asyncio import Redis
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import get_db
+from app.models.user import User, UserRole
+from app.redis_client import get_redis
+from app.schemas.auth import TokenResponse
 
+
+# ── Password hashing (bcrypt 4.x, no passlib — passlib is incompatible with
+# Python 3.13). bcrypt rejects payloads >72 bytes, so pre-hash with sha256
+# to give it a fixed-size digest regardless of the user's password length.
 
 def hash_password(password: str) -> str:
     digest = hashlib.sha256(password.encode()).digest()
@@ -19,24 +57,245 @@ def verify_password(plain: str, hashed: str) -> bool:
     return bcrypt.checkpw(digest, hashed.encode())
 
 
-def create_access_token(data: dict[str, Any], expires_delta: timedelta | None = None) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire, "type": "access"})
-    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
+# ── JWT primitives ───────────────────────────────────────────────────────────
+
+def _encode(payload: dict[str, Any]) -> str:
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_refresh_token(data: dict[str, Any]) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    to_encode.update({"exp": expire, "type": "refresh"})
-    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
+def create_access_token(user: User) -> tuple[str, str, datetime]:
+    """Returns (token, jti, expires_at)."""
+    now = datetime.now(timezone.utc)
+    exp = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    jti = str(uuid.uuid4())
+    payload = {
+        "sub": str(user.id),
+        "email": user.email,
+        "role": user.role.value,
+        "jti": jti,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "type": "access",
+    }
+    return _encode(payload), jti, exp
 
 
-def decode_token(token: str) -> dict[str, Any]:
+def create_refresh_token(
+    user_id: str,
+    family_id: str,
+    *,
+    sliding_days: int,
+    absolute_expires_at: datetime,
+) -> tuple[str, str, datetime]:
+    """Returns (token, jti, expires_at). The JWT exp is min(sliding, absolute)
+    so the token can never outlive the family's absolute deadline even if the
+    Redis layer is bypassed."""
+    now = datetime.now(timezone.utc)
+    sliding_exp = now + timedelta(days=sliding_days)
+    exp = min(sliding_exp, absolute_expires_at)
+    jti = str(uuid.uuid4())
+    payload = {
+        "sub": user_id,
+        "family_id": family_id,
+        "jti": jti,
+        "iat": int(now.timestamp()),
+        "exp": int(exp.timestamp()),
+        "type": "refresh",
+    }
+    return _encode(payload), jti, exp
+
+
+def decode_token(token: str, *, verify_exp: bool = True) -> dict[str, Any]:
     try:
-        return jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        return jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+            options={"verify_exp": verify_exp},
+        )
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+
+# ── Service ──────────────────────────────────────────────────────────────────
+
+class AuthService:
+    def __init__(self, db: AsyncSession, redis: Redis) -> None:
+        self.db = db
+        self.redis = redis
+
+    @staticmethod
+    def _family_key(user_id: str, family_id: str) -> str:
+        return f"refresh:{user_id}:{family_id}"
+
+    @staticmethod
+    def _blacklist_key(jti: str) -> str:
+        return f"blacklist:{jti}"
+
+    # ── registration / login ────────────────────────────────────────────────
+
+    async def register(
+        self,
+        email: str,
+        password: str,
+        full_name: str | None,
+        role: UserRole = UserRole.teacher,
+    ) -> User:
+        existing = await self.db.scalar(select(User).where(User.email == email))
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already registered")
+
+        user = User(
+            email=email,
+            hashed_password=hash_password(password),
+            full_name=full_name,
+            role=role,
+        )
+        self.db.add(user)
+        await self.db.commit()
+        await self.db.refresh(user)
+        return user
+
+    async def login(self, email: str, password: str, remember_me: bool = True) -> TokenResponse:
+        user = await self.db.scalar(select(User).where(User.email == email))
+        if not user or not verify_password(password, user.hashed_password):
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        if not user.is_active:
+            raise HTTPException(status_code=403, detail="User is inactive")
+
+        family_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc)
+        absolute_expires_at = now + timedelta(days=settings.REFRESH_TOKEN_ABSOLUTE_MAX_DAYS)
+        sliding_days = (
+            settings.REFRESH_TOKEN_EXPIRE_DAYS if remember_me else settings.REFRESH_TOKEN_SESSION_DAYS
+        )
+        return await self._mint_pair(
+            user=user,
+            family_id=family_id,
+            created_at=now,
+            absolute_expires_at=absolute_expires_at,
+            sliding_days=sliding_days,
+        )
+
+    # ── refresh / rotation ──────────────────────────────────────────────────
+
+    async def refresh(self, refresh_token: str) -> TokenResponse:
+        payload = decode_token(refresh_token)
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Not a refresh token")
+
+        user_id = payload.get("sub")
+        family_id = payload.get("family_id")
+        token_jti = payload.get("jti")
+        if not (user_id and family_id and token_jti):
+            raise HTTPException(status_code=401, detail="Invalid refresh token payload")
+
+        key = self._family_key(user_id, family_id)
+        raw = await self.redis.get(key)
+        if not raw:
+            raise HTTPException(status_code=401, detail="Session expired")
+
+        family = json.loads(raw)
+        if family.get("jti") != token_jti:
+            # Reuse of a rotated jti — assume the original was stolen and
+            # invalidate the entire family.
+            await self.redis.delete(key)
+            raise HTTPException(
+                status_code=401,
+                detail="Token reuse detected. All sessions invalidated.",
+            )
+
+        absolute_expires_at = datetime.fromisoformat(family["absolute_expires_at"])
+        if datetime.now(timezone.utc) >= absolute_expires_at:
+            await self.redis.delete(key)
+            raise HTTPException(
+                status_code=401,
+                detail="Session expired, please log in again",
+            )
+
+        user = await self.db.get(User, uuid.UUID(user_id))
+        if not user or not user.is_active:
+            await self.redis.delete(key)
+            raise HTTPException(status_code=401, detail="User not found or inactive")
+
+        return await self._mint_pair(
+            user=user,
+            family_id=family_id,
+            created_at=datetime.fromisoformat(family["created_at"]),
+            absolute_expires_at=absolute_expires_at,
+            sliding_days=int(family.get("sliding_days", settings.REFRESH_TOKEN_EXPIRE_DAYS)),
+        )
+
+    async def _mint_pair(
+        self,
+        *,
+        user: User,
+        family_id: str,
+        created_at: datetime,
+        absolute_expires_at: datetime,
+        sliding_days: int,
+    ) -> TokenResponse:
+        access_token, _access_jti, _access_exp = create_access_token(user)
+        refresh_token, refresh_jti, refresh_exp = create_refresh_token(
+            str(user.id),
+            family_id,
+            sliding_days=sliding_days,
+            absolute_expires_at=absolute_expires_at,
+        )
+
+        ttl_seconds = max(int((refresh_exp - datetime.now(timezone.utc)).total_seconds()), 1)
+        record = json.dumps(
+            {
+                "jti": refresh_jti,
+                "created_at": created_at.isoformat(),
+                "absolute_expires_at": absolute_expires_at.isoformat(),
+                "sliding_days": sliding_days,
+            }
+        )
+        await self.redis.set(self._family_key(str(user.id), family_id), record, ex=ttl_seconds)
+
+        return TokenResponse(access_token=access_token, refresh_token=refresh_token)
+
+    # ── logout ──────────────────────────────────────────────────────────────
+
+    async def logout(
+        self,
+        access_jti: str,
+        access_exp: datetime,
+        refresh_token: str | None,
+    ) -> None:
+        ttl = max(int((access_exp - datetime.now(timezone.utc)).total_seconds()), 1)
+        await self.redis.set(self._blacklist_key(access_jti), "1", ex=ttl)
+
+        if not refresh_token:
+            return
+        # The client may pass a slightly-stale or even malformed refresh —
+        # we still want logout to succeed for the access side, so swallow
+        # decode errors here.
+        try:
+            payload = decode_token(refresh_token, verify_exp=False)
+        except HTTPException:
+            return
+        user_id = payload.get("sub")
+        family_id = payload.get("family_id")
+        if user_id and family_id:
+            await self.redis.delete(self._family_key(user_id, family_id))
+
+    async def logout_all_sessions(self, user_id: str) -> None:
+        pattern = f"refresh:{user_id}:*"
+        cursor = 0
+        while True:
+            cursor, keys = await self.redis.scan(cursor=cursor, match=pattern, count=100)
+            if keys:
+                await self.redis.delete(*keys)
+            if cursor == 0:
+                break
+
+
+async def get_auth_service(
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> AuthService:
+    return AuthService(db, redis)

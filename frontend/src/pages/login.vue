@@ -2,6 +2,7 @@
 const { login, user } = useAuth()
 const email = ref('')
 const password = ref('')
+const rememberMe = ref(true)
 const error = ref<string | null>(null)
 const loading = ref(false)
 
@@ -9,7 +10,7 @@ const submit = async () => {
   error.value = null
   loading.value = true
   try {
-    await login(email.value, password.value)
+    await login(email.value, password.value, rememberMe.value)
     const dest = user.value?.role === 'student' ? '/student/dashboard' : '/dashboard'
     await navigateTo(dest)
   } catch (e: any) {
@@ -42,6 +43,15 @@ const submit = async () => {
           autocomplete="current-password"
           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
         />
+
+        <label class="flex items-center gap-2 text-sm text-gray-600 select-none cursor-pointer ml-1">
+          <input
+            v-model="rememberMe"
+            type="checkbox"
+            class="h-4 w-4 rounded accent-brand cursor-pointer"
+          />
+          Запомнить меня
+        </label>
 
         <p v-if="error" class="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
           {{ error }}

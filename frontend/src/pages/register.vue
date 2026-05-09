@@ -68,9 +68,9 @@ const submit = async () => {
         <input
           v-model="password"
           type="password"
-          placeholder="Пароль (минимум 6 символов)"
+          placeholder="Пароль (минимум 8 символов)"
           required
-          minlength="6"
+          minlength="8"
           class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
         />
 
