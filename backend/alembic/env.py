@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from logging.config import fileConfig
 
 from alembic import context
@@ -13,7 +14,17 @@ from app import models  # noqa: F401  (ensure all models are registered)
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
 
-if config.config_file_name is not None:
+# Only apply alembic.ini's [logger_*] sections when run from the alembic CLI
+# (i.e. no logging handlers have been configured yet). When this env.py is
+# invoked from `app.main:lifespan` via `command.upgrade`, the FastAPI process
+# has already called `logging.basicConfig(level=INFO)` — calling
+# `fileConfig()` here would either silence those loggers (the default
+# `disable_existing_loggers=True` flips their `disabled` flag) or override
+# the root level back to WARN per alembic.ini, both of which would hide
+# tracebacks emitted by `app.main.log_and_catch`. Skipping fileConfig in
+# that case keeps app logs working while standalone CLI runs still get
+# alembic.ini's log config.
+if config.config_file_name is not None and not logging.getLogger().handlers:
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata

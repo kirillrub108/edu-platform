@@ -17,6 +17,10 @@ class AccessMode(str, enum.Enum):
 
 class Course(Base):
     __tablename__ = "courses"
+    # See User.__mapper_args__ for rationale — UPDATE on `is_published` etc.
+    # without `eager_defaults` leaves `updated_at` expired and breaks Pydantic
+    # serialization with `MissingGreenlet`.
+    __mapper_args__ = {"eager_defaults": True}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     title = Column(String(255), nullable=False)

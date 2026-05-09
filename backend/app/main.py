@@ -68,42 +68,27 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ── CORS ──────────────────────────────────────────────────────────────────────
-# Middleware order matters in Starlette: add_middleware called *first* ends up
-# *outermost* in the wrapped stack. We add CORS first so it wraps everything
-# below — preflight (OPTIONS) is handled here, and every successful response
-# gets CORS headers as it streams back out through this layer.
+# ── Middleware order ──────────────────────────────────────────────────────────
+# In modern Starlette, `app.add_middleware()` *prepends* to user_middleware
+# (insert(0, ...)), so the LAST middleware registered ends up OUTERMOST. We
+# need this stack from outside in:
 #
-# CORS is INSIDE Starlette's ServerErrorMiddleware (the absolute outermost),
-# which is why we can't rely on @app.exception_handler(Exception) — that
-# handler runs in ServerErrorMiddleware, *outside* CORS, so its responses miss
-# CORS headers. To keep CORS on every error, we instead catch Exception inside
-# our own middleware below (which sits *inside* CORS in the stack).
-_cors_origins = settings.CORS_ORIGINS
-_allow_all = "*" in _cors_origins
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"] if _allow_all else _cors_origins,
-    allow_credentials=False if _allow_all else True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=600,
-)
-
+#     ServerErrorMiddleware   (built-in, always outermost)
+#       → CORSMiddleware       ← MUST be outside log_and_catch so the 500
+#         → log_and_catch      ← JSONResponse it returns flows back through
+#           → ExceptionMiddleware
+#             → routes
+#
+# That way CORS headers are attached to *every* response, including the
+# fall-back 500 from `log_and_catch`. If CORS sits *inside* log_and_catch, a
+# backend bug surfaces in the browser as a misleading "CORS policy" error
+# (because the 500 response ships without Access-Control-Allow-Origin).
+#
+# Therefore: register `log_and_catch` FIRST, then CORS LAST.
 
 @app.middleware("http")
 async def log_and_catch(request: Request, call_next):
-    """Access log + last-resort 500 handler INSIDE the CORS layer.
-
-    Catching unhandled exceptions here (rather than via
-    @app.exception_handler(Exception), which lives in ServerErrorMiddleware
-    *outside* CORS) guarantees the JSONResponse(500) flows back through
-    CORSMiddleware on its way out and therefore carries the
-    Access-Control-Allow-Origin header. Without that, a backend bug shows up
-    in the browser as a misleading "CORS policy" error.
-    """
+    """Access log + last-resort 500 handler. Sits inside CORS in the stack."""
     start = time.perf_counter()
     try:
         response = await call_next(request)
@@ -129,6 +114,20 @@ async def log_and_catch(request: Request, call_next):
         elapsed_ms,
     )
     return response
+
+
+_cors_origins = settings.CORS_ORIGINS
+_allow_all = "*" in _cors_origins
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"] if _allow_all else _cors_origins,
+    allow_credentials=False if _allow_all else True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
+)
 
 
 # ── Exception handlers (HTTPException + validation) ──────────────────────────

@@ -16,6 +16,14 @@ class UserRole(str, enum.Enum):
 
 class User(Base):
     __tablename__ = "users"
+    # `eager_defaults=True` makes SQLAlchemy add a RETURNING clause to INSERT
+    # AND UPDATE statements so that columns with server-side defaults
+    # (`server_default=func.now()`, `onupdate=func.now()`) are populated
+    # in-place after `await db.commit()`. Without this, `updated_at` is left
+    # in the "expired" state after UPDATE; later attribute access (e.g. by
+    # Pydantic during response serialization) triggers a sync lazy-load,
+    # which crashes async sessions with `MissingGreenlet`.
+    __mapper_args__ = {"eager_defaults": True}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), unique=True, index=True, nullable=False)

@@ -13,6 +13,8 @@ class SlideText(Base):
     __table_args__ = (
         UniqueConstraint("lesson_id", "slide_number", name="uq_slide_lesson_number"),
     )
+    # See User.__mapper_args__ for rationale.
+    __mapper_args__ = {"eager_defaults": True}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     lesson_id = Column(

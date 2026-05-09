@@ -53,6 +53,8 @@ class Module(Base):
 
 class Lesson(Base):
     __tablename__ = "lessons"
+    # See User.__mapper_args__ for rationale.
+    __mapper_args__ = {"eager_defaults": True}
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     module_id = Column(
