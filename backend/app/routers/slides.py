@@ -74,6 +74,8 @@ async def analyze_lesson_slides(
     await db.commit()
 
     task = analyze_presentation_task.delay(str(lesson.id), lesson.pptx_path)
+    lesson.analyze_task_id = task.id
+    await db.commit()
     return {"task_id": task.id, "lesson_id": str(lesson.id), "status": "analyzing"}
 
 

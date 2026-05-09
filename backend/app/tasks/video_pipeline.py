@@ -44,6 +44,9 @@ def _set_status(
     lesson.status = status
     if video_url is not None:
         lesson.video_url = video_url
+    # Clear video_task_id once the video pipeline is no longer active.
+    if status in (LessonStatus.published, LessonStatus.error):
+        lesson.video_task_id = None
     session.commit()
 
 

@@ -131,6 +131,8 @@ async def generate_video(
         await db.commit()
 
     task = generate_video_lesson.delay(str(lesson.id), pptx_path, data.voice)
+    lesson.video_task_id = task.id
+    await db.commit()
     return {"task_id": task.id, "lesson_id": str(lesson.id)}
 
 

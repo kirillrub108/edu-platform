@@ -56,6 +56,52 @@ const taskError = ref('')
 const generating = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
+// ── Lesson-status polling (resume after page reload, no task_id) ─────────────
+let statusPollTimer: ReturnType<typeof setInterval> | null = null
+
+const stopStatusPolling = () => {
+  if (statusPollTimer) {
+    clearInterval(statusPollTimer)
+    statusPollTimer = null
+  }
+}
+
+const pollForAnalysisCompletion = async () => {
+  try {
+    const data = await apiFetch<any>(`/lessons/${route.params.id}`)
+    if (data.status !== 'analyzing') {
+      stopStatusPolling()
+      analyzing.value = false
+      lesson.value = data
+      script.value = data.script ?? data.text_content ?? ''
+      if (data.status === 'ready_for_edit') {
+        showSlideEditor.value = true
+      } else if (data.status === 'error') {
+        analyzeError.value = 'Ошибка анализа. Попробуйте запустить снова.'
+      }
+    }
+  } catch {
+    // network glitch — keep polling
+  }
+}
+
+const pollForVideoCompletion = async () => {
+  try {
+    const data = await apiFetch<any>(`/lessons/${route.params.id}`)
+    if (data.status !== 'processing') {
+      stopStatusPolling()
+      generating.value = false
+      lesson.value = data
+      script.value = data.script ?? data.text_content ?? ''
+      if (data.status === 'error') {
+        taskError.value = 'Ошибка генерации видео.'
+      }
+    }
+  } catch {
+    // network glitch — keep polling
+  }
+}
+
 // ── Load lesson ───────────────────────────────────────────────────────────────
 const load = async () => {
   loading.value = true
@@ -66,10 +112,41 @@ const load = async () => {
     if (lesson.value.creation_mode) {
       mode.value = lesson.value.creation_mode as CreationModeValue
     }
-    if (lesson.value.status === 'ready_for_edit' || lesson.value.status === 'analyzing') {
+    if (lesson.value.status === 'analyzing') {
       mode.value = CreationMode.PRESENTATION_AUTO
-      if (lesson.value.status === 'ready_for_edit') {
-        showSlideEditor.value = true
+      // Resume UI state only if not already polling via startAnalyze.
+      if (!analyzing.value) {
+        analyzing.value = true
+        stopAnalyzePolling()
+        stopStatusPolling()
+        if (lesson.value.analyze_task_id) {
+          // Resume detailed Celery polling so the progress bar reflects
+          // real per-slide progress instead of an indeterminate state.
+          analyzeTaskId.value = lesson.value.analyze_task_id
+          analyzeStatus.value = 'PENDING'
+          analyzeTimer = setInterval(pollAnalyzeStatus, 2000)
+        } else {
+          // Fallback when the task_id was lost (legacy lesson, etc.):
+          // poll lesson status directly to at least detect completion.
+          statusPollTimer = setInterval(pollForAnalysisCompletion, 2000)
+        }
+      }
+    } else if (lesson.value.status === 'ready_for_edit') {
+      mode.value = CreationMode.PRESENTATION_AUTO
+      showSlideEditor.value = true
+    } else if (lesson.value.status === 'processing') {
+      // Resume UI state only if not already polling via generateVideo.
+      if (!generating.value) {
+        generating.value = true
+        stopPolling()
+        stopStatusPolling()
+        if (lesson.value.video_task_id) {
+          taskId.value = lesson.value.video_task_id
+          taskStatus.value = 'PENDING'
+          pollTimer = setInterval(pollStatus, 2000)
+        } else {
+          statusPollTimer = setInterval(pollForVideoCompletion, 3000)
+        }
       }
     }
   } catch (e: any) {
@@ -205,6 +282,8 @@ const startAnalyze = async () => {
   analyzeError.value = ''
   analyzeMeta.value = null
   analyzing.value = true
+  stopAnalyzePolling()
+  stopStatusPolling()
   try {
     const res = await apiFetch<any>(`/lessons/${route.params.id}/analyze`, {
       method: 'POST',
@@ -297,6 +376,8 @@ const generateVideo = async () => {
   taskError.value = ''
   taskMeta.value = null
   generating.value = true
+  stopPolling()
+  stopStatusPolling()
 
   if (mode.value === CreationMode.PRESENTATION_AND_TEXT) {
     await saveScript()
@@ -339,6 +420,7 @@ onMounted(load)
 onUnmounted(() => {
   stopPolling()
   stopAnalyzePolling()
+  stopStatusPolling()
 })
 
 const isAuto = computed(() => mode.value === CreationMode.PRESENTATION_AUTO)

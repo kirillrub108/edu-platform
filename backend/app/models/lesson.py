@@ -79,6 +79,8 @@ class Lesson(Base):
         default=LessonStatus.draft,
         nullable=False,
     )
+    analyze_task_id = Column(String(64), nullable=True)
+    video_task_id = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

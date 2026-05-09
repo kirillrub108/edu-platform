@@ -23,6 +23,10 @@ def _set_status(session: Session, lesson_id: UUID, status: LessonStatus) -> None
     if not lesson:
         return
     lesson.status = status
+    # Clear analyze_task_id once the analysis pipeline is no longer active
+    # so the frontend stops resuming polling on this finished task.
+    if status in (LessonStatus.ready_for_edit, LessonStatus.error, LessonStatus.draft):
+        lesson.analyze_task_id = None
     session.commit()
 
 
