@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import { ChevronLeft, ChevronRight, Sparkles, Save, FileText } from 'lucide-vue-next'
+import ProgressBar from './ProgressBar.vue'
+import UiButton from './UiButton.vue'
+
 interface SlideText {
   id: string
   slide_number: number
@@ -38,11 +42,9 @@ const estDurationLabel = computed(() => {
 })
 
 const editedCount = computed(() =>
-  slides.value.filter(s => (s.edited_text ?? '').trim().length > 0 || (s.generated_text ?? '').trim().length > 0).length,
-)
-
-const progressPct = computed(() =>
-  slides.value.length > 0 ? Math.round((editedCount.value / slides.value.length) * 100) : 0,
+  slides.value.filter(
+    s => (s.edited_text ?? '').trim().length > 0 || (s.generated_text ?? '').trim().length > 0,
+  ).length,
 )
 
 const loadSlides = async () => {
@@ -144,148 +146,174 @@ defineExpose({ persistCurrent })
 <template>
   <div class="space-y-4">
     <div v-if="loading" class="text-sm text-gray-500">Загрузка слайдов…</div>
-    <div v-else-if="loadError" class="text-sm text-red-600 bg-red-50 border border-red-200 rounded p-3">
+
+    <div
+      v-else-if="loadError"
+      class="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3"
+    >
       {{ loadError }}
     </div>
-    <div v-else-if="slides.length === 0" class="text-sm text-gray-500 bg-gray-50 rounded p-4">
+
+    <div
+      v-else-if="slides.length === 0"
+      class="text-sm text-gray-500 bg-violet-50/50 border border-violet-100 rounded-2xl p-6 text-center"
+    >
+      <FileText class="w-8 h-8 text-violet-400 mx-auto mb-2" />
       Слайдов нет. Сначала загрузите презентацию и запустите анализ.
     </div>
 
     <template v-else-if="current">
-      <!-- Top bar -->
-      <div class="flex items-center justify-between gap-3 border-b border-gray-200 pb-3">
-        <button
-          type="button"
-          class="text-sm text-brand hover:underline"
-          @click="$emit('back')"
-        >
-          ← Назад
-        </button>
-        <div class="text-sm font-medium text-gray-700">
-          Слайд {{ current.slide_number }} из {{ slides.length }}
-        </div>
-        <div class="flex gap-2">
+      <div
+        class="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-soft"
+      >
+        <!-- top bar -->
+        <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
           <button
             type="button"
-            class="px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-40"
-            :disabled="currentIdx === 0"
-            @click="prev"
+            class="text-sm text-violet-700 hover:text-violet-600 font-medium transition"
+            @click="emit('back')"
           >
-            ← Пред
+            ← Назад
           </button>
-          <button
-            type="button"
-            class="px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-40"
-            :disabled="currentIdx === slides.length - 1"
-            @click="next"
-          >
-            След →
-          </button>
-        </div>
-      </div>
 
-      <!-- Split view -->
-      <div class="grid grid-cols-1 lg:grid-cols-[2fr_3fr] gap-5">
-        <!-- Slide preview -->
-        <div class="bg-gray-50 border rounded-xl p-3 flex items-center justify-center min-h-[260px]">
-          <img
-            v-if="current.image_url"
-            :src="current.image_url"
-            :alt="`Слайд ${current.slide_number}`"
-            class="max-w-full max-h-[60vh] object-contain rounded shadow-sm bg-white"
-          />
-          <span v-else class="text-sm text-gray-400">Изображение недоступно</span>
-        </div>
+          <div class="text-sm text-gray-500">
+            Слайд
+            <span class="font-semibold text-gray-900">{{ current.slide_number }}</span>
+            из {{ slides.length }}
+          </div>
 
-        <!-- Text editor -->
-        <div class="flex flex-col">
-          <label class="block text-sm font-medium text-gray-700 mb-1">Текст озвучки</label>
-          <textarea
-            v-model="buffer"
-            class="w-full flex-1 min-h-[400px] max-h-[70vh] resize-y border rounded-lg px-4 py-3 text-base leading-relaxed focus:outline-none focus:ring-2 focus:ring-brand/40"
-            placeholder="Введите текст, который будет озвучен на этом слайде…"
-            @input="scheduleSave"
-            @blur="persistCurrent"
-          />
-
-          <div class="flex flex-wrap items-center justify-between gap-3 mt-3">
-            <div class="text-xs text-gray-500">
-              Слов: <span class="font-medium text-gray-700">{{ wordCount }}</span>
-              <span class="text-gray-300 mx-1.5">·</span>
-              ≈ {{ estDurationLabel }}
-              <span v-if="isSavingCurrent" class="ml-3 text-brand">сохранение…</span>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                class="px-3 py-1.5 border rounded-lg text-sm hover:bg-gray-50 disabled:opacity-50"
-                :disabled="isRegenCurrent || !current.image_url"
-                @click="regenerate"
-              >
-                {{ isRegenCurrent ? 'Регенерация…' : 'Регенерировать LLM' }}
-              </button>
-              <button
-                type="button"
-                class="px-3 py-1.5 bg-brand text-white rounded-lg text-sm disabled:opacity-50"
-                :disabled="isSavingCurrent"
-                @click="persistCurrent"
-              >
-                Сохранить
-              </button>
-              <button
-                type="button"
-                class="px-3 py-1.5 border rounded-lg text-sm text-gray-400 cursor-not-allowed"
-                disabled
-                title="Скоро"
-              >
-                Расширенный редактор
-              </button>
-            </div>
+          <div class="flex gap-1">
+            <button
+              class="w-8 h-8 grid place-items-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
+              :disabled="currentIdx === 0"
+              aria-label="Предыдущий"
+              @click="prev"
+            >
+              <ChevronLeft class="w-4 h-4" />
+            </button>
+            <button
+              class="w-8 h-8 grid place-items-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
+              :disabled="currentIdx === slides.length - 1"
+              aria-label="Следующий"
+              @click="next"
+            >
+              <ChevronRight class="w-4 h-4" />
+            </button>
           </div>
         </div>
-      </div>
 
-      <!-- Bottom bar with progress -->
-      <div class="border-t border-gray-200 pt-3 mt-2 space-y-3">
-        <div class="flex items-center gap-3 text-sm">
-          <span class="text-gray-500 whitespace-nowrap">Прогресс: {{ editedCount }}/{{ slides.length }}</span>
-          <div class="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              class="h-full bg-brand transition-all"
-              :style="{ width: `${progressPct}%` }"
+        <!-- two-panel: slide preview + editor -->
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-5 p-5">
+          <div class="md:col-span-2">
+            <div class="aspect-[4/3] rounded-xl overflow-hidden bg-gray-50 border border-gray-200 shadow-sm grid place-items-center">
+              <img
+                v-if="current.image_url"
+                :src="current.image_url"
+                :alt="`Слайд ${current.slide_number}`"
+                class="w-full h-full object-contain bg-white"
+              />
+              <span v-else class="text-xs text-gray-400">Изображение недоступно</span>
+            </div>
+          </div>
+
+          <div class="md:col-span-3 flex flex-col">
+            <label class="block text-sm font-medium text-gray-700 mb-2">Текст озвучки</label>
+            <textarea
+              v-model="buffer"
+              placeholder="Введите текст, который будет озвучен на этом слайде…"
+              class="flex-1 min-h-[260px] resize-none px-4 py-3 text-sm leading-relaxed bg-white
+                     border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition"
+              @input="scheduleSave"
+              @blur="persistCurrent"
             />
+            <div class="flex justify-between text-xs text-gray-500 mt-2">
+              <span>
+                Слов: <span class="font-medium text-gray-700">{{ wordCount }}</span>
+                <span class="text-gray-300 mx-1.5">·</span>
+                ≈ {{ estDurationLabel }}
+              </span>
+              <span v-if="isSavingCurrent" class="text-violet-700">сохранение…</span>
+            </div>
           </div>
-          <span class="text-gray-500 tabular-nums w-10 text-right">{{ progressPct }}%</span>
         </div>
 
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex flex-wrap gap-1.5">
+        <!-- thumbnail strip -->
+        <div class="px-5 pb-3 overflow-x-auto">
+          <div class="flex gap-2">
             <button
               v-for="(s, idx) in slides"
               :key="s.id"
               type="button"
               :class="[
-                'w-7 h-7 text-xs rounded font-medium border transition',
+                'shrink-0 relative rounded-md overflow-hidden border-2 transition',
                 idx === currentIdx
-                  ? 'bg-brand text-white border-brand'
-                  : (s.edited_text ?? s.generated_text ?? '').trim()
-                    ? 'bg-brand/10 text-brand border-brand/30 hover:bg-brand/20'
-                    : 'bg-white text-gray-400 border-gray-200 hover:bg-gray-50',
+                  ? 'border-violet-600 ring-2 ring-violet-200'
+                  : 'border-transparent hover:border-violet-300 opacity-70 hover:opacity-100',
               ]"
+              :style="{ width: '64px', height: '48px' }"
               @click="goTo(idx)"
             >
-              {{ idx + 1 }}
+              <img
+                v-if="s.image_url"
+                :src="s.image_url"
+                :alt="`Слайд ${idx + 1}`"
+                class="w-full h-full object-cover"
+              />
+              <div
+                v-else
+                class="w-full h-full grid place-items-center text-[10px] font-medium bg-gray-100 text-gray-500"
+              >
+                {{ idx + 1 }}
+              </div>
+              <span
+                v-if="(s.edited_text ?? s.generated_text ?? '').trim()"
+                class="absolute bottom-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-violet-500"
+              ></span>
             </button>
           </div>
+        </div>
 
-          <button
-            type="button"
-            class="px-5 py-2 bg-brand text-white rounded-lg font-medium disabled:opacity-50"
-            :disabled="slides.length === 0"
-            @click="async () => { await persistCurrent(); emit('ready') }"
-          >
-            Генерировать видео →
-          </button>
+        <!-- sticky bottom -->
+        <div class="border-t border-gray-100 bg-white">
+          <div class="px-5 pt-3">
+            <ProgressBar
+              :value="editedCount"
+              :total="slides.length"
+              label="Прогресс редактирования"
+            />
+          </div>
+          <div class="px-5 py-3 flex flex-wrap gap-2 justify-between items-center">
+            <UiButton
+              variant="secondary"
+              size="sm"
+              :loading="!!isRegenCurrent"
+              :disabled="!current.image_url"
+              @click="regenerate"
+            >
+              <template #icon><Sparkles class="w-4 h-4" /></template>
+              Регенерировать LLM
+            </UiButton>
+
+            <div class="flex flex-wrap gap-2">
+              <UiButton
+                variant="secondary"
+                size="sm"
+                :loading="!!isSavingCurrent"
+                @click="persistCurrent"
+              >
+                <template #icon><Save class="w-4 h-4" /></template>
+                Сохранить
+              </UiButton>
+              <UiButton
+                variant="primary"
+                size="md"
+                :disabled="slides.length === 0"
+                @click="async () => { await persistCurrent(); emit('ready') }"
+              >
+                Генерировать видео →
+              </UiButton>
+            </div>
+          </div>
         </div>
       </div>
     </template>

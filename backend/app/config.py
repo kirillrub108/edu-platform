@@ -1,6 +1,7 @@
 from functools import lru_cache
 from typing import List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -53,8 +54,24 @@ class Settings(BaseSettings):
     STORAGE_PATH: str = "/app/storage"
     BASE_URL: str = "http://localhost:8000"
 
-    # CORS
-    CORS_ORIGINS: List[str] = ["http://localhost:3000"]
+    # CORS — accepts a comma-separated string from env (CORS_ORIGINS=a,b,c) or
+    # a JSON array. Use "*" to allow any origin in dev.
+    CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://0.0.0.0:3000",
+    ]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def _split_cors(cls, v):
+        if isinstance(v, str):
+            stripped = v.strip()
+            if stripped.startswith("["):
+                # JSON array — let pydantic parse it
+                return v
+            return [s.strip() for s in stripped.split(",") if s.strip()]
+        return v
 
 
 @lru_cache

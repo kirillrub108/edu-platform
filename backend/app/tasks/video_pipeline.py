@@ -17,6 +17,7 @@ from app.services.llm_service import llm_service
 from app.services.storage_service import storage_service
 from app.services.tts_service import tts_service
 from app.services.video_service import video_service
+from app.services.vision_analysis import vision_analysis_service
 
 logger = logging.getLogger(__name__)
 
@@ -92,26 +93,21 @@ def generate_video_lesson(
 
             pptx_full = storage_service.get_full_path(pptx_relative_path)
 
-            # ── 1. PPTX → PNG slides + extract slide texts ───────────────────
+            # ── 1. PPTX → PNG slides ─────────────────────────────────────────
             slides_dir = os.path.join(work_dir, "slides")
             image_paths = video_service.convert_pptx_to_images(
                 pptx_full, slides_dir, cache_dir=slides_cache_dir
             )
             total_slides = len(image_paths)
-            slide_texts = video_service.extract_slide_texts(pptx_full)
-            logger.info(
-                "Got %d slides (%d with extracted text)",
-                total_slides, sum(1 for t in slide_texts if t),
-            )
             _progress("slides", total_slides, total_slides)
 
-            # ── 2. Split + SSML-annotate via LLM ─────────────────────────────
+            # ── 2. Decide processing path ────────────────────────────────────
             lesson = session.get(Lesson, lesson_uuid)
             mode = getattr(lesson, "creation_mode", CreationMode.presentation_and_text)
 
             # When per-slide texts already exist (vision-generated and/or
             # edited by the teacher), use them directly — wrap each in a <p>
-            # tag and skip the script-splitting LLM call entirely.
+            # tag and skip both the summary and script-splitting LLM calls.
             slide_rows = (
                 session.query(SlideText)
                 .filter(SlideText.lesson_id == lesson_uuid)
@@ -123,13 +119,46 @@ def generate_video_lesson(
                 for row in slide_rows
             ]
 
-            _progress("llm", 0, 1)
-
-            if (
+            use_per_slide = (
                 mode == CreationMode.presentation_auto
                 and len(per_slide_texts) == total_slides
                 and any(per_slide_texts)
-            ):
+            )
+
+            # ── 3. VLM summaries — alignment hints for the script splitter ───
+            # Skipped in auto mode (per_slide_texts already describe each slide
+            # in detail). In manual mode, VLM summaries replace the legacy
+            # python-pptx text extraction so PDFs and image-based slides also
+            # get usable alignment hints.
+            slide_summaries: list[str] = []
+            if not use_per_slide:
+                _progress("summary", 0, total_slides)
+
+                def _summary_progress(done: int, total: int) -> None:
+                    _progress("summary", done, total)
+
+                try:
+                    slide_summaries = asyncio.run(
+                        vision_analysis_service.summarize_presentation(
+                            image_paths, progress_cb=_summary_progress
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "VLM summarisation failed; falling back to no slide hints"
+                    )
+                    slide_summaries = []
+                logger.info(
+                    "Got %d slide summaries (%d non-empty)",
+                    len(slide_summaries),
+                    sum(1 for s in slide_summaries if s),
+                )
+                _progress("summary", total_slides, total_slides)
+
+            # ── 4. Split + SSML-annotate via LLM ─────────────────────────────
+            _progress("llm", 0, 1)
+
+            if use_per_slide:
                 slide_scripts = [
                     f"<p>{t}</p>" if t else f"<p>Слайд {i + 1}</p>"
                     for i, t in enumerate(per_slide_texts)
@@ -137,7 +166,9 @@ def generate_video_lesson(
             else:
                 base_script = (lesson.script or lesson.text_content or "").strip()
                 if base_script and len(base_script.split()) > 5:
-                    slide_scripts = _split_and_annotate(base_script, total_slides, slide_texts)
+                    slide_scripts = _split_and_annotate(
+                        base_script, total_slides, slide_summaries or None
+                    )
                 else:
                     slide_scripts = [f"<p>Слайд {i + 1}</p>" for i in range(total_slides)]
 
@@ -145,8 +176,8 @@ def generate_video_lesson(
                 plain = _TAG_RE.sub("", chunk).strip()
                 if not plain:
                     fallback_text = (
-                        slide_texts[i].strip()
-                        if slide_texts and i < len(slide_texts)
+                        slide_summaries[i].strip()
+                        if slide_summaries and i < len(slide_summaries)
                         else ""
                     ).strip()
                     if not fallback_text:

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronLeft, Upload, FileText, Sparkles, Video, CheckCircle2, ArrowDown, AlertCircle } from 'lucide-vue-next'
 import { CreationMode, type CreationModeValue } from '~/composables/useCreationMode'
 
 definePageMeta({ middleware: ['auth', 'teacher'] })
@@ -6,29 +7,23 @@ definePageMeta({ middleware: ['auth', 'teacher'] })
 const route = useRoute()
 const { apiFetch } = useApi()
 
-// ── State ─────────────────────────────────────────────────────────────────────
 const lesson = ref<any>(null)
 const loading = ref(true)
 const error = ref('')
 
-// Mode chooser
 const mode = ref<CreationModeValue | null>(null)
 
-// PPTX upload
 const pptxFile = ref<File | null>(null)
 const uploading = ref(false)
 const uploadError = ref('')
 
-// Script (manual mode)
 const script = ref('')
 const savingScript = ref(false)
 
-// Script file upload (txt/md/pdf)
 const scriptFile = ref<File | null>(null)
 const uploadingScript = ref(false)
 const scriptUploadError = ref('')
 
-// Voice
 const voices = [
   { value: 'xenia',   label: 'Ксения (жен.)' },
   { value: 'baya',    label: 'Байя (жен.)' },
@@ -38,7 +33,6 @@ const voices = [
 ]
 const selectedVoice = ref<string>('xenia')
 
-// Vision analysis state
 const analyzeTaskId = ref<string | null>(null)
 const analyzeStatus = ref<string>('')
 const analyzeMeta = ref<{ step?: string; done?: number; total?: number } | null>(null)
@@ -48,7 +42,6 @@ let analyzeTimer: ReturnType<typeof setInterval> | null = null
 
 const showSlideEditor = ref(false)
 
-// Video generation
 const taskId = ref<string | null>(null)
 const taskStatus = ref<string>('')
 const taskMeta = ref<{ step: string; done: number; total: number } | null>(null)
@@ -56,7 +49,6 @@ const taskError = ref('')
 const generating = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
-// ── Lesson-status polling (resume after page reload, no task_id) ─────────────
 let statusPollTimer: ReturnType<typeof setInterval> | null = null
 
 const stopStatusPolling = () => {
@@ -102,7 +94,6 @@ const pollForVideoCompletion = async () => {
   }
 }
 
-// ── Load lesson ───────────────────────────────────────────────────────────────
 const load = async () => {
   loading.value = true
   error.value = ''
@@ -114,20 +105,15 @@ const load = async () => {
     }
     if (lesson.value.status === 'analyzing') {
       mode.value = CreationMode.PRESENTATION_AUTO
-      // Resume UI state only if not already polling via startAnalyze.
       if (!analyzing.value) {
         analyzing.value = true
         stopAnalyzePolling()
         stopStatusPolling()
         if (lesson.value.analyze_task_id) {
-          // Resume detailed Celery polling so the progress bar reflects
-          // real per-slide progress instead of an indeterminate state.
           analyzeTaskId.value = lesson.value.analyze_task_id
           analyzeStatus.value = 'PENDING'
           analyzeTimer = setInterval(pollAnalyzeStatus, 2000)
         } else {
-          // Fallback when the task_id was lost (legacy lesson, etc.):
-          // poll lesson status directly to at least detect completion.
           statusPollTimer = setInterval(pollForAnalysisCompletion, 2000)
         }
       }
@@ -135,7 +121,6 @@ const load = async () => {
       mode.value = CreationMode.PRESENTATION_AUTO
       showSlideEditor.value = true
     } else if (lesson.value.status === 'processing') {
-      // Resume UI state only if not already polling via generateVideo.
       if (!generating.value) {
         generating.value = true
         stopPolling()
@@ -172,7 +157,6 @@ const onModeSelect = async (m: CreationModeValue) => {
   await persistMode(m)
 }
 
-// ── PPTX upload ───────────────────────────────────────────────────────────────
 const onFileChange = (e: Event) => {
   const input = e.target as HTMLInputElement
   pptxFile.value = input.files?.[0] ?? null
@@ -201,7 +185,6 @@ const uploadPptx = async () => {
   }
 }
 
-// ── Manual script ─────────────────────────────────────────────────────────────
 const saveScript = async () => {
   savingScript.value = true
   try {
@@ -241,7 +224,6 @@ const uploadScriptFile = async () => {
   }
 }
 
-// ── Vision analysis flow ──────────────────────────────────────────────────────
 const stopAnalyzePolling = () => {
   if (analyzeTimer) {
     clearInterval(analyzeTimer)
@@ -297,39 +279,39 @@ const startAnalyze = async () => {
   }
 }
 
-const analyzeProgressPct = computed(() => {
-  const done = analyzeMeta.value?.done ?? 0
-  const total = analyzeMeta.value?.total ?? 0
-  return total > 0 ? Math.round((done / total) * 100) : 0
-})
+const analyzeProgressDone = computed(() => analyzeMeta.value?.done ?? 0)
+const analyzeProgressTotal = computed(() => analyzeMeta.value?.total ?? 0)
 
-// ── Video generation ──────────────────────────────────────────────────────────
-const stages = [
-  { key: 'slides',   label: 'Слайды' },
-  { key: 'llm',      label: 'Текст' },
-  { key: 'tts',      label: 'Озвучка' },
-  { key: 'encoding', label: 'Видео' },
-]
+const stages = computed(() => {
+  const base = [
+    { key: 'slides',   label: 'Слайды' },
+    { key: 'summary',  label: 'Саммари' },
+    { key: 'llm',      label: 'Текст' },
+    { key: 'tts',      label: 'Озвучка' },
+    { key: 'encoding', label: 'Видео' },
+  ]
+  // Vision/auto mode skips the summary stage — per-slide texts are already in the DB.
+  if (mode.value === CreationMode.PRESENTATION_AUTO) {
+    return base.filter(s => s.key !== 'summary')
+  }
+  return base
+})
 
 const currentStageIdx = computed(() => {
-  if (!taskMeta.value) return -1
-  return stages.findIndex(s => s.key === taskMeta.value!.step)
+  if (!taskMeta.value) return 0
+  const idx = stages.value.findIndex(s => s.key === taskMeta.value!.step)
+  return idx < 0 ? 0 : idx
 })
 
-const stageState = (idx: number): 'pending' | 'active' | 'done' => {
-  const cur = currentStageIdx.value
-  if (cur < 0) return 'pending'
-  if (idx < cur) return 'done'
-  if (idx === cur) return 'active'
-  return 'pending'
-}
-
-const stageLabelClass = (idx: number): string => {
-  const s = stageState(idx)
-  if (s === 'done')   return 'text-brand'
-  if (s === 'active') return 'text-brand font-medium'
-  return 'text-gray-400'
-}
+const pipelineStages = computed(() =>
+  stages.value.map((s, i) => {
+    const stage: { label: string; pct?: number } = { label: s.label }
+    if (i === currentStageIdx.value && taskMeta.value && taskMeta.value.total > 0) {
+      stage.pct = Math.round((taskMeta.value.done / taskMeta.value.total) * 100)
+    }
+    return stage
+  }),
+)
 
 const stopPolling = () => {
   if (pollTimer) {
@@ -397,24 +379,12 @@ const generateVideo = async () => {
   }
 }
 
-// ── Status helpers ────────────────────────────────────────────────────────────
-const statusLabel: Record<string, string> = {
-  draft: 'Черновик',
-  analyzing: 'Анализируется',
-  ready_for_edit: 'Готов к редактированию',
-  processing: 'Генерируется',
-  published: 'Опубликован',
-  error: 'Ошибка',
-}
-
-const statusColor: Record<string, string> = {
-  draft: 'bg-gray-100 text-gray-600',
-  analyzing: 'bg-blue-100 text-blue-700',
-  ready_for_edit: 'bg-indigo-100 text-indigo-700',
-  processing: 'bg-yellow-100 text-yellow-700',
-  published: 'bg-green-100 text-green-700',
-  error: 'bg-red-100 text-red-700',
-}
+const lessonStatusForBadge = computed(() => {
+  const s = lesson.value?.status
+  if (s === 'draft' || s === 'analyzing' || s === 'ready_for_edit'
+      || s === 'processing' || s === 'published' || s === 'error') return s
+  return 'draft'
+})
 
 onMounted(load)
 onUnmounted(() => {
@@ -425,30 +395,38 @@ onUnmounted(() => {
 
 const isAuto = computed(() => mode.value === CreationMode.PRESENTATION_AUTO)
 const isManual = computed(() => mode.value === CreationMode.PRESENTATION_AND_TEXT)
+const showPipeline = computed(() => generating.value || taskStatus.value === 'PROGRESS' || lesson.value?.status === 'processing')
 </script>
 
 <template>
   <div v-if="loading" class="text-gray-500">Загрузка…</div>
-  <div v-else-if="error" class="text-red-600">{{ error }}</div>
+  <div
+    v-else-if="error"
+    class="flex items-start gap-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-2xl p-4"
+  >
+    <AlertCircle class="w-5 h-5 shrink-0 mt-0.5" />
+    <div>{{ error }}</div>
+  </div>
 
-  <div v-else-if="lesson" class="space-y-8 max-w-4xl">
+  <div v-else-if="lesson" class="space-y-6 max-w-4xl">
 
     <!-- Header -->
     <div>
-      <NuxtLink to="/courses" class="text-sm text-brand hover:underline block mb-2">← Назад к курсам</NuxtLink>
+      <NuxtLink
+        to="/dashboard"
+        class="inline-flex items-center gap-1 text-sm text-violet-700 hover:text-violet-600 font-medium transition mb-2"
+      >
+        <ChevronLeft class="w-4 h-4" />
+        Назад к курсам
+      </NuxtLink>
       <div class="flex items-center gap-3 flex-wrap">
-        <h1 class="text-2xl font-semibold">{{ lesson.title }}</h1>
-        <span
-          class="text-xs px-2 py-1 rounded-full font-medium"
-          :class="statusColor[lesson.status]"
-        >
-          {{ statusLabel[lesson.status] ?? lesson.status }}
-        </span>
+        <h1 class="text-2xl font-semibold text-gray-900">{{ lesson.title }}</h1>
+        <StatusBadge :status="lessonStatusForBadge" />
       </div>
     </div>
 
     <!-- Slide editor takes over when active -->
-    <section v-if="showSlideEditor" class="bg-white border rounded-xl p-5">
+    <section v-if="showSlideEditor">
       <SlideTextEditor
         :lesson-id="String(route.params.id)"
         @back="showSlideEditor = false"
@@ -457,56 +435,53 @@ const isManual = computed(() => mode.value === CreationMode.PRESENTATION_AND_TEX
     </section>
 
     <template v-else>
-
-      <!-- ── 1. Choose creation mode ── -->
-      <section class="bg-white border rounded-xl p-5">
-        <CreationModeChooser
-          :model-value="mode"
-          @update:model-value="onModeSelect"
-        />
+      <!-- 1. Choose creation mode -->
+      <section class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
+        <CreationModeChooser :model-value="mode" @update:model-value="onModeSelect" />
       </section>
 
-      <!-- ── 2. PPTX upload (both modes) ── -->
-      <section v-if="isManual || isAuto" class="bg-white border rounded-xl p-5">
-        <h2 class="font-semibold mb-1">Презентация</h2>
+      <!-- 2. PPTX upload -->
+      <section v-if="isManual || isAuto" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">Презентация</h2>
         <p class="text-sm text-gray-500 mb-4">Загрузите PPTX, PPT или PDF-файл со слайдами.</p>
 
-        <div v-if="lesson.pptx_path" class="flex items-center gap-2 mb-3 text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2">
-          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-          </svg>
+        <div
+          v-if="lesson.pptx_path"
+          class="flex items-center gap-2 mb-3 text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2"
+        >
+          <CheckCircle2 class="w-4 h-4 shrink-0" />
           <span class="truncate">{{ lesson.pptx_path.split('/').pop() }}</span>
         </div>
 
-        <div class="flex gap-2 items-center">
-          <label class="cursor-pointer px-4 py-2 border rounded text-sm hover:bg-gray-50 transition">
+        <div class="flex gap-2 items-center flex-wrap">
+          <label class="cursor-pointer inline-flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 transition">
+            <Upload class="w-4 h-4" />
             {{ pptxFile ? pptxFile.name : 'Выбрать файл' }}
             <input type="file" accept=".pptx,.ppt,.pdf" class="hidden" @change="onFileChange" />
           </label>
-          <button
+          <UiButton
             v-if="pptxFile"
-            class="px-4 py-2 bg-brand text-white rounded text-sm disabled:opacity-50"
-            :disabled="uploading"
+            variant="primary"
+            size="sm"
+            :loading="uploading"
             @click="uploadPptx"
           >
-            {{ uploading ? 'Загрузка…' : 'Загрузить' }}
-          </button>
+            Загрузить
+          </UiButton>
         </div>
-        <p v-if="uploadError" class="mt-2 text-sm text-red-600">{{ uploadError }}</p>
+        <p v-if="uploadError" class="mt-2 text-sm text-rose-600">{{ uploadError }}</p>
       </section>
 
-      <!-- ── 3a. Manual: text editor ── -->
-      <section v-if="isManual" class="bg-white border rounded-xl p-5">
-        <h2 class="font-semibold mb-1">Текст доклада</h2>
+      <!-- 3a. Manual: text editor -->
+      <section v-if="isManual" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">Текст доклада</h2>
         <p class="text-sm text-gray-500 mb-4">
           Введите полный текст или загрузите файл. LLM разобьёт его по слайдам.
         </p>
 
         <div class="flex flex-wrap gap-2 items-center mb-3">
-          <label class="cursor-pointer px-3 py-1.5 border rounded text-sm hover:bg-gray-50 transition inline-flex items-center gap-2">
-            <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/>
-            </svg>
+          <label class="cursor-pointer inline-flex items-center gap-2 px-3 py-1.5 border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 transition">
+            <FileText class="w-4 h-4" />
             {{ scriptFile ? scriptFile.name : 'Загрузить из файла' }}
             <input
               type="file"
@@ -515,174 +490,151 @@ const isManual = computed(() => mode.value === CreationMode.PRESENTATION_AND_TEX
               @change="onScriptFileChange"
             />
           </label>
-          <button
+          <UiButton
             v-if="scriptFile"
-            class="px-3 py-1.5 bg-brand text-white rounded text-sm disabled:opacity-50"
-            :disabled="uploadingScript"
+            variant="primary"
+            size="sm"
+            :loading="uploadingScript"
             @click="uploadScriptFile"
           >
-            {{ uploadingScript ? 'Извлечение…' : 'Извлечь текст' }}
-          </button>
+            Извлечь текст
+          </UiButton>
           <span class="text-xs text-gray-400">TXT, MD, PDF, DOCX, DOC, RTF, ODT, HTML</span>
         </div>
-        <p v-if="scriptUploadError" class="mb-2 text-sm text-red-600">{{ scriptUploadError }}</p>
+        <p v-if="scriptUploadError" class="mb-2 text-sm text-rose-600">{{ scriptUploadError }}</p>
 
         <textarea
           v-model="script"
           rows="8"
           placeholder="Введите текст доклада…"
-          class="w-full border rounded px-3 py-2 text-sm resize-y focus:outline-none focus:ring-2 focus:ring-brand/40"
+          class="w-full bg-white px-4 py-3 text-sm leading-relaxed border border-gray-200 rounded-xl resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition"
         />
         <div class="flex justify-between items-center mt-2">
-          <span class="text-xs text-gray-400">{{ script.split(/\s+/).filter(Boolean).length }} слов</span>
-          <button
-            class="px-4 py-1.5 border rounded text-sm hover:bg-gray-50 transition disabled:opacity-50"
-            :disabled="savingScript"
+          <span class="text-xs text-gray-500">
+            {{ script.split(/\s+/).filter(Boolean).length }} слов
+          </span>
+          <UiButton
+            variant="secondary"
+            size="sm"
+            :loading="savingScript"
             @click="saveScript"
           >
-            {{ savingScript ? 'Сохранение…' : 'Сохранить' }}
-          </button>
+            Сохранить
+          </UiButton>
         </div>
       </section>
 
-      <!-- ── 3b. Auto: vision analysis ── -->
-      <section v-if="isAuto" class="bg-white border rounded-xl p-5">
-        <h2 class="font-semibold mb-1">Автогенерация текста по слайдам</h2>
+      <!-- 3b. Auto: vision analysis -->
+      <section v-if="isAuto" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">Автогенерация текста по слайдам</h2>
         <p class="text-sm text-gray-500 mb-4">
           Vision LLM проанализирует каждый слайд и напишет развёрнутый текст озвучки.
         </p>
 
         <div v-if="analyzing || analyzeStatus === 'PROGRESS'" class="mb-4">
-          <div class="text-sm text-gray-700 mb-2">
+          <div class="text-sm text-violet-700 mb-2 flex items-center gap-1.5">
+            <Sparkles class="w-4 h-4 animate-pulse" />
             <template v-if="analyzeMeta?.step === 'slides'">Подготовка слайдов…</template>
             <template v-else-if="analyzeMeta?.step === 'vision'">
-              Анализируется слайд {{ analyzeMeta?.done ?? 0 }} из {{ analyzeMeta?.total ?? '…' }}
+              Анализируется слайд {{ analyzeProgressDone }} из {{ analyzeProgressTotal || '…' }}
             </template>
             <template v-else>Запуск анализа…</template>
           </div>
-          <div class="h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              class="h-full bg-brand transition-all"
-              :style="{ width: `${analyzeProgressPct}%` }"
-            />
-          </div>
+          <ProgressBar
+            :value="analyzeProgressDone"
+            :total="analyzeProgressTotal"
+            :indeterminate="analyzeProgressTotal === 0"
+          />
         </div>
 
-        <p v-if="analyzeError" class="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-          {{ analyzeError }}
-        </p>
+        <div
+          v-if="analyzeError"
+          class="flex items-start gap-2 mb-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"
+        >
+          <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{{ analyzeError }}</span>
+        </div>
 
         <div class="flex gap-2 flex-wrap">
-          <button
-            class="px-4 py-2 bg-brand text-white rounded text-sm disabled:opacity-50"
-            :disabled="!lesson.pptx_path || analyzing"
+          <UiButton
+            variant="primary"
+            :loading="analyzing"
+            :disabled="!lesson.pptx_path"
             @click="startAnalyze"
           >
-            {{ analyzing ? 'Анализ…' : (lesson.status === 'ready_for_edit' ? 'Перезапустить анализ' : 'Запустить анализ') }}
-          </button>
-          <button
+            <template #icon><Sparkles class="w-4 h-4" /></template>
+            {{ lesson.status === 'ready_for_edit' ? 'Перезапустить анализ' : 'Запустить анализ' }}
+          </UiButton>
+          <UiButton
             v-if="lesson.status === 'ready_for_edit'"
-            class="px-4 py-2 border rounded text-sm hover:bg-gray-50"
+            variant="secondary"
             @click="showSlideEditor = true"
           >
             Открыть редактор текста →
-          </button>
+          </UiButton>
         </div>
       </section>
 
-      <!-- ── 4. Generate video ── -->
-      <section v-if="isManual || isAuto" class="bg-white border rounded-xl p-5">
-        <h2 class="font-semibold mb-1">Генерация видео</h2>
-        <p class="text-sm text-gray-500 mb-4">
+      <!-- 4. Generate video -->
+      <section v-if="isManual || isAuto" class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
+        <h2 class="text-lg font-semibold text-gray-900 mb-1">Генерация видео</h2>
+        <p class="text-sm text-gray-500 mb-5">
           Запустите пайплайн: слайды + озвучка → MP4. Займёт 1–5 минут.
         </p>
 
-        <div class="mb-4 max-w-xs">
-          <label class="block text-sm text-gray-700 mb-1">Голос озвучки</label>
+        <div class="mb-5 max-w-xs">
+          <label class="block text-sm font-medium text-gray-700 mb-1.5">Голос озвучки</label>
           <div class="relative">
             <select
               v-model="selectedVoice"
               :disabled="generating || lesson.status === 'processing'"
-              class="w-full border rounded px-3 py-2 text-sm bg-white appearance-none pr-9 focus:outline-none focus:ring-2 focus:ring-brand/40 disabled:opacity-50"
+              class="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm appearance-none pr-9 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 disabled:opacity-50 transition"
             >
               <option v-for="v in voices" :key="v.value" :value="v.value">{{ v.label }}</option>
             </select>
-            <svg class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
-            </svg>
+            <ArrowDown class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
           </div>
         </div>
 
-        <div v-if="generating || taskStatus === 'PROGRESS'" class="mb-5">
-          <div class="flex items-start">
-            <template v-for="(stage, idx) in stages" :key="stage.key">
-              <div class="flex flex-col items-center flex-none">
-                <template v-if="stageState(idx) === 'active'">
-                  <svg class="w-7 h-7 animate-spin text-brand" viewBox="0 0 28 28" fill="none" style="animation-duration:1.1s">
-                    <circle cx="14" cy="14" r="11" stroke="currentColor" stroke-opacity="0.18" stroke-width="2.5"/>
-                    <circle cx="14" cy="14" r="11" stroke="currentColor" stroke-width="2.5"
-                      stroke-dasharray="17 52" stroke-linecap="round"
-                      transform="rotate(-90 14 14)"/>
-                  </svg>
-                </template>
-                <template v-else-if="stageState(idx) === 'done'">
-                  <div class="w-7 h-7 rounded-full bg-brand border-2 border-brand flex items-center justify-center transition-all duration-300">
-                    <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
-                    </svg>
-                  </div>
-                </template>
-                <template v-else>
-                  <div class="w-7 h-7 rounded-full bg-white border-2 border-gray-300 flex items-center justify-center text-xs font-semibold text-gray-400">
-                    {{ idx + 1 }}
-                  </div>
-                </template>
-
-                <span class="text-[10px] mt-1 text-center leading-tight w-14 transition-colors duration-300" :class="stageLabelClass(idx)">
-                  {{ stage.label }}
-                </span>
-              </div>
-              <div
-                v-if="idx < stages.length - 1"
-                class="flex-1 h-0.5 mt-3.5 mx-1 transition-colors duration-500"
-                :class="stageState(idx) === 'done' ? 'bg-brand' : 'bg-gray-200'"
-              />
-            </template>
-          </div>
+        <div v-if="showPipeline" class="mb-5 px-2">
+          <PipelineStages :stages="pipelineStages" :current="currentStageIdx" />
         </div>
 
-        <p v-if="taskError" class="mb-3 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-          {{ taskError }}
-        </p>
+        <div
+          v-if="taskError"
+          class="flex items-start gap-2 mb-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"
+        >
+          <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
+          <span>{{ taskError }}</span>
+        </div>
 
-        <button
-          class="px-5 py-2 bg-brand text-white rounded font-medium disabled:opacity-50 transition"
-          :disabled="generating || lesson.status === 'processing'"
+        <UiButton
+          variant="primary"
+          :loading="generating || lesson.status === 'processing'"
           @click="generateVideo"
         >
+          <template #icon><Video class="w-4 h-4" /></template>
           <span v-if="generating || lesson.status === 'processing'">Генерируется…</span>
           <span v-else-if="lesson.status === 'published'">Перегенерировать</span>
           <span v-else>Создать видео</span>
-        </button>
+        </UiButton>
       </section>
 
-      <!-- ── 5. Video player ── -->
-      <section v-if="lesson.status === 'published' && lesson.video_url" class="bg-white border rounded-xl p-5">
-        <h2 class="font-semibold mb-3">Готовое видео</h2>
-        <video
-          :src="lesson.video_url"
-          controls
-          class="w-full rounded"
-        />
+      <!-- 5. Video player -->
+      <section
+        v-if="lesson.status === 'published' && lesson.video_url"
+        class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft"
+      >
+        <h2 class="text-lg font-semibold text-gray-900 mb-3">Готовое видео</h2>
+        <video :src="lesson.video_url" controls class="w-full rounded-xl bg-black" />
         <a
           :href="lesson.video_url"
           target="_blank"
-          class="mt-2 inline-block text-sm text-brand hover:underline"
+          class="mt-3 inline-block text-sm text-violet-700 hover:text-violet-600 font-medium transition"
         >
-          Открыть в новой вкладке
+          Открыть в новой вкладке →
         </a>
       </section>
-
     </template>
   </div>
 </template>

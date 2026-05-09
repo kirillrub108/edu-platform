@@ -4,10 +4,12 @@ import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import settings
 from app.database import engine
@@ -66,8 +68,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — allow all origins in development so browser never sees CORS errors
-# on internal crashes. Switch to specific origins in production.
+# ── CORS ──────────────────────────────────────────────────────────────────────
+# Middleware order matters in Starlette: add_middleware called *first* ends up
+# *outermost* in the wrapped stack. We add CORS first so it wraps everything
+# below — preflight (OPTIONS) is handled here, and every successful response
+# gets CORS headers as it streams back out through this layer.
+#
+# CORS is INSIDE Starlette's ServerErrorMiddleware (the absolute outermost),
+# which is why we can't rely on @app.exception_handler(Exception) — that
+# handler runs in ServerErrorMiddleware, *outside* CORS, so its responses miss
+# CORS headers. To keep CORS on every error, we instead catch Exception inside
+# our own middleware below (which sits *inside* CORS in the stack).
 _cors_origins = settings.CORS_ORIGINS
 _allow_all = "*" in _cors_origins
 
@@ -77,15 +88,26 @@ app.add_middleware(
     allow_credentials=False if _allow_all else True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=600,
 )
 
 
 @app.middleware("http")
-async def log_requests(request: Request, call_next):
+async def log_and_catch(request: Request, call_next):
+    """Access log + last-resort 500 handler INSIDE the CORS layer.
+
+    Catching unhandled exceptions here (rather than via
+    @app.exception_handler(Exception), which lives in ServerErrorMiddleware
+    *outside* CORS) guarantees the JSONResponse(500) flows back through
+    CORSMiddleware on its way out and therefore carries the
+    Access-Control-Allow-Origin header. Without that, a backend bug shows up
+    in the browser as a misleading "CORS policy" error.
+    """
     start = time.perf_counter()
     try:
         response = await call_next(request)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         elapsed_ms = (time.perf_counter() - start) * 1000
         logger.exception(
             "Unhandled error in %s %s (%.1fms): %s",
@@ -107,6 +129,26 @@ async def log_requests(request: Request, call_next):
         elapsed_ms,
     )
     return response
+
+
+# ── Exception handlers (HTTPException + validation) ──────────────────────────
+# These types are caught by Starlette's ExceptionMiddleware, which is innermost
+# in the stack — its responses already flow back through CORS, so headers are
+# preserved without any extra effort. We override the defaults purely to
+# guarantee a consistent JSON shape ({"detail": ...}).
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=exc.headers,
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 
 app.include_router(auth.router)
