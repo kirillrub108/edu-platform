@@ -34,7 +34,7 @@ onMounted(load)
 <template>
   <div class="flex">
     <AppSidebar />
-    <main class="flex-1 px-6 lg:px-10 py-8 max-w-6xl">
+    <main class="flex-1 px-6 lg:px-10 py-8">
       <div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div>
           <div class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Преподаватель</div>

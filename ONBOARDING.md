@@ -876,7 +876,7 @@ Dockerfile делает много нетривиальных вещей:
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | 30 | срок access |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | 30 | срок refresh |
 | `LLM_BASE_URL` | `http://host.docker.internal:11434/v1` | OpenAI-совместимый LLM |
-| `LLM_MODEL` | qwen3:14b | имя модели |
+| `LLM_MODEL` | qwen3:8b | имя модели |
 | `LLM_API_KEY` | ollama | для Ollama любая строка |
 | `LLM_TEMPERATURE / LLM_MAX_TOKENS` | 0.7 / 2048 | дефолты для генерации |
 | `VISION_PROVIDER` | ollama (или yandex) | какой vision-провайдер |
@@ -898,7 +898,7 @@ Dockerfile делает много нетривиальных вещей:
 - **Ollama** + модели (если используешь локальный LLM):
   ```bash
   # установка: https://ollama.com/download
-  ollama pull qwen3:14b
+  ollama pull qwen3:8b
   ollama pull qwen2.5vl:7b
   ```
 - ~30GB свободного места (LibreOffice образ + модели Silero + Ollama).

@@ -32,7 +32,7 @@ class Settings(BaseSettings):
 
     # LLM
     LLM_BASE_URL: str = "http://host.docker.internal:11434/v1"
-    LLM_MODEL: str = "qwen3:14b"
+    LLM_MODEL: str = "qwen3:8b"
     LLM_API_KEY: str = "ollama"
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 2048

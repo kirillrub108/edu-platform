@@ -85,7 +85,13 @@ class LLMService:
         )
         self.model = settings.LLM_MODEL
 
-    async def _chat(self, system: str, user: str, json_mode: bool = False) -> str:
+    @staticmethod
+    def _strip_think(text: str) -> str:
+        return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    async def _chat(self, system: str, user: str, json_mode: bool = False, think: bool = False) -> str:
+        if not think:
+            user = user + "\n/no_think"
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [
@@ -98,7 +104,7 @@ class LLMService:
             kwargs["response_format"] = {"type": "json_object"}
 
         response = await self.client.chat.completions.create(**kwargs)
-        return response.choices[0].message.content or ""
+        return self._strip_think(response.choices[0].message.content or "")
 
     async def split_and_annotate_ssml(
         self,
@@ -175,7 +181,7 @@ class LLMService:
             "max_tokens": settings.LLM_MAX_TOKENS,
         }
         response = await self.client.chat.completions.create(**kwargs)
-        return (response.choices[0].message.content or "").strip()
+        return self._strip_think(response.choices[0].message.content or "")
 
     async def generate_quiz(
         self, lesson_text: str, questions_count: int = 5
@@ -187,7 +193,7 @@ class LLMService:
         )
         user = f"Questions count: {questions_count}\n\nLesson:\n{lesson_text}"
 
-        raw = await self._chat(system, user, json_mode=True)
+        raw = await self._chat(system, user, json_mode=True, think=True)
         try:
             data = json.loads(raw)
             return data.get("questions", [])

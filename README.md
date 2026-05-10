@@ -31,7 +31,7 @@ git clone <repo> && cd edu-platform
 cp .env.example .env
 
 # 1. Поднять Ollama локально (https://ollama.com/download) и скачать модель
-ollama pull qwen3:14b
+ollama pull qwen3:8b
 
 # 2. Поднять стек
 docker-compose up --build
@@ -57,7 +57,7 @@ docker-compose exec backend alembic upgrade head
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | срок жизни access-токена                  | `30`                                                    |
 | `REFRESH_TOKEN_EXPIRE_DAYS`   | срок жизни refresh-токена                 | `30`                                                    |
 | `LLM_BASE_URL`                | OpenAI-совместимый endpoint               | `http://host.docker.internal:11434/v1` (Ollama)          |
-| `LLM_MODEL`                   | имя модели                                | `qwen3:14b`, `yandexgpt/latest`                          |
+| `LLM_MODEL`                   | имя модели                                | `qwen3:8b`, `yandexgpt/latest`                          |
 | `LLM_API_KEY`                 | ключ                                      | `ollama` (для локального — любая строка)                |
 | `TTS_PROVIDER`                | имя провайдера                            | `silero`, `yandex`                                      |
 | `STORAGE_PATH`                | путь к локальному хранилищу               | `/app/storage`                                          |
