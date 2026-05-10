@@ -23,14 +23,14 @@ trade-off we accept to keep the access path stateless.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import bcrypt
 import jwt
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 from fastapi import Depends, HTTPException, status
 from redis.asyncio import Redis
 from sqlalchemy import select
@@ -43,18 +43,21 @@ from app.redis_client import get_redis
 from app.schemas.auth import TokenResponse
 
 
-# ── Password hashing (bcrypt 4.x, no passlib — passlib is incompatible with
-# Python 3.13). bcrypt rejects payloads >72 bytes, so pre-hash with sha256
-# to give it a fixed-size digest regardless of the user's password length.
+# ── Password hashing (argon2id — OWASP-recommended defaults from argon2-cffi).
+# Memory-hard, no 72-byte input limit, no pre-hash hacks.
+
+_ph = PasswordHasher()
+
 
 def hash_password(password: str) -> str:
-    digest = hashlib.sha256(password.encode()).digest()
-    return bcrypt.hashpw(digest, bcrypt.gensalt()).decode()
+    return _ph.hash(password)
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    digest = hashlib.sha256(plain.encode()).digest()
-    return bcrypt.checkpw(digest, hashed.encode())
+    try:
+        return _ph.verify(hashed, plain)
+    except VerifyMismatchError:
+        return False
 
 
 # ── JWT primitives ───────────────────────────────────────────────────────────
