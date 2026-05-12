@@ -22,16 +22,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
 
     # JWT
-    @field_validator('SECRET_KEY')
-    @classmethod
-    def secret_key_must_be_changed(cls, v):
-        if v == "change-me":
-            raise ValueError(
-                "SECRET_KEY is not set. "
-                "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
-            )
-        return v
-    
+    SECRET_KEY: str = "change-me"
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 14

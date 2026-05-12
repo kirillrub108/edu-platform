@@ -12,28 +12,12 @@ from app.database import get_db
 from app.dependencies import require_teacher
 from app.models.lesson import Lesson
 from app.models.user import User
+from app.services.file_validation_service import validate_upload
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/uploads", tags=["uploads"])
 
-ALLOWED_PPTX = {".pptx", ".ppt", ".pdf"}
-ALLOWED_VIDEO = {".mp4", ".webm", ".mov"}
-ALLOWED_SCRIPT = {
-    ".txt", ".md", ".markdown",
-    ".pdf",
-    ".docx", ".doc",
-    ".rtf",
-    ".odt",
-    ".html", ".htm",
-}
-
 MAX_SCRIPT_BYTES = 10 * 1024 * 1024  # 10 MB
-
-
-def _ext_ok(filename: str | None, allowed: set[str]) -> bool:
-    if not filename:
-        return False
-    return os.path.splitext(filename)[1].lower() in allowed
 
 
 def _decode_text(content: bytes) -> str:
@@ -61,20 +45,45 @@ def _extract_pdf_text(content: bytes) -> str:
 
 def _extract_docx_text(content: bytes) -> str:
     """Extract paragraphs and table cells from a DOCX. Images/embedded objects are skipped."""
+    import xml.etree.ElementTree as _ET
+
+    from defusedxml.ElementTree import fromstring as _safe_fromstring
+    from defusedxml.ElementTree import iterparse as _safe_iterparse
+    from defusedxml.ElementTree import parse as _safe_parse
     from docx import Document
 
-    doc = Document(io.BytesIO(content))
-    parts: list[str] = []
-    for para in doc.paragraphs:
-        text = para.text.strip()
-        if text:
-            parts.append(text)
-    for table in doc.tables:
-        for row in table.rows:
-            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-            if cells:
-                parts.append(" | ".join(cells))
-    return "\n\n".join(parts)
+    # python-docx parses the DOCX's internal XML parts via stdlib
+    # xml.etree.ElementTree when lxml is unavailable. The stdlib parser
+    # resolves external entities and expands internal ones unboundedly, so a
+    # crafted DOCX can mount XXE (file:///etc/passwd) or Billion Laughs DoS.
+    # Patch is scoped to this call — `finally` restores stdlib for the rest of
+    # the process so unrelated XML usage is unaffected.
+    _orig_fromstring = _ET.fromstring
+    _orig_parse = _ET.parse
+    _orig_iterparse = _ET.iterparse
+    _ET.fromstring = _safe_fromstring
+    _ET.parse = _safe_parse
+    _ET.iterparse = _safe_iterparse
+
+    buf = io.BytesIO(content)
+    buf.seek(0)
+    try:
+        doc = Document(buf)
+        parts: list[str] = []
+        for para in doc.paragraphs:
+            text = para.text.strip()
+            if text:
+                parts.append(text)
+        for table in doc.tables:
+            for row in table.rows:
+                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                if cells:
+                    parts.append(" | ".join(cells))
+        return "\n\n".join(parts)
+    finally:
+        _ET.fromstring = _orig_fromstring
+        _ET.parse = _orig_parse
+        _ET.iterparse = _orig_iterparse
 
 
 def _extract_rtf_text(content: bytes) -> str:
@@ -185,8 +194,7 @@ async def upload_pptx(
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
-    if not _ext_ok(file.filename, ALLOWED_PPTX):
-        raise HTTPException(status_code=400, detail="Only PPTX/PPT/PDF allowed")
+    await validate_upload(file, [".pptx", ".ppt", ".pdf"])
 
     relative = await storage_service.save_upload(file, "pptx")
 
@@ -215,11 +223,10 @@ async def upload_script(
 
     For PDFs only the text layer is extracted — images and figures are skipped.
     """
-    if not _ext_ok(file.filename, ALLOWED_SCRIPT):
-        raise HTTPException(
-            status_code=400,
-            detail="Поддерживаются: TXT, MD, PDF, DOCX, DOC, RTF, ODT, HTML",
-        )
+    await validate_upload(
+        file,
+        [".txt", ".md", ".pdf", ".docx", ".doc", ".rtf", ".odt", ".html"],
+    )
 
     content = await file.read()
     if not content:
@@ -253,8 +260,7 @@ async def upload_video(
     file: UploadFile,
     user: User = Depends(require_teacher),
 ):
-    if not _ext_ok(file.filename, ALLOWED_VIDEO):
-        raise HTTPException(status_code=400, detail="Only MP4/WebM/MOV allowed")
+    await validate_upload(file, [".mp4", ".webm", ".mov"])
     relative = await storage_service.save_upload(file, "videos")
     return {
         "file_path": relative,
