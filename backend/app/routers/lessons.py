@@ -18,7 +18,14 @@ from app.schemas.lesson import (
     TaskStatusResponse,
     VideoGenerateRequest,
 )
+from app.services.storage_service import storage_service
 from app.tasks.video_pipeline import generate_video_lesson
+
+
+def _lesson_out(lesson: Lesson, user_id: str) -> LessonOut:
+    out = LessonOut.model_validate(lesson)
+    out.video_url = storage_service.resign_url(out.video_url, user_id)
+    return out
 
 router = APIRouter(prefix="/api/v1/lessons", tags=["lessons"])
 
@@ -57,7 +64,7 @@ async def create_lesson(
     db.add(lesson)
     await db.commit()
     await db.refresh(lesson)
-    return lesson
+    return _lesson_out(lesson, str(user.id))
 
 
 @router.get("/{lesson_id}", response_model=LessonOut)
@@ -66,7 +73,8 @@ async def get_lesson(
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _get_owned_lesson(lesson_id, user, db)
+    lesson = await _get_owned_lesson(lesson_id, user, db)
+    return _lesson_out(lesson, str(user.id))
 
 
 @router.put("/{lesson_id}", response_model=LessonOut)
@@ -81,7 +89,7 @@ async def update_lesson(
         setattr(lesson, key, value)
     await db.commit()
     await db.refresh(lesson)
-    return lesson
+    return _lesson_out(lesson, str(user.id))
 
 
 @router.delete("/{lesson_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -106,7 +114,7 @@ async def update_script(
     lesson.script = data.script
     await db.commit()
     await db.refresh(lesson)
-    return lesson
+    return _lesson_out(lesson, str(user.id))
 
 
 @router.post("/{lesson_id}/generate-video")

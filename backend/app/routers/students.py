@@ -14,6 +14,8 @@ from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import Lesson, Module
 from app.models.user import User
 from app.schemas.course import CourseDetail, CourseOut
+from app.schemas.lesson import LessonOut
+from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/students", tags=["students"])
 
@@ -96,6 +98,30 @@ async def course_details(
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
     return course
+
+
+@router.get("/lessons/{lesson_id}", response_model=LessonOut)
+async def get_lesson_for_student(
+    lesson_id: UUID,
+    user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+):
+    lesson = await db.get(Lesson, lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    module = await db.get(Module, lesson.module_id)
+    enrollment = await db.scalar(
+        select(Enrollment).where(
+            Enrollment.student_id == user.id, Enrollment.course_id == module.course_id
+        )
+    )
+    if not enrollment:
+        raise HTTPException(status_code=403, detail="Not enrolled")
+
+    out = LessonOut.model_validate(lesson)
+    if out.video_url is not None:
+        out.video_url = storage_service.resign_url(out.video_url, str(user.id))
+    return out
 
 
 async def _get_progress(

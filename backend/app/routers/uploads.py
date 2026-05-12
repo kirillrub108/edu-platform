@@ -200,7 +200,7 @@ async def upload_pptx(
 
     return {
         "file_path": relative,
-        "file_url": storage_service.get_url(relative),
+        "file_url": storage_service.get_url(relative, str(user.id)),
     }
 
 
@@ -258,5 +258,5 @@ async def upload_video(
     relative = await storage_service.save_upload(file, "videos")
     return {
         "file_path": relative,
-        "file_url": storage_service.get_url(relative),
+        "file_url": storage_service.get_url(relative, str(user.id)),
     }

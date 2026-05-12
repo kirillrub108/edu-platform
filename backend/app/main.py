@@ -7,7 +7,6 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -16,7 +15,7 @@ from app.config import settings
 from app.database import engine
 from app.limiter import limiter
 from app.redis_client import close_redis
-from app.routers import auth, courses, lessons, slides, students, uploads
+from app.routers import auth, courses, files, lessons, slides, students, uploads
 
 logging.basicConfig(
     level=logging.INFO,
@@ -166,12 +165,7 @@ app.include_router(lessons.router)
 app.include_router(slides.router)
 app.include_router(uploads.router)
 app.include_router(students.router)
-
-app.mount(
-    "/files",
-    StaticFiles(directory=settings.STORAGE_PATH, check_dir=False),
-    name="files",
-)
+app.include_router(files.router)
 
 
 @app.get("/", tags=["meta"])

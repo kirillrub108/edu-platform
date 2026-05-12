@@ -6,6 +6,7 @@ import aiofiles
 from fastapi import UploadFile
 
 from app.config import settings
+from app.services.signed_url_service import generate_signed_url
 
 
 class StorageService:
@@ -28,8 +29,24 @@ class StorageService:
 
         return relative
 
-    def get_url(self, relative_path: str) -> str:
-        return f"{self.base_url}/files/{relative_path.lstrip('/')}"
+    def get_url(self, relative_path: str, user_id: str) -> str:
+        return f"{self.base_url}{generate_signed_url(relative_path, user_id)}"
+
+    def resign_url(self, stored_url: str | None, user_id: str) -> str | None:
+        """Take a previously-stored `/files/<rel>?...` URL and re-sign it for
+        the given user. Stored URLs are signed for the lesson owner at write
+        time; readers (the owner past 1h, or any other authorised user) need a
+        fresh signature against their own `user_id`.
+        """
+        if not stored_url:
+            return stored_url
+        marker = "/files/"
+        idx = stored_url.find(marker)
+        if idx == -1:
+            return stored_url
+        rel_and_query = stored_url[idx + len(marker):]
+        rel = rel_and_query.split("?", 1)[0]
+        return self.get_url(rel, user_id)
 
     def get_full_path(self, relative_path: str) -> str:
         return str(self.base_path / relative_path)

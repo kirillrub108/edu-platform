@@ -39,10 +39,10 @@ async def _get_owned_lesson(lesson_id: UUID, user: User, db: AsyncSession) -> Le
     return lesson
 
 
-def _row_to_out(row: SlideText) -> SlideTextOut:
+def _row_to_out(row: SlideText, user_id: str) -> SlideTextOut:
     image_url: str | None = None
     if row.image_path:
-        image_url = storage_service.get_url(row.image_path)
+        image_url = storage_service.get_url(row.image_path, user_id)
     return SlideTextOut(
         id=row.id,
         slide_number=row.slide_number,
@@ -128,7 +128,7 @@ async def list_slides(
         lesson_id=lesson_id,
         status=lesson.status.value if hasattr(lesson.status, "value") else str(lesson.status),
         total=len(rows),
-        slides=[_row_to_out(r) for r in rows],
+        slides=[_row_to_out(r, str(user.id)) for r in rows],
     )
 
 
@@ -148,7 +148,7 @@ async def update_slide_text(
     row.edited_text = data.edited_text
     await db.commit()
     await db.refresh(row)
-    return _row_to_out(row)
+    return _row_to_out(row, str(user.id))
 
 
 @router.post("/{lesson_id}/slides/{slide_id}/regenerate", response_model=SlideTextOut)
@@ -206,4 +206,4 @@ async def regenerate_slide_text(
     row.edited_text = None
     await db.commit()
     await db.refresh(row)
-    return _row_to_out(row)
+    return _row_to_out(row, str(user.id))

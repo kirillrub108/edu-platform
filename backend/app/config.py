@@ -22,7 +22,16 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://redis:6379/0"
 
     # JWT
-    SECRET_KEY: str = "change-me"
+    @field_validator('SECRET_KEY')
+    @classmethod
+    def secret_key_must_be_changed(cls, v):
+        if v == "change-me":
+            raise ValueError(
+                "SECRET_KEY is not set. "
+                "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+            )
+        return v
+    
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 14
@@ -56,6 +65,9 @@ class Settings(BaseSettings):
     # Storage
     STORAGE_PATH: str = "/app/storage"
     BASE_URL: str = "http://localhost:8000"
+
+    # Signed URLs (HMAC-protected /files/*). Lifetime, in seconds.
+    SIGNED_URL_EXPIRES_IN: int = 3600
 
     # CORS — accepts a comma-separated string from env (CORS_ORIGINS=a,b,c) or
     # a JSON array. Use "*" to allow any origin in dev.

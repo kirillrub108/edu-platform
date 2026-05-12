@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.models.lesson import CreationMode, Lesson, LessonStatus
+from app.models.course import Course
+from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.slide_text import SlideText
 from app.services.llm_service import llm_service
 from app.services.storage_service import storage_service
@@ -258,7 +259,13 @@ def generate_video_lesson(
                 segment_paths, video_full  # type: ignore[arg-type]
             )
 
-            video_url = storage_service.get_url(video_relative)
+            # Sign with the course owner (teacher); read endpoints re-sign for
+            # the current viewer so non-owner readers and post-expiry owner
+            # reads also get a valid signature.
+            owner_lesson = session.get(Lesson, lesson_uuid)
+            owner_module = session.get(Module, owner_lesson.module_id)
+            owner_course = session.get(Course, owner_module.course_id)
+            video_url = storage_service.get_url(video_relative, str(owner_course.owner_id))
             _set_status(session, lesson_uuid, LessonStatus.published, video_url)
 
             return {"status": "ok", "video_url": video_url}
