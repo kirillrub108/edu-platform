@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 
 from app.dependencies import get_current_token_payload, get_current_user
+from app.limiter import limiter
 from app.models.user import User
 from app.schemas.auth import (
     LogoutRequest,
@@ -19,7 +20,9 @@ router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@limiter.limit("3/minute")
 async def register(
+    request: Request,
     data: UserRegister,
     service: AuthService = Depends(get_auth_service),
 ) -> User:
@@ -32,7 +35,9 @@ async def register(
 
 
 @router.post("/login", response_model=TokenResponse)
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     data: UserLogin,
     service: AuthService = Depends(get_auth_service),
 ) -> TokenResponse:
@@ -40,7 +45,9 @@ async def login(
 
 
 @router.post("/refresh", response_model=TokenResponse)
+@limiter.limit("10/minute")
 async def refresh(
+    request: Request,
     data: RefreshRequest,
     service: AuthService = Depends(get_auth_service),
 ) -> TokenResponse:

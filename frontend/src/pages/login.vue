@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { login, user } = useAuth()
+const auth = useAuthStore()
 const email = ref('')
 const password = ref('')
 const rememberMe = ref(true)
@@ -10,8 +10,8 @@ const submit = async () => {
   error.value = null
   loading.value = true
   try {
-    await login(email.value, password.value, rememberMe.value)
-    const dest = user.value?.role === 'student' ? '/student/dashboard' : '/dashboard'
+    await auth.login(email.value, password.value, rememberMe.value)
+    const dest = auth.user?.role === 'student' ? '/student/dashboard' : '/dashboard'
     await navigateTo(dest)
   } catch (e: any) {
     error.value = e?.data?.detail ?? 'Неверный email или пароль'

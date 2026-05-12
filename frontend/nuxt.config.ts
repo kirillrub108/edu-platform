@@ -1,8 +1,12 @@
 export default defineNuxtConfig({
   srcDir: 'src/',
-  ssr: false,
   devtools: { enabled: true },
-  modules: ['@nuxtjs/tailwindcss'],
+  modules: ['@nuxtjs/tailwindcss', '@pinia/nuxt'],
+  // Hybrid rendering: SSG for landing, CSR for everything else
+  routeRules: {
+    '/': { prerender: true },
+    '/**': { ssr: false },
+  },
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:8000/api/v1',

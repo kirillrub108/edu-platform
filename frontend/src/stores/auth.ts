@@ -1,3 +1,5 @@
+import { defineStore } from 'pinia'
+
 interface UserOut {
   id: string
   email: string
@@ -13,9 +15,10 @@ interface TokenResponse {
   token_type: string
 }
 
-export const useAuth = () => {
+export const useAuthStore = defineStore('auth', () => {
   const { apiFetch } = useApi()
-  const user = useState<UserOut | null>('auth.user', () => null)
+  const user = ref<UserOut | null>(null)
+  const isAuthenticated = computed(() => !!user.value)
 
   const persistTokens = (tokens: TokenResponse) => {
     if (!import.meta.client) return
@@ -53,8 +56,6 @@ export const useAuth = () => {
     role: 'teacher' | 'student',
     full_name?: string,
   ) => {
-    // Backend /register only creates the user (returns UserOut). Log in
-    // immediately so the caller ends up authenticated like before.
     await apiFetch<UserOut>('/auth/register', {
       method: 'POST',
       body: { email, password, role, full_name },
@@ -65,9 +66,6 @@ export const useAuth = () => {
   const logout = async () => {
     if (import.meta.client) {
       const refresh_token = localStorage.getItem('refresh_token')
-      // Best-effort revoke on the backend (blacklists access jti and
-      // deletes the refresh family). Ignore errors — local state is
-      // wiped regardless so the user always ends up logged out.
       try {
         await apiFetch('/auth/logout', {
           method: 'POST',
@@ -82,7 +80,5 @@ export const useAuth = () => {
     await navigateTo('/login')
   }
 
-  const isAuthenticated = computed(() => !!user.value)
-
   return { user, isAuthenticated, login, register, logout, fetchMe }
-}
+})

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { GraduationCap, LogOut, Menu } from 'lucide-vue-next'
 
-const { user, isAuthenticated, logout, fetchMe } = useAuth()
+const auth = useAuthStore()
+const { user, isAuthenticated } = storeToRefs(auth)
+const { logout } = auth
 
 onMounted(() => {
-  if (!user.value) fetchMe()
+  if (!user.value) auth.fetchMe()
 })
 
 const initials = computed(() =>

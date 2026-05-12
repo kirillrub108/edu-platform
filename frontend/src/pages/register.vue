@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { register } = useAuth()
+const auth = useAuthStore()
 const email = ref('')
 const password = ref('')
 const fullName = ref('')
@@ -11,7 +11,7 @@ const submit = async () => {
   error.value = null
   loading.value = true
   try {
-    await register(email.value, password.value, role.value, fullName.value || undefined)
+    await auth.register(email.value, password.value, role.value, fullName.value || undefined)
     await navigateTo(role.value === 'teacher' ? '/dashboard' : '/student/dashboard')
   } catch (e: any) {
     error.value = e?.data?.detail ?? 'Ошибка регистрации'

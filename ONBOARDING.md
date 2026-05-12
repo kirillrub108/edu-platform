@@ -695,6 +695,7 @@ POST /api/v1/lessons/{id}/analyze
 
 ## 5.1 Архитектура Nuxt 3
 
+- **`prerender: true (SSG at build time) на /`**
 - **`ssr: false`** → это SPA. Всё рендерится в браузере. Сервер Nuxt существует только для dev-сервера и сборки.
 - **`srcDir: 'src/'`** → нестандартное расположение, читай конфиг чтобы не путаться.
 - **File-based routing**: `pages/lessons/[id].vue` → `/lessons/abc-123`.
@@ -982,10 +983,6 @@ docker-compose exec backend alembic upgrade head
 
 | Проблема | Файл | Почему опасно | Как исправить |
 |---|---|---|---|
-| **JWT в localStorage** | `composables/useApi.ts` | XSS читает токены | httpOnly+SameSite cookie + CSRF |
-| **bcrypt poверх sha256** | `services/auth_service.py:13` | password-shucking, потенциально длинные пароли | ограничить длину или argon2id |
-| **Refresh-токен не используется** | `composables/useAuth.ts` | каждые 30 минут пользователь силой выкидывается на login | сделать interceptor: 401 → /auth/refresh → retry |
-| **Нет rate-limiting** | весь backend | brute-force на /auth/login | slowapi / nginx limit_req |
 | **CORS `allow_credentials=True`** + `allow_origins=["*"]` логически конфликтуют, защита есть в `main.py` | `main.py:82-93` | если кто-то выставит `*` — credentials отключатся (это правильно, но конфигурация тонкая) | задокументировать |
 | **Файлы `/files/*` отдаются без авторизации** | `main.py:161` | любой со ссылкой на видео может смотреть; и слайды учеников тоже доступны | подписанные ссылки или прокси-эндпоинт |
 | **`SECRET_KEY` дефолт `change-me`** | `config.py:25` | если забыть поменять в .env — катастрофа | fail-fast на старте если значение по-умолчанию |

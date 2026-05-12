@@ -1,9 +1,9 @@
 export default defineNuxtRouteMiddleware(() => {
   if (!import.meta.client) return
 
-  const { user } = useAuth()
+  const auth = useAuthStore()
 
-  if (user.value && user.value.role !== 'teacher') {
+  if (auth.user && auth.user.role !== 'teacher') {
     return navigateTo('/student/dashboard')
   }
 })

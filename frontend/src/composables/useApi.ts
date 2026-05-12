@@ -72,18 +72,19 @@ export const useApi = () => {
       // Try to silently rotate tokens and replay the request once. Skip for
       // the auth endpoints themselves — refreshing on a failed /auth/refresh
       // would loop, and refreshing on a wrong-password /auth/login is moot.
-      if (is401 && !_retried && import.meta.client && !isAuthEndpoint(path)) {
+      if (is401 && !_retried && token && import.meta.client && !isAuthEndpoint(path)) {
         const tokens = await tryRefresh()
         if (tokens) {
           return apiFetch<T>(path, options, true)
         }
       }
 
-      // Refresh impossible or also failed → user is genuinely logged out.
+      // Refresh impossible or also failed → session expired (had a token) → redirect.
+      // If there was no token at all, the user is simply unauthenticated — not an error.
       if (is401 && import.meta.client && !isAuthEndpoint(path)) {
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
-        await navigateTo('/login')
+        if (token) await navigateTo('/login')
       }
       throw err
     }

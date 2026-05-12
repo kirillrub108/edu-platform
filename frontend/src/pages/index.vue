@@ -3,17 +3,23 @@ import { Upload, Sparkles, Video, ArrowRight, Play, Zap, Brain, Monitor } from '
 
 definePageMeta({ layout: 'bare' })
 
-const { isAuthenticated, user, fetchMe } = useAuth()
-
-onMounted(() => {
-  if (!user.value) fetchMe()
+useSeoMeta({
+  title: 'EduAI — Создавайте видеокурсы с ИИ за минуты',
+  description: 'Загрузите PPTX, получите готовый видеокурс с автоматическим скриптом и озвучкой. Без съёмок, без монтажа — за пару минут.',
+  ogTitle: 'EduAI — Видеокурсы с ИИ',
+  ogDescription: 'Загрузите PPTX, получите готовый видеокурс с автоматическим скриптом и озвучкой. Без съёмок, без монтажа.',
+  twitterCard: 'summary',
 })
+
+// Auth is client-only; during prerender user is null → ctaTo defaults to /register.
+// No fetchMe here — landing is a public page, no need to hit the API on every visit.
+const auth = useAuthStore()
 
 const ctaTo = computed(() => {
-  if (!isAuthenticated.value) return '/register'
-  return user.value?.role === 'teacher' ? '/dashboard' : '/student/dashboard'
+  if (!auth.isAuthenticated) return '/register'
+  return auth.user?.role === 'teacher' ? '/dashboard' : '/student/dashboard'
 })
-const ctaLabel = computed(() => (isAuthenticated.value ? 'В кабинет' : 'Начать бесплатно'))
+const ctaLabel = computed(() => (auth.isAuthenticated ? 'В кабинет' : 'Начать бесплатно'))
 
 const features = [
   { icon: Upload,   title: 'Загрузите PPTX',     desc: 'Просто перетащите презентацию — никаких шаблонов и настроек.' },
