@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
 from app.database import get_db
-from app.dependencies import require_teacher
+from app.dependencies import get_owned_lesson, require_teacher
 from app.models.course import Course
 from app.models.lesson import Lesson, Module
 from app.models.user import User
@@ -29,16 +29,6 @@ def _lesson_out(lesson: Lesson, user_id: str) -> LessonOut:
 
 router = APIRouter(prefix="/api/v1/lessons", tags=["lessons"])
 
-
-async def _get_owned_lesson(lesson_id: UUID, user: User, db: AsyncSession) -> Lesson:
-    lesson = await db.get(Lesson, lesson_id)
-    if not lesson:
-        raise HTTPException(status_code=404, detail="Lesson not found")
-    module = await db.get(Module, lesson.module_id)
-    course = await db.get(Course, module.course_id)
-    if course.owner_id != user.id:
-        raise HTTPException(status_code=403, detail="Not your lesson")
-    return lesson
 
 
 @router.post("/", response_model=LessonOut, status_code=status.HTTP_201_CREATED)
@@ -71,9 +61,8 @@ async def create_lesson(
 async def get_lesson(
     lesson_id: UUID,
     user: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    lesson: Lesson = Depends(get_owned_lesson),
 ):
-    lesson = await _get_owned_lesson(lesson_id, user, db)
     return _lesson_out(lesson, str(user.id))
 
 
@@ -82,9 +71,9 @@ async def update_lesson(
     lesson_id: UUID,
     data: LessonUpdate,
     user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await _get_owned_lesson(lesson_id, user, db)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(lesson, key, value)
     await db.commit()
@@ -95,10 +84,9 @@ async def update_lesson(
 @router.delete("/{lesson_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_lesson(
     lesson_id: UUID,
-    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await _get_owned_lesson(lesson_id, user, db)
     await db.delete(lesson)
     await db.commit()
 
@@ -108,9 +96,9 @@ async def update_script(
     lesson_id: UUID,
     data: ScriptUpdateRequest,
     user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await _get_owned_lesson(lesson_id, user, db)
     lesson.script = data.script
     await db.commit()
     await db.refresh(lesson)
@@ -122,10 +110,9 @@ async def generate_video(
     lesson_id: UUID,
     data: VideoGenerateRequest,
     user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await _get_owned_lesson(lesson_id, user, db)
-
     pptx_path = data.pptx_path or lesson.pptx_path
     if not pptx_path:
         raise HTTPException(
@@ -138,20 +125,41 @@ async def generate_video(
         lesson.pptx_path = data.pptx_path
         await db.commit()
 
-    task = generate_video_lesson.delay(str(lesson.id), pptx_path, data.voice)
+    task = generate_video_lesson.apply_async(
+        args=[str(lesson.id), pptx_path, data.voice], queue="video"
+    )
     lesson.video_task_id = task.id
     await db.commit()
     return {"task_id": task.id, "lesson_id": str(lesson.id)}
+
+
+@router.post("/{lesson_id}/cancel-video")
+async def cancel_video(
+    lesson_id: UUID,
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    task_id = lesson.video_task_id
+    if task_id:
+        result = AsyncResult(task_id, app=celery_app)
+        result.revoke(terminate=True, signal="SIGKILL")
+        lesson.video_task_id = None
+
+    from app.models.lesson import LessonStatus
+    if lesson.creation_mode and str(lesson.creation_mode) in ("presentation_auto",):
+        lesson.status = LessonStatus.ready_for_edit
+    else:
+        lesson.status = LessonStatus.draft
+    await db.commit()
+    return {"cancelled": True, "lesson_id": str(lesson_id)}
 
 
 @router.get("/{lesson_id}/task-status/{task_id}", response_model=TaskStatusResponse)
 async def task_status(
     lesson_id: UUID,
     task_id: str,
-    user: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    _lesson: Lesson = Depends(get_owned_lesson),
 ):
-    await _get_owned_lesson(lesson_id, user, db)
     result = AsyncResult(task_id, app=celery_app)
 
     payload: dict = {"task_id": task_id, "status": result.status, "result": None, "meta": None}

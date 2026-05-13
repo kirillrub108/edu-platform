@@ -4,9 +4,13 @@ from uuid import UUID
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.database import get_db
+from app.models.course import Course
+from app.models.lesson import Lesson, Module
 from app.models.user import User, UserRole
 from app.redis_client import get_redis
 from app.services.auth_service import decode_token
@@ -70,3 +74,22 @@ async def require_student(user: User = Depends(get_current_user)) -> User:
             detail="Student role required",
         )
     return user
+
+
+async def get_owned_lesson(
+    lesson_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> Lesson:
+    result = await db.execute(
+        select(Lesson)
+        .join(Module, Lesson.module_id == Module.id)
+        .join(Course, Module.course_id == Course.id)
+        .where(Lesson.id == lesson_id)
+        .where(Course.owner_id == user.id)
+        .options(joinedload(Lesson.module).joinedload(Module.course))
+    )
+    lesson = result.scalar_one_or_none()
+    if lesson is None:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    return lesson

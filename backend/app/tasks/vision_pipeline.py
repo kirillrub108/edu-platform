@@ -41,7 +41,7 @@ def _store_slide_image(lesson_id: str, slide_idx: int, src_png: str) -> str:
     return rel_path
 
 
-@celery_app.task(bind=True, name="analyze_presentation")
+@celery_app.task(bind=True, name="analyze_presentation", queue="vision")
 def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> dict:
     lesson_uuid = UUID(lesson_id)
     work_dir = os.path.join(settings.STORAGE_PATH, "video_jobs", lesson_id)

@@ -40,13 +40,19 @@ const togglePublish = async () => {
 }
 
 const addModule = async () => {
-  if (!newModuleTitle.value.trim()) return
+  const title = newModuleTitle.value.trim()
+  if (!title) {
+    // Don't silently swallow the click — without this the user sees "ничего
+    // не проходит" with no console output and no clue why.
+    actionError.value = 'Введите название модуля'
+    return
+  }
   addingModule.value = true
   actionError.value = ''
   try {
     await apiFetch(`/courses/${route.params.id}/modules`, {
       method: 'POST',
-      body: { title: newModuleTitle.value, order: course.value?.modules?.length ?? 0 },
+      body: { title, order: course.value?.modules?.length ?? 0 },
     })
     newModuleTitle.value = ''
     await load()
@@ -59,7 +65,10 @@ const addModule = async () => {
 
 const addLesson = async (moduleId: string) => {
   const title = newLessonTitle.value[moduleId]?.trim()
-  if (!title) return
+  if (!title) {
+    actionError.value = 'Введите название урока'
+    return
+  }
   addingLesson.value[moduleId] = true
   actionError.value = ''
   try {
@@ -72,6 +81,9 @@ const addLesson = async (moduleId: string) => {
     await navigateTo(`/lessons/${lesson.id}`)
   } catch (e: any) {
     actionError.value = e?.data?.detail ?? 'Ошибка при добавлении урока'
+  } finally {
+    // Reset on every exit (success or failure) so the button never stays
+    // stuck in '…' if navigation throws or the user comes back to this page.
     addingLesson.value[moduleId] = false
   }
 }
@@ -172,12 +184,13 @@ onMounted(load)
             <input
               v-model="newLessonTitle[m.id]"
               placeholder="Название урока"
+              required
               class="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
             />
             <button
               type="submit"
               class="px-3 py-1.5 bg-brand text-white rounded-lg text-sm disabled:opacity-50 whitespace-nowrap"
-              :disabled="addingLesson[m.id]"
+              :disabled="addingLesson[m.id] || !newLessonTitle[m.id]?.trim()"
             >
               {{ addingLesson[m.id] ? '…' : '+ Урок' }}
             </button>
@@ -189,12 +202,13 @@ onMounted(load)
         <input
           v-model="newModuleTitle"
           placeholder="Название нового модуля"
+          required
           class="flex-1 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
         />
         <button
           type="submit"
           class="px-4 py-2 bg-brand text-white rounded-lg text-sm disabled:opacity-50 whitespace-nowrap"
-          :disabled="addingModule"
+          :disabled="addingModule || !newModuleTitle.trim()"
         >
           {{ addingModule ? '…' : '+ Модуль' }}
         </button>

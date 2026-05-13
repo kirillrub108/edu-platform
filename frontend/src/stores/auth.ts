@@ -32,6 +32,11 @@ export const useAuthStore = defineStore('auth', () => {
     localStorage.removeItem('refresh_token')
   }
 
+  const clearSession = () => {
+    clearTokens()
+    user.value = null
+  }
+
   const fetchMe = async () => {
     if (!import.meta.client) return
     try {
@@ -75,10 +80,9 @@ export const useAuthStore = defineStore('auth', () => {
         /* noop */
       }
     }
-    clearTokens()
-    user.value = null
+    clearSession()
     await navigateTo('/login')
   }
 
-  return { user, isAuthenticated, login, register, logout, fetchMe }
+  return { user, isAuthenticated, login, register, logout, fetchMe, clearSession }
 })

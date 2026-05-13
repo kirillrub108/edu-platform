@@ -1,4 +1,5 @@
 from celery import Celery
+from kombu import Queue
 
 from app.config import settings
 
@@ -17,4 +18,10 @@ celery_app.conf.update(
     enable_utc=True,
     task_track_started=True,
     task_time_limit=60 * 30,
+    task_queues=(
+        Queue("video",  routing_key="video"),
+        Queue("vision", routing_key="vision"),
+    ),
+    task_default_queue="video",
+    task_default_routing_key="video",
 )

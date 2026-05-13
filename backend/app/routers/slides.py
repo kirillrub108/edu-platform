@@ -8,9 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
 from app.database import get_db
-from app.dependencies import require_teacher
-from app.models.course import Course
-from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
+from app.dependencies import get_owned_lesson, require_teacher
+from app.models.lesson import CreationMode, Lesson, LessonStatus
 from app.models.slide_text import SlideText
 from app.models.user import User
 from app.schemas.slide import (
@@ -27,16 +26,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/lessons", tags=["slides"])
 
-
-async def _get_owned_lesson(lesson_id: UUID, user: User, db: AsyncSession) -> Lesson:
-    lesson = await db.get(Lesson, lesson_id)
-    if not lesson:
-        raise HTTPException(status_code=404, detail="Lesson not found")
-    module = await db.get(Module, lesson.module_id)
-    course = await db.get(Course, module.course_id)
-    if course.owner_id != user.id:
-        raise HTTPException(status_code=403, detail="Not your lesson")
-    return lesson
 
 
 def _row_to_out(row: SlideText, user_id: str) -> SlideTextOut:
@@ -59,10 +48,9 @@ def _row_to_out(row: SlideText, user_id: str) -> SlideTextOut:
 @router.post("/{lesson_id}/analyze")
 async def analyze_lesson_slides(
     lesson_id: UUID,
-    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await _get_owned_lesson(lesson_id, user, db)
     if not lesson.pptx_path:
         raise HTTPException(
             status_code=400,
@@ -73,7 +61,9 @@ async def analyze_lesson_slides(
     lesson.status = LessonStatus.analyzing
     await db.commit()
 
-    task = analyze_presentation_task.delay(str(lesson.id), lesson.pptx_path)
+    task = analyze_presentation_task.apply_async(
+        args=[str(lesson.id), lesson.pptx_path], queue="vision"
+    )
     lesson.analyze_task_id = task.id
     await db.commit()
     return {"task_id": task.id, "lesson_id": str(lesson.id), "status": "analyzing"}
@@ -86,10 +76,8 @@ async def analyze_lesson_slides(
 async def analysis_status(
     lesson_id: UUID,
     task_id: str,
-    user: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
+    _lesson: Lesson = Depends(get_owned_lesson),
 ):
-    await _get_owned_lesson(lesson_id, user, db)
     result = AsyncResult(task_id, app=celery_app)
 
     payload: dict = {"status": result.status, "task_id": task_id}
@@ -115,9 +103,9 @@ async def analysis_status(
 async def list_slides(
     lesson_id: UUID,
     user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await _get_owned_lesson(lesson_id, user, db)
     rows_q = await db.execute(
         select(SlideText)
         .where(SlideText.lesson_id == lesson_id)
@@ -138,9 +126,9 @@ async def update_slide_text(
     slide_id: UUID,
     data: SlideTextUpdate,
     user: User = Depends(require_teacher),
+    _lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_owned_lesson(lesson_id, user, db)
     row = await db.get(SlideText, slide_id)
     if not row or row.lesson_id != lesson_id:
         raise HTTPException(status_code=404, detail="Slide not found")
@@ -156,9 +144,9 @@ async def regenerate_slide_text(
     lesson_id: UUID,
     slide_id: UUID,
     user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await _get_owned_lesson(lesson_id, user, db)
     row = await db.get(SlideText, slide_id)
     if not row or row.lesson_id != lesson_id:
         raise HTTPException(status_code=404, detail="Slide not found")

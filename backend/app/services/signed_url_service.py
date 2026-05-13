@@ -28,12 +28,10 @@ def _normalize(file_path: str) -> str:
 def generate_signed_url(
     file_path: str, user_id: str, expires_in: int | None = None
 ) -> str:
-    """Return a signed URL path: `/files/<file_path>?expires=...&sig=...`.
+    """Return a signed URL path: `/files/<file_path>?uid=...&expires=...&sig=...`.
 
-    `user_id` is folded into the HMAC payload but never serialised into the URL
-    — the file endpoint reads it from the caller's JWT instead, so it never
-    appears in server logs, browser history, or Referer headers.
-    Callers that need a fully-qualified URL prepend `settings.BASE_URL`.
+    `uid` is included in the URL so the file endpoint can verify the HMAC
+    without requiring a JWT — this allows <img> tags to load files directly.
     """
     if expires_in is None:
         expires_in = settings.SIGNED_URL_EXPIRES_IN
@@ -41,7 +39,7 @@ def generate_signed_url(
     clean_path = _normalize(file_path)
     payload = f"{clean_path}:{user_id}:{expires_at}"
     sig = _sign(payload)
-    query = urlencode({"expires": expires_at, "sig": sig})
+    query = urlencode({"uid": user_id, "expires": expires_at, "sig": sig})
     return f"/files/{clean_path}?{query}"
 
 

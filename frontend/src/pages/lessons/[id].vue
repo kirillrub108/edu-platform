@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronLeft, Upload, FileText, Sparkles, Video, CheckCircle2, ArrowDown, AlertCircle } from 'lucide-vue-next'
+import { ChevronLeft, Upload, FileText, Sparkles, Video, CheckCircle2, ArrowDown, AlertCircle, Square } from 'lucide-vue-next'
 import { CreationMode, type CreationModeValue } from '~/composables/useCreationMode'
 
 definePageMeta({ middleware: ['auth', 'teacher'] })
@@ -379,7 +379,29 @@ const generateVideo = async () => {
   }
 }
 
+const cancellingVideo = ref(false)
+
+const cancelVideo = async () => {
+  cancellingVideo.value = true
+  try {
+    await apiFetch(`/lessons/${route.params.id}/cancel-video`, { method: 'POST' })
+    stopPolling()
+    stopStatusPolling()
+    generating.value = false
+    taskStatus.value = ''
+    taskMeta.value = null
+    taskError.value = ''
+    await load()
+  } catch {
+    // ignore
+  } finally {
+    cancellingVideo.value = false
+  }
+}
+
 const lessonStatusForBadge = computed(() => {
+  if (analyzing.value) return 'analyzing'
+  if (generating.value) return 'processing'
   const s = lesson.value?.status
   if (s === 'draft' || s === 'analyzing' || s === 'ready_for_edit'
       || s === 'processing' || s === 'published' || s === 'error') return s
@@ -396,6 +418,18 @@ onUnmounted(() => {
 const isAuto = computed(() => mode.value === CreationMode.PRESENTATION_AUTO)
 const isManual = computed(() => mode.value === CreationMode.PRESENTATION_AND_TEXT)
 const showPipeline = computed(() => generating.value || taskStatus.value === 'PROGRESS' || lesson.value?.status === 'processing')
+
+const canGenerateVideo = computed(() => {
+  if (!lesson.value?.pptx_path) return false
+  if (generating.value || lesson.value.status === 'processing') return false
+  if (isAuto.value) {
+    return lesson.value.status === 'ready_for_edit' || lesson.value.status === 'published'
+  }
+  if (isManual.value) {
+    return script.value.trim().length > 0
+  }
+  return false
+})
 </script>
 
 <template>
@@ -559,7 +593,7 @@ const showPipeline = computed(() => generating.value || taskStatus.value === 'PR
           <UiButton
             variant="primary"
             :loading="analyzing"
-            :disabled="!lesson.pptx_path"
+            :disabled="!lesson.pptx_path || generating || lesson.status === 'processing'"
             @click="startAnalyze"
           >
             <template #icon><Sparkles class="w-4 h-4" /></template>
@@ -568,6 +602,7 @@ const showPipeline = computed(() => generating.value || taskStatus.value === 'PR
           <UiButton
             v-if="lesson.status === 'ready_for_edit'"
             variant="secondary"
+            :disabled="generating || lesson.status === 'processing'"
             @click="showSlideEditor = true"
           >
             Открыть редактор текста →
@@ -608,16 +643,34 @@ const showPipeline = computed(() => generating.value || taskStatus.value === 'PR
           <span>{{ taskError }}</span>
         </div>
 
-        <UiButton
-          variant="primary"
-          :loading="generating || lesson.status === 'processing'"
-          @click="generateVideo"
-        >
-          <template #icon><Video class="w-4 h-4" /></template>
-          <span v-if="generating || lesson.status === 'processing'">Генерируется…</span>
-          <span v-else-if="lesson.status === 'published'">Перегенерировать</span>
-          <span v-else>Создать видео</span>
-        </UiButton>
+        <div class="flex gap-2 flex-wrap items-center">
+          <UiButton
+            variant="primary"
+            :loading="generating || lesson.status === 'processing'"
+            :disabled="!canGenerateVideo"
+            @click="generateVideo"
+          >
+            <template #icon><Video class="w-4 h-4" /></template>
+            <span v-if="generating || lesson.status === 'processing'">Генерируется…</span>
+            <span v-else-if="lesson.status === 'published'">Перегенерировать</span>
+            <span v-else>Создать видео</span>
+          </UiButton>
+          <UiButton
+            v-if="generating || lesson.status === 'processing'"
+            variant="secondary"
+            :loading="cancellingVideo"
+            @click="cancelVideo"
+          >
+            <template #icon><Square class="w-4 h-4" /></template>
+            Остановить
+          </UiButton>
+        </div>
+        <p v-if="!canGenerateVideo && !generating && lesson.status !== 'processing'" class="mt-2 text-xs text-gray-400">
+          <template v-if="!lesson.pptx_path">Сначала загрузите презентацию</template>
+          <template v-else-if="isAuto && analyzing">Дождитесь завершения анализа</template>
+          <template v-else-if="isAuto && lesson.status !== 'ready_for_edit' && lesson.status !== 'published'">Сначала запустите анализ презентации</template>
+          <template v-else-if="isManual && !script.trim()">Введите текст доклада</template>
+        </p>
       </section>
 
       <!-- 5. Video player -->

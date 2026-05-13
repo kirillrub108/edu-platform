@@ -65,12 +65,42 @@ services:
     networks:
       - edu-network
 
-  celery_worker:
+  celery_video:
     build:
       context: ./backend
       dockerfile: Dockerfile
     user: "1000:1000"
-    command: celery -A app.celery_app worker --loglevel=info --pool=prefork -c 2
+    command: >
+      celery -A app.celery_app worker
+      --pool=prefork
+      --concurrency=2
+      --queues=video
+      --hostname=video@%h
+      --loglevel=info
+    env_file:
+      - .env
+    volumes:
+      - ./backend/storage:/app/storage
+      - ./backend/app:/app/app
+    depends_on:
+      - backend
+      - redis
+      - silero-tts
+    networks:
+      - edu-network
+
+  celery_vision:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    command: >
+      celery -A app.celery_app worker
+      --pool=prefork
+      --concurrency=1
+      --queues=vision
+      --hostname=vision@%h
+      --loglevel=info
     env_file:
       - .env
     volumes:
