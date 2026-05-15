@@ -999,8 +999,6 @@ docker-compose exec backend alembic upgrade head
 
 | Проблема | Симптом |
 |---|---|
-| **`finally rmtree(work_dir)`** удаляет всё, даже если задача упала | потеряли возможность post-mortem |
-| **LLM может вернуть `len(chunks) != N`** — есть fallback, но качество резко падает | в логах warning, пользователь не видит |
 
 ## 7.4 DX и поддерживаемость
 

@@ -358,6 +358,7 @@ const generateVideo = async () => {
 
   taskError.value = ''
   taskMeta.value = null
+  warningDismissed.value = false
   generating.value = true
   stopPolling()
   stopStatusPolling()
@@ -381,6 +382,7 @@ const generateVideo = async () => {
 }
 
 const cancellingVideo = ref(false)
+const warningDismissed = ref(false)
 
 const cancelVideo = async () => {
   cancellingVideo.value = true
@@ -462,6 +464,21 @@ const canGenerateVideo = computed(() => {
         <StatusBadge :status="lessonStatusForBadge" />
       </div>
     </div>
+
+      <!-- LLM fallback warning -->
+      <div
+        v-if="lesson.last_warning && !warningDismissed"
+        class="flex items-start gap-3 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-2xl p-4"
+      >
+        <AlertCircle class="w-5 h-5 shrink-0 mt-0.5 text-amber-500" />
+        <span class="flex-1">{{ lesson.last_warning }}</span>
+        <button
+          type="button"
+          class="shrink-0 text-amber-500 hover:text-amber-700 transition leading-none"
+          aria-label="Закрыть"
+          @click="warningDismissed = true"
+        >✕</button>
+      </div>
 
       <!-- 1. Choose creation mode -->
       <section class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">

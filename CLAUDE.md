@@ -23,7 +23,8 @@ docker-compose up --build
 docker-compose exec backend alembic revision --autogenerate -m "describe change"
 docker-compose exec backend alembic upgrade head     # usually unnecessary, see "Migrations" below
 
-# Backend tests (pytest is in requirements? — run inside the backend image):
+# Backend tests — run inside the backend image. Coverage is currently minimal
+# (only tests/test_slide_renderer.py exists), so a green run does not imply correctness.
 docker-compose exec backend pytest                    # all
 docker-compose exec backend pytest tests/test_slide_renderer.py::test_name   # single
 
@@ -47,7 +48,7 @@ Open URLs:
 `docker-compose.yml` runs `celery_video` (queue=`video`, concurrency=2) and `celery_vision` (queue=`vision`, concurrency=1) separately. When adding a new task, route it to the right queue or the worker won't pick it up. (Note: `docs/ARCHITECTURE.md` §8.3 still describes the old single-worker setup — the code is the source of truth.)
 
 ### Migrations auto-apply on backend start
-`app/main.py:_ensure_schema_at_head` runs `alembic upgrade head` inside the FastAPI lifespan. Forgetting to generate a migration after a model change = backend refuses to start. New models **must** be re-exported in `app/models/__init__.py`, otherwise Alembic autogenerate won't see them.
+`app/main.py:_ensure_schema_at_head` runs `alembic upgrade head` inside the FastAPI lifespan. Forgetting to generate a migration after a model change = backend refuses to start. New models **must** be re-exported in `app/models/__init__.py` (along with any new enums — `LessonStatus`, `CreationMode`, `ContentType`, `AccessMode`, `UserRole` follow this pattern), otherwise Alembic autogenerate won't see them.
 
 ### Local storage, not S3
 Everything (uploaded PPTX, generated PNG/WAV/MP4, caches) is in `backend/storage/`, bind-mounted into the backend and both celery containers. Exposed read-only via FastAPI `StaticFiles` at `/files/*` (URLs are signed — see `services/signed_url_service.py`). Cache directories `slides_cache/` and `summaries_cache/` are keyed by content hash; deleting them is safe and just forces re-rendering.
@@ -62,10 +63,13 @@ CORS is added **last** intentionally — `add_middleware` prepends, so the last-
 Without it you get `MissingGreenlet` when serializing a row right after `UPDATE` (asyncpg refetches the server-generated value). Existing models already set this — copy the pattern for new ones.
 
 ### Frontend state
-Pinia is installed (`@pinia/nuxt` in `nuxt.config.ts` `modules`), and there's a `src/stores/` directory. There are also legacy `useState('key', factory)` singletons in some composables (`useAuth`, `useCreationMode`). When extending, follow the convention already used by the page you're editing — don't mix paradigms in the same feature.
+Pinia is the canonical state layer — auth lives in `src/stores/auth.ts` (`useAuthStore`). `composables/useCreationMode.ts` is *not* a state singleton, just a module of constants (`CreationMode`, `CREATION_MODE_CARDS`). When adding new shared state, prefer a Pinia store over `useState('key', factory)` singletons.
 
 ### API client and auth
-`composables/useApi.ts` is the single fetch wrapper: adds `Authorization: Bearer …` from `localStorage`, and on 401 clears tokens and redirects to `/login` (refresh-token flow is *not* wired — see `KNOWN_PROBLEMS.md` §1.2 before adding it).
+`composables/useApi.ts` is the single fetch wrapper. It reads `Authorization: Bearer …` from `localStorage`, proactively refreshes the access token ~5s before its `exp` (decoded client-side without signature verification), and uses a **singleflight `refreshPromise`** so a burst of parallel 401s triggers only one `/auth/refresh` rotation. If refresh fails, tokens are cleared and the user is redirected to `/login`. Don't add a second refresh path — extend `useApi` instead, or you'll race the singleflight.
+
+### Rate limiting
+`slowapi` is wired in `app/limiter.py` and registered on `app.state.limiter` in `main.py`, with a dedicated 429 handler. Per-route limits use the `@limiter.limit(...)` decorator (see `routers/auth.py`). Tests that hit limited endpoints in a loop will start 429-ing — use distinct client IPs or reset the limiter in fixtures.
 
 ### Routing rules
 - `middleware/auth.ts` — global guard for authenticated routes

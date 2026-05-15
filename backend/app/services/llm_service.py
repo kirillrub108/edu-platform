@@ -111,8 +111,12 @@ class LLMService:
         script: str,
         slides_count: int,
         slide_texts: list[str] | None = None,
-    ) -> list[str]:
-        """Split script into N chunks aligned with slides, with SSML annotation."""
+    ) -> tuple[list[str], str | None]:
+        """Split script into N chunks aligned with slides, with SSML annotation.
+
+        Returns (chunks, warning) where warning is non-None when the LLM returned
+        the wrong number of chunks and fallback splitting was used.
+        """
         anchors = ""
         if slide_texts:
             anchor_lines = []
@@ -131,11 +135,17 @@ class LLMService:
             data = json.loads(raw)
             chunks = data.get("chunks", [])
             if len(chunks) == slides_count and all(chunks):
-                return [str(c) for c in chunks]
-            logger.warning("LLM returned %d SSML chunks for %d slides", len(chunks), slides_count)
+                return [str(c) for c in chunks], None
+            got = len(chunks)
+            logger.warning("LLM returned %d SSML chunks for %d slides", got, slides_count)
+            warning = (
+                f"LLM вернул {got} чанков вместо {slides_count}. "
+                "Использован fallback — качество озвучки может быть ниже."
+            )
+            return self._fallback_ssml(script, slides_count), warning
         except json.JSONDecodeError:
             logger.error("Failed to parse LLM SSML JSON: %s", raw[:300])
-        return self._fallback_ssml(script, slides_count)
+        return self._fallback_ssml(script, slides_count), None
 
     def _fallback_ssml(self, text: str, n: int) -> list[str]:
         sentences = re.split(r"(?<=[.!?])\s+", text.strip())

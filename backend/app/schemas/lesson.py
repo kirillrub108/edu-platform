@@ -41,6 +41,7 @@ class LessonOut(BaseModel):
     creation_mode: CreationMode
     analyze_task_id: str | None = None
     video_task_id: str | None = None
+    last_warning: str | None = None
     created_at: datetime
     updated_at: datetime
 

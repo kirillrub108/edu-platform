@@ -54,21 +54,25 @@ def _set_status(
 
 def _split_and_annotate(
     script: str, slides_count: int, slide_texts: list[str] | None = None
-) -> list[str]:
-    """Call async LLM service from sync Celery context to get SSML-annotated chunks."""
+) -> tuple[list[str], str | None]:
+    """Call async LLM service from sync Celery context to get SSML-annotated chunks.
+
+    Returns (chunks, warning) — warning is non-None when fallback was used due to a
+    chunk-count mismatch. On LLM exception, falls back silently (no warning).
+    """
     try:
-        chunks = asyncio.run(
+        chunks, warning = asyncio.run(
             llm_service.split_and_annotate_ssml(script, slides_count, slide_texts)
         )
         if len(chunks) == slides_count and all(chunks):
-            return chunks
+            return chunks, warning
         logger.warning(
             "LLM returned %d SSML chunks for %d slides, using fallback",
             len(chunks), slides_count,
         )
     except Exception:
         logger.exception("LLM SSML split failed, using fallback")
-    return llm_service._fallback_ssml(script, slides_count)
+    return llm_service._fallback_ssml(script, slides_count), None
 
 
 @celery_app.task(bind=True, name="generate_video_lesson", queue="video")
@@ -80,6 +84,7 @@ def generate_video_lesson(
     work_dir = os.path.join(settings.STORAGE_PATH, "video_jobs", lesson_id)
     slides_cache_dir = os.path.join(settings.STORAGE_PATH, "slides_cache")
     os.makedirs(work_dir, exist_ok=True)
+    _success = False
 
     def _progress(step: str, done: int, total: int) -> None:
         self.update_state(
@@ -89,6 +94,12 @@ def generate_video_lesson(
 
     with SyncSession() as session:
         try:
+            # Reset any previous warning from a prior run before starting fresh.
+            lesson_reset = session.get(Lesson, lesson_uuid)
+            if lesson_reset:
+                lesson_reset.last_warning = None
+                session.commit()
+
             _set_status(session, lesson_uuid, LessonStatus.processing)
             _progress("slides", 0, 1)
 
@@ -167,9 +178,14 @@ def generate_video_lesson(
             else:
                 base_script = (lesson.script or lesson.text_content or "").strip()
                 if base_script and len(base_script.split()) > 5:
-                    slide_scripts = _split_and_annotate(
+                    slide_scripts, llm_warning = _split_and_annotate(
                         base_script, total_slides, slide_summaries or None
                     )
+                    if llm_warning:
+                        llm_lesson = session.get(Lesson, lesson_uuid)
+                        if llm_lesson:
+                            llm_lesson.last_warning = llm_warning
+                            session.commit()
                 else:
                     slide_scripts = [f"<p>Слайд {i + 1}</p>" for i in range(total_slides)]
 
@@ -268,6 +284,7 @@ def generate_video_lesson(
             video_url = storage_service.get_url(video_relative, str(owner_course.owner_id))
             _set_status(session, lesson_uuid, LessonStatus.published, video_url)
 
+            _success = True
             return {"status": "ok", "video_url": video_url}
 
         except Exception as exc:
@@ -276,5 +293,10 @@ def generate_video_lesson(
             return {"status": "error", "error": str(exc)}
 
         finally:
-            if os.path.exists(work_dir):
-                shutil.rmtree(work_dir, ignore_errors=True)
+            if work_dir and os.path.exists(work_dir):
+                if _success:
+                    shutil.rmtree(work_dir, ignore_errors=True)
+                else:
+                    logger.warning(
+                        "work_dir retained for post-mortem: %s", work_dir
+                    )
