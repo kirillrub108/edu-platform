@@ -8,7 +8,7 @@ from app.celery_app import celery_app
 from app.database import get_db
 from app.dependencies import get_owned_lesson, require_teacher
 from app.models.course import Course
-from app.models.lesson import Lesson, Module
+from app.models.lesson import Lesson, LessonStatus, Module
 from app.models.user import User
 from app.schemas.lesson import (
     LessonCreate,
@@ -154,22 +154,50 @@ async def cancel_video(
     return {"cancelled": True, "lesson_id": str(lesson_id)}
 
 
+_LESSON_STATUS_TO_CELERY: dict[LessonStatus, str] = {
+    LessonStatus.draft: "PENDING",
+    LessonStatus.analyzing: "PROGRESS",
+    LessonStatus.ready_for_edit: "PENDING",
+    LessonStatus.processing: "PROGRESS",
+    LessonStatus.published: "SUCCESS",
+    LessonStatus.error: "FAILURE",
+}
+
+
 @router.get("/{lesson_id}/task-status/{task_id}", response_model=TaskStatusResponse)
 async def task_status(
     lesson_id: UUID,
     task_id: str,
-    _lesson: Lesson = Depends(get_owned_lesson),
+    lesson: Lesson = Depends(get_owned_lesson),
 ):
-    result = AsyncResult(task_id, app=celery_app)
+    celery_status = _LESSON_STATUS_TO_CELERY.get(lesson.status, "PENDING")
 
-    payload: dict = {"task_id": task_id, "status": result.status, "result": None, "meta": None}
+    payload: dict = {
+        "task_id": task_id,
+        "status": celery_status,
+        "result": None,
+        "meta": None,
+        "progress_pct": None,
+        "error": None,
+    }
 
-    if result.state == "PROGRESS":
-        payload["meta"] = result.info  # {"step": ..., "done": ..., "total": ...}
-    elif result.ready():
-        try:
-            payload["result"] = result.result if isinstance(result.result, dict) else {"value": str(result.result)}
-        except Exception:
-            payload["result"] = None
+    if lesson.status == LessonStatus.published:
+        payload["result"] = {"video_url": lesson.video_url}
+        return payload
+
+    if lesson.status == LessonStatus.error:
+        payload["error"] = "Video generation failed"
+        return payload
+
+    # Try Redis for live progress details; fails gracefully if Redis is down.
+    try:
+        ar = AsyncResult(task_id, app=celery_app)
+        if ar.state == "PROGRESS" and isinstance(ar.info, dict):
+            payload["meta"] = ar.info
+            done = ar.info.get("done", 0)
+            total = ar.info.get("total", 1) or 1
+            payload["progress_pct"] = round(done / total * 100)
+    except Exception:
+        pass
 
     return payload

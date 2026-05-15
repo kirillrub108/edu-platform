@@ -27,7 +27,7 @@ export default defineNuxtPlugin(() => {
     }, 150)
   }
 
-  router.beforeEach((_, from) => { save(from.fullPath) })
+  router.beforeEach((_, from) => { if (from.matched.length) save(from.fullPath) })
   window.addEventListener('scroll', onScroll, { passive: true })
   window.addEventListener('beforeunload', () => { save(router.currentRoute.value.fullPath) })
 })

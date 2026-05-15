@@ -11,7 +11,7 @@ export default <RouterConfig>{
     if (typeof sessionStorage !== 'undefined') {
       try {
         const saved = sessionStorage.getItem('scroll:' + to.fullPath)
-        if (saved && Number(saved) > 0) return false
+        if (saved != null && Number.isFinite(Number(saved)) && Number(saved) >= 0) return false
       } catch { /* private mode */ }
     }
 

@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     # Signed URLs (HMAC-protected /files/*). Lifetime, in seconds.
     SIGNED_URL_EXPIRES_IN: int = 3600
 
+    # In-memory slide-PNG cache (TTLCache). Keyed by MD5+DPI of the source file.
+    SLIDES_CACHE_TTL_SECONDS: int = 86400
+    SLIDES_CACHE_MAX_SIZE: int = 256
+
     # CORS — accepts a comma-separated string from env (CORS_ORIGINS=a,b,c) or
     # a JSON array. Use "*" to allow any origin in dev.
     CORS_ORIGINS: List[str] = [

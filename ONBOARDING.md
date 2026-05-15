@@ -989,16 +989,12 @@ docker-compose exec backend alembic upgrade head
 
 | Проблема | Где | Что произойдёт |
 |---|---|---|
-| **N+1 в `_get_owned_lesson`** | `routers/lessons.py:26-34` и `routers/slides.py:31-39` | три запроса (lesson → module → course) на каждом эндпоинте; стоит сделать join или selectinload |
-| **Один Celery worker на всё** | `docker-compose.yml` | анализ блокирует генерацию; нужен отдельный queue per task |
 | **Ollama локально + qwen2.5vl:7b** | `vision_analysis.py` | ~30-60 секунд на слайд; на презентации из 30 слайдов — 15-30 минут |
 | **LibreOffice — единственный конвертер** | `video_service.py` | падает на нестандартных шрифтах, эмодзи, сложных анимациях |
 | **`silero-tts` HTTP** не имеет очереди | внешний сервис | при 4 параллельных запросах он сам очередит; >10 — может вернуть 500 |
 | **Два thread-pool в Celery (4 + 3) на каждом таске** | `tasks/video_pipeline.py:217` | 7 потоков × 2 prefork worker = до 14 потоков → CPU contention с LibreOffice |
 | **Storage локальный** | везде | один backend контейнер = single-point-of-failure для файлов |
 | **`StaticFiles` через FastAPI** | `main.py:161` | плохо отдаёт большие MP4 |
-| **Кеш PPTX по md5 файла, не по `lesson_id`** | `video_service.py:113` | если две лекции загрузили **тот же** файл — кеш переиспользуется (это плюс), но кеш не очищается по TTL и растёт бесконечно |
-| **`AsyncResult` после рестарта Redis** | `routers/lessons.py:147` | теряет статус задачи, фронт не сможет понять что произошло |
 
 ## 7.3 Корректность
 

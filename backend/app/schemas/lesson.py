@@ -79,3 +79,5 @@ class TaskStatusResponse(BaseModel):
     status: str
     result: dict | None = None
     meta: dict | None = None
+    progress_pct: int | None = None
+    error: str | None = None

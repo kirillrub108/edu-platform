@@ -20,7 +20,7 @@ export async function restoreScroll(): Promise<void> {
   // Use window.location instead of useRoute() — useRoute()/useNuxtApp() may
   // become unreliable after await in async lifecycle hooks (lost Vue instance
   // context). window.location is always available and reflects the actual URL.
-  const path = window.location.pathname + window.location.search
+  const path = window.location.pathname + window.location.search + window.location.hash
 
   let saved: string | null = null
   try {
@@ -29,7 +29,7 @@ export async function restoreScroll(): Promise<void> {
 
   if (!saved) return
   const y = Number(saved)
-  if (!Number.isFinite(y) || y <= 0) return
+  if (!Number.isFinite(y) || y < 0) return
 
   await nextTick()
 

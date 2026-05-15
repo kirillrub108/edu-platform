@@ -5,11 +5,15 @@ import os
 import re
 import shutil
 import subprocess
+import threading
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from cachetools import TTLCache
 from pptx import Presentation
+
+from app.config import settings
 
 # Bundled LibreOffice font-substitution profile; maps Windows/macOS emoji fonts
 # (Segoe UI Emoji, Apple Color Emoji) to Noto Color Emoji which is installed in
@@ -119,6 +123,14 @@ def _pptx_cache_key(pptx_path: str) -> str:
     return f"{h.hexdigest()}_dpi{_SLIDE_DPI}"
 
 
+# TTLCache is not thread-safe; the Lock serialises concurrent get/set.
+_slides_cache: TTLCache = TTLCache(
+    maxsize=settings.SLIDES_CACHE_MAX_SIZE,
+    ttl=settings.SLIDES_CACHE_TTL_SECONDS,
+)
+_slides_cache_lock = threading.Lock()
+
+
 class VideoService:
     FRAME_RATE = 25
     # Concurrent FFmpeg processes for segment encoding. 3 on a 4-core machine
@@ -164,6 +176,16 @@ class VideoService:
         # ── cache lookup (PPTX only — PDFs are read directly, no conversion) ──
         if cache_dir and suffix != ".pdf":
             cache_key = _pptx_cache_key(pptx_path)
+
+            with _slides_cache_lock:
+                cached_images = _slides_cache.get(cache_key)
+            if cached_images:
+                logger.info(
+                    "Slide memory-cache hit (%s…) — returning %d images",
+                    cache_key[:8], len(cached_images),
+                )
+                return cached_images
+
             cached_dir = os.path.join(cache_dir, cache_key)
             cached_images = sorted(
                 (str(p) for p in Path(cached_dir).glob("slide-*.png")),
@@ -171,9 +193,11 @@ class VideoService:
             )
             if cached_images:
                 logger.info(
-                    "Slide cache hit (%s…) — returning %d cached images",
+                    "Slide disk-cache hit (%s…) — returning %d cached images",
                     cache_key[:8], len(cached_images),
                 )
+                with _slides_cache_lock:
+                    _slides_cache[cache_key] = cached_images
                 return cached_images
 
         os.makedirs(output_dir, exist_ok=True)
@@ -227,6 +251,10 @@ class VideoService:
             logger.info(
                 "Cached %d slide images → %s…", len(images), cache_key[:8]
             )
+            with _slides_cache_lock:
+                _slides_cache[cache_key] = [
+                    os.path.join(cached_dir, Path(img).name) for img in images
+                ]
 
         return images
 
