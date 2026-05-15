@@ -36,3 +36,4 @@ class AnalyzeStatusResponse(BaseModel):
     total: int | None = None
     task_id: str | None = None
     error: str | None = None
+    traceback: str | None = None

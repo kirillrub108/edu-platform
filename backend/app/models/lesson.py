@@ -41,6 +41,12 @@ class Module(Base):
     title = Column(String(255), nullable=False)
     order = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     course = relationship("Course", back_populates="modules")
     lessons = relationship(
@@ -117,5 +123,12 @@ class QuizQuestion(Base):
     options = Column(JSONB, nullable=False)
     correct_index = Column(Integer, nullable=False)
     order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     lesson = relationship("Lesson", back_populates="quiz_questions")

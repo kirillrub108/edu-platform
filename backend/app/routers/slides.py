@@ -91,7 +91,10 @@ async def analysis_status(
             }
         )
     elif result.ready():
-        if isinstance(result.result, dict):
+        if result.failed():
+            payload["error"] = str(result.result) if result.result is not None else "Analysis failed"
+            payload["traceback"] = result.traceback
+        elif isinstance(result.result, dict):
             err = result.result.get("error")
             if err:
                 payload["error"] = err

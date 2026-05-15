@@ -185,13 +185,13 @@ async def task_status(
         payload["result"] = {"video_url": lesson.video_url}
         return payload
 
-    if lesson.status == LessonStatus.error:
-        payload["error"] = "Video generation failed"
-        return payload
-
     # Try Redis for live progress details; fails gracefully if Redis is down.
     try:
         ar = AsyncResult(task_id, app=celery_app)
+        if lesson.status == LessonStatus.error:
+            payload["error"] = str(ar.result) if ar.result is not None else "Video generation failed"
+            payload["traceback"] = ar.traceback
+            return payload
         if ar.state == "PROGRESS" and isinstance(ar.info, dict):
             payload["meta"] = ar.info
             done = ar.info.get("done", 0)

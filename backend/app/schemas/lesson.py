@@ -81,3 +81,4 @@ class TaskStatusResponse(BaseModel):
     meta: dict | None = None
     progress_pct: int | None = None
     error: str | None = None
+    traceback: str | None = None

@@ -29,6 +29,12 @@ class Enrollment(Base):
         UUID(as_uuid=True), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
     )
     enrolled_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     student = relationship("User", back_populates="enrollments")
     course = relationship("Course", back_populates="enrollments")
@@ -53,5 +59,11 @@ class LessonProgress(Base):
     is_completed = Column(Boolean, default=False, nullable=False)
     quiz_score = Column(Float, nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
     enrollment = relationship("Enrollment", back_populates="progress")
