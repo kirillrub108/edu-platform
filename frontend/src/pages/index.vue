@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Upload, Sparkles, Video, ArrowRight, Play, Zap, Brain, Monitor } from 'lucide-vue-next'
 
-definePageMeta({ layout: 'bare' })
+definePageMeta({ layout: 'bare', middleware: ['guest'] })
 
 useSeoMeta({
   title: 'EduAI — Создавайте видеокурсы с ИИ за минуты',
