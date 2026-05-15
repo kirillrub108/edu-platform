@@ -25,7 +25,10 @@ const enroll = async () => {
   await load()
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await restoreScroll()
+})
 </script>
 
 <template>

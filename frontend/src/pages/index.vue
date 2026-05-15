@@ -31,6 +31,8 @@ const stats = [
   { icon: Brain,   value: 'GPT-4o', label: 'vision-анализ слайдов' },
   { icon: Monitor, value: 'HD',     label: '1080p, 48 kHz озвучка' },
 ]
+
+onMounted(restoreScroll)
 </script>
 
 <template>

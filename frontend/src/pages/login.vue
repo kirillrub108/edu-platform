@@ -19,6 +19,8 @@ const submit = async () => {
     loading.value = false
   }
 }
+
+onMounted(restoreScroll)
 </script>
 
 <template>

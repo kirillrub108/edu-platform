@@ -102,7 +102,10 @@ const statusColor: Record<string, string> = {
   error: 'bg-red-100 text-red-600',
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await restoreScroll()
+})
 </script>
 
 <template>

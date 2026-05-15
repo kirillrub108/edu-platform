@@ -1,5 +1,6 @@
 # Agent
 .claude
+CLAUDE.local.md
 
 # Python
 __pycache__/
@@ -20,6 +21,7 @@ env/
 .idea/
 *.swp
 *.swo
+.vscode
 
 # OS
 .DS_Store

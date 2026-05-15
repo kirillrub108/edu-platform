@@ -28,7 +28,10 @@ const stats = computed(() => ({
   lessons: courses.value.reduce((a, c) => a + (c.lessons_count ?? 0), 0),
 }))
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await restoreScroll()
+})
 </script>
 
 <template>

@@ -21,7 +21,10 @@ const markComplete = async () => {
   await apiFetch(`/students/lessons/${activeLesson.value.id}/complete`, { method: 'POST' })
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  await restoreScroll()
+})
 </script>
 
 <template>
