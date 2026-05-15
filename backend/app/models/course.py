@@ -32,7 +32,7 @@ class Course(Base):
         default=AccessMode.link,
         nullable=False,
     )
-    access_code = Column(String(20), nullable=True)
+    access_code = Column(String(20), nullable=True, unique=True)
     is_published = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(

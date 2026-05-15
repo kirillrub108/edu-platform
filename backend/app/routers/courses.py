@@ -2,6 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -89,7 +90,11 @@ async def update_course(
     course = await _get_owned_course(course_id, user, db)
     for key, value in data.model_dump(exclude_unset=True).items():
         setattr(course, key, value)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="access_code already in use")
     await db.refresh(course, attribute_names=["owner"])
     return course
 

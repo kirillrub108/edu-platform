@@ -994,14 +994,11 @@ docker-compose exec backend alembic upgrade head
 | **`silero-tts` HTTP** не имеет очереди | внешний сервис | при 4 параллельных запросах он сам очередит; >10 — может вернуть 500 |
 | **Два thread-pool в Celery (4 + 3) на каждом таске** | `tasks/video_pipeline.py:217` | 7 потоков × 2 prefork worker = до 14 потоков → CPU contention с LibreOffice |
 | **Storage локальный** | везде | один backend контейнер = single-point-of-failure для файлов |
-| **`StaticFiles` через FastAPI** | `main.py:161` | плохо отдаёт большие MP4 |
 
 ## 7.3 Корректность
 
 | Проблема | Симптом |
 |---|---|
-| **`access_code` не уникален** | два курса с одинаковым кодом → enroll берёт первого попавшегося |
-| **`Enrollment` UNIQUE есть, но `LessonProgress` — нет** | теоретически можно создать несколько прогрессов на один lesson внутри enrollment |
 | **`/auth/refresh` не отзывает старый refresh** | украденный refresh живёт 30 дней, нет revocation |
 | **`updated_at` не везде** (например, в `Module`) | сложно дебажить «когда изменилось» |
 | **`pptx_path` vs `video_url`: разная семантика** (см. выше) | путаница, частая ошибка при добавлении новых эндпоинтов |
