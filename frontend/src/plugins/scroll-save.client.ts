@@ -27,7 +27,13 @@ export default defineNuxtPlugin(() => {
     }, 150)
   }
 
-  router.beforeEach((_, from) => { if (from.matched.length) save(from.fullPath) })
+  // Save only when actually leaving the current page. Nuxt fires an internal
+  // self-navigation (from.fullPath === to.fullPath) right after hydration; if
+  // we save on that, window.scrollY === 0 (page just mounted, restore hasn't
+  // run yet) overwrites the value beforeunload wrote on the previous reload.
+  router.beforeEach((to, from) => {
+    if (from.matched.length && from.fullPath !== to.fullPath) save(from.fullPath)
+  })
   window.addEventListener('scroll', onScroll, { passive: true })
   window.addEventListener('beforeunload', () => { save(router.currentRoute.value.fullPath) })
 })
