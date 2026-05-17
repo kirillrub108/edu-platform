@@ -1,7 +1,8 @@
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Enum as SAEnum, ForeignKey, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -26,7 +27,9 @@ class Course(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     cover_url = Column(String(512), nullable=True)
-    owner_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    owner_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )  # noqa: E501
     access_mode = Column(
         SAEnum(AccessMode, name="access_mode"),
         default=AccessMode.link,
@@ -49,6 +52,4 @@ class Course(Base):
         cascade="all, delete-orphan",
         order_by="Module.order",
     )
-    enrollments = relationship(
-        "Enrollment", back_populates="course", cascade="all, delete-orphan"
-    )
+    enrollments = relationship("Enrollment", back_populates="course", cascade="all, delete-orphan")

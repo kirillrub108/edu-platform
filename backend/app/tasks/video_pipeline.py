@@ -68,7 +68,8 @@ def _split_and_annotate(
             return chunks, warning
         logger.warning(
             "LLM returned %d SSML chunks for %d slides, using fallback",
-            len(chunks), slides_count,
+            len(chunks),
+            slides_count,
         )
     except Exception:
         logger.exception("LLM SSML split failed, using fallback")
@@ -127,8 +128,7 @@ def generate_video_lesson(
                 .all()
             )
             per_slide_texts = [
-                ((row.edited_text or row.generated_text or "").strip())
-                for row in slide_rows
+                ((row.edited_text or row.generated_text or "").strip()) for row in slide_rows
             ]
 
             use_per_slide = (
@@ -156,9 +156,7 @@ def generate_video_lesson(
                         )
                     )
                 except Exception:
-                    logger.exception(
-                        "VLM summarisation failed; falling back to no slide hints"
-                    )
+                    logger.exception("VLM summarisation failed; falling back to no slide hints")
                     slide_summaries = []
                 logger.info(
                     "Got %d slide summaries (%d non-empty)",
@@ -202,7 +200,8 @@ def generate_video_lesson(
                     slide_scripts[i] = f"<p>{fallback_text}</p>"
                     logger.warning(
                         "Slide %d had empty SSML chunk; replaced with: %r",
-                        i + 1, slide_scripts[i],
+                        i + 1,
+                        slide_scripts[i],
                     )
             _progress("llm", 1, 1)
 
@@ -226,23 +225,17 @@ def generate_video_lesson(
 
             def _do_tts(idx: int) -> tuple[int, str]:
                 audio_path = os.path.join(audio_dir, f"slide_{idx:04d}.wav")
-                tts_service.synthesize(
-                    slide_scripts[idx], audio_path, voice=effective_voice
-                )
+                tts_service.synthesize(slide_scripts[idx], audio_path, voice=effective_voice)
                 return idx, audio_path
 
             with (
-                ThreadPoolExecutor(
-                    max_workers=_TTS_WORKERS, thread_name_prefix="tts"
-                ) as tts_pool,
+                ThreadPoolExecutor(max_workers=_TTS_WORKERS, thread_name_prefix="tts") as tts_pool,
                 ThreadPoolExecutor(
                     max_workers=_ENCODE_WORKERS, thread_name_prefix="enc"
                 ) as enc_pool,
             ):
                 # Submit all TTS tasks upfront so Silero processes them in parallel.
-                tts_futures = {
-                    tts_pool.submit(_do_tts, i): i for i in range(total_slides)
-                }
+                tts_futures = {tts_pool.submit(_do_tts, i): i for i in range(total_slides)}
                 enc_futures: dict = {}
 
                 # Chain: each completed TTS immediately spawns an encode task.
@@ -250,12 +243,13 @@ def generate_video_lesson(
                     idx, audio_path = tts_future.result()
                     tts_done += 1
                     _progress("tts", tts_done, total_slides)
-                    logger.info(
-                        "TTS %d/%d done (slide %d)", tts_done, total_slides, idx
-                    )
+                    logger.info("TTS %d/%d done (slide %d)", tts_done, total_slides, idx)
                     enc_future = enc_pool.submit(
                         video_service.encode_segment,
-                        idx, image_paths[idx], audio_path, seg_work_dir,
+                        idx,
+                        image_paths[idx],
+                        audio_path,
+                        seg_work_dir,
                     )
                     enc_futures[enc_future] = idx
 
@@ -272,7 +266,8 @@ def generate_video_lesson(
             os.makedirs(os.path.dirname(video_full), exist_ok=True)
 
             video_service.concatenate_segments(
-                segment_paths, video_full  # type: ignore[arg-type]
+                segment_paths,
+                video_full,  # type: ignore[arg-type]
             )
 
             # Sign with the course owner (teacher); read endpoints re-sign for
@@ -297,6 +292,4 @@ def generate_video_lesson(
                 if _success:
                     shutil.rmtree(work_dir, ignore_errors=True)
                 else:
-                    logger.warning(
-                        "work_dir retained for post-mortem: %s", work_dir
-                    )
+                    logger.warning("work_dir retained for post-mortem: %s", work_dir)

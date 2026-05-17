@@ -21,3 +21,6 @@ fakeredis>=2.26,<3
 
 # ── Deterministic time for token-expiry tests. ───────────────────────────────
 freezegun>=1.5,<2
+
+# ── Linter + formatter ───────────────────────────────────────────────────────
+ruff>=0.9,<1

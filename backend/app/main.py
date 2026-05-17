@@ -30,8 +30,9 @@ async def _ensure_schema_at_head() -> None:
     bootstrap, which silently diverged from migration history and caused
     'type already exists' errors on first `alembic upgrade head`.
     """
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     cfg = Config("/app/alembic.ini")
     cfg.set_main_option("script_location", "/app/alembic")
@@ -90,6 +91,7 @@ app.state.limiter = limiter
 #
 # Therefore: register `log_and_catch` FIRST, then CORS LAST.
 
+
 @app.middleware("http")
 async def log_and_catch(request: Request, call_next):
     """Access log + last-resort 500 handler. Sits inside CORS in the stack."""
@@ -139,6 +141,7 @@ app.add_middleware(
 # in the stack — its responses already flow back through CORS, so headers are
 # preserved without any extra effort. We override the defaults purely to
 # guarantee a consistent JSON shape ({"detail": ...}).
+
 
 @app.exception_handler(StarletteHTTPException)
 async def http_exception_handler(request: Request, exc: StarletteHTTPException):

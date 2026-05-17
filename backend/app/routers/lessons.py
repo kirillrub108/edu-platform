@@ -27,8 +27,8 @@ def _lesson_out(lesson: Lesson, user_id: str) -> LessonOut:
     out.video_url = storage_service.resign_url(out.video_url, user_id)
     return out
 
-router = APIRouter(prefix="/api/v1/lessons", tags=["lessons"])
 
+router = APIRouter(prefix="/api/v1/lessons", tags=["lessons"])
 
 
 @router.post("/", response_model=LessonOut, status_code=status.HTTP_201_CREATED)
@@ -117,7 +117,7 @@ async def generate_video(
     if not pptx_path:
         raise HTTPException(
             status_code=400,
-            detail="pptx_path is required (pass it in the body or upload a PPTX to the lesson first)",
+            detail="pptx_path is required (pass it in the body or upload a PPTX to the lesson first)",  # noqa: E501
         )
 
     # Persist pptx_path on the lesson so it can be reused on retries
@@ -146,6 +146,7 @@ async def cancel_video(
         lesson.video_task_id = None
 
     from app.models.lesson import LessonStatus
+
     if lesson.creation_mode and str(lesson.creation_mode) in ("presentation_auto",):
         lesson.status = LessonStatus.ready_for_edit
     else:
@@ -189,7 +190,9 @@ async def task_status(
     try:
         ar = AsyncResult(task_id, app=celery_app)
         if lesson.status == LessonStatus.error:
-            payload["error"] = str(ar.result) if ar.result is not None else "Video generation failed"
+            payload["error"] = (
+                str(ar.result) if ar.result is not None else "Video generation failed"
+            )  # noqa: E501
             payload["traceback"] = ar.traceback
             return payload
         if ar.state == "PROGRESS" and isinstance(ar.info, dict):

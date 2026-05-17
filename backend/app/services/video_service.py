@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import logging
 import os
@@ -47,12 +46,17 @@ def _get_audio_duration(path: str) -> float:
     """Return audio duration in seconds via ffprobe."""
     result = subprocess.run(
         [
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "default=noprint_wrappers=1:nokey=1",
             path,
         ],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         timeout=30,
     )
     if result.returncode != 0:
@@ -72,12 +76,12 @@ def _trim_trailing_silence(src: str, dest: str) -> bool:
     """
     r = subprocess.run(
         [
-            "ffmpeg", "-y", "-i", src,
+            "ffmpeg",
+            "-y",
+            "-i",
+            src,
             "-af",
-            "silenceremove="
-            "stop_periods=-1:"
-            "stop_duration=0.15:"
-            "stop_threshold=-40dB",
+            "silenceremove=stop_periods=-1:stop_duration=0.15:stop_threshold=-40dB",
             dest,
         ],
         capture_output=True,
@@ -86,7 +90,8 @@ def _trim_trailing_silence(src: str, dest: str) -> bool:
     if r.returncode != 0:
         logger.warning(
             "silenceremove failed for %s (exit %d), using original",
-            src, r.returncode,
+            src,
+            r.returncode,
         )
         return False
     try:
@@ -94,9 +99,7 @@ def _trim_trailing_silence(src: str, dest: str) -> bool:
     except (ValueError, RuntimeError, OSError):
         return False
     if dur < 0.1:
-        logger.warning(
-            "trimmed audio %s is too short (%.3fs), using original", src, dur
-        )
+        logger.warning("trimmed audio %s is too short (%.3fs), using original", src, dur)
         return False
     return True
 
@@ -182,7 +185,8 @@ class VideoService:
             if cached_images:
                 logger.info(
                     "Slide memory-cache hit (%s…) — returning %d images",
-                    cache_key[:8], len(cached_images),
+                    cache_key[:8],
+                    len(cached_images),
                 )
                 return cached_images
 
@@ -194,7 +198,8 @@ class VideoService:
             if cached_images:
                 logger.info(
                     "Slide disk-cache hit (%s…) — returning %d cached images",
-                    cache_key[:8], len(cached_images),
+                    cache_key[:8],
+                    len(cached_images),
                 )
                 with _slides_cache_lock:
                     _slides_cache[cache_key] = cached_images
@@ -212,13 +217,18 @@ class VideoService:
 
             lo_user_dir = os.path.join(output_dir, "_lo_profile")
             _seed_lo_profile(lo_user_dir)
-            _run([
-                "libreoffice", "--headless",
-                f"-env:UserInstallation=file://{lo_user_dir}",
-                "--convert-to", "pdf",
-                "--outdir", pdf_dir,
-                pptx_path,
-            ])
+            _run(
+                [
+                    "libreoffice",
+                    "--headless",
+                    f"-env:UserInstallation=file://{lo_user_dir}",
+                    "--convert-to",
+                    "pdf",
+                    "--outdir",
+                    pdf_dir,
+                    pptx_path,
+                ]
+            )
 
             pdf_name = Path(pptx_path).stem + ".pdf"
             pdf_path = os.path.join(pdf_dir, pdf_name)
@@ -228,12 +238,20 @@ class VideoService:
                     raise RuntimeError(f"LibreOffice produced no PDF from {pptx_path}")
                 pdf_path = str(pdfs[0])
 
-        _run([
-            "pdftoppm", "-png", "-r", str(_SLIDE_DPI),
-            "-aa", "yes", "-aaVector", "yes",
-            pdf_path,
-            os.path.join(output_dir, "slide"),
-        ])
+        _run(
+            [
+                "pdftoppm",
+                "-png",
+                "-r",
+                str(_SLIDE_DPI),
+                "-aa",
+                "yes",
+                "-aaVector",
+                "yes",
+                pdf_path,
+                os.path.join(output_dir, "slide"),
+            ]
+        )
 
         images = sorted(
             (str(p) for p in Path(output_dir).glob("slide-*.png")),
@@ -248,9 +266,7 @@ class VideoService:
             os.makedirs(cached_dir, exist_ok=True)
             for img in images:
                 shutil.copy2(img, cached_dir)
-            logger.info(
-                "Cached %d slide images → %s…", len(images), cache_key[:8]
-            )
+            logger.info("Cached %d slide images → %s…", len(images), cache_key[:8])
             with _slides_cache_lock:
                 _slides_cache[cache_key] = [
                     os.path.join(cached_dir, Path(img).name) for img in images
@@ -272,23 +288,46 @@ class VideoService:
         duration = _get_audio_duration(effective_aud)
         logger.info("Encoding segment %d (%.2fs)", idx, duration)
 
-        _run([
-            "ffmpeg", "-y",
-            "-loop", "1", "-framerate", str(self.FRAME_RATE),
-            "-t", str(duration),
-            "-i", img,
-            "-i", effective_aud,
-            # "fast" instead of "medium": ~30% quicker with no visible quality
-            # difference for still-image video (tune stillimage suppresses motion
-            # estimation anyway, making the preset gap negligible).
-            "-c:v", "libx264", "-tune", "stillimage", "-preset", "fast",
-            "-r", str(self.FRAME_RATE),
-            "-bf", "0",
-            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
-            "-pix_fmt", "yuv420p",
-            "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
-            seg_path,
-        ])
+        _run(
+            [
+                "ffmpeg",
+                "-y",
+                "-loop",
+                "1",
+                "-framerate",
+                str(self.FRAME_RATE),
+                "-t",
+                str(duration),
+                "-i",
+                img,
+                "-i",
+                effective_aud,
+                # "fast" instead of "medium": ~30% quicker with no visible quality
+                # difference for still-image video (tune stillimage suppresses motion
+                # estimation anyway, making the preset gap negligible).
+                "-c:v",
+                "libx264",
+                "-tune",
+                "stillimage",
+                "-preset",
+                "fast",
+                "-r",
+                str(self.FRAME_RATE),
+                "-bf",
+                "0",
+                "-c:a",
+                "aac",
+                "-b:a",
+                "192k",
+                "-ar",
+                "48000",
+                "-pix_fmt",
+                "yuv420p",
+                "-vf",
+                "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+                seg_path,
+            ]
+        )
         return seg_path
 
     def concatenate_segments(self, segment_paths: list[str], output_path: str) -> str:
@@ -302,14 +341,23 @@ class VideoService:
                 fh.write(f"file '{seg}'\n")
 
         logger.info("Concatenating %d segments → %s", len(segment_paths), output_path)
-        _run([
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", list_path,
-            "-c", "copy",
-            "-movflags", "+faststart",
-            output_path,
-        ])
+        _run(
+            [
+                "ffmpeg",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                list_path,
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                output_path,
+            ]
+        )
 
         for seg in segment_paths:
             try:
@@ -345,9 +393,7 @@ class VideoService:
         total = len(image_paths)
         segment_paths: list[str | None] = [None] * total
 
-        with ThreadPoolExecutor(
-            max_workers=self._ENCODE_WORKERS, thread_name_prefix="enc"
-        ) as pool:
+        with ThreadPoolExecutor(max_workers=self._ENCODE_WORKERS, thread_name_prefix="enc") as pool:
             futures = {
                 pool.submit(self.encode_segment, idx, img, aud, work_dir): idx
                 for idx, (img, aud) in enumerate(zip(image_paths, audio_paths))

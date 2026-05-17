@@ -44,7 +44,7 @@ class StorageService:
         idx = stored_url.find(marker)
         if idx == -1:
             return stored_url
-        rel_and_query = stored_url[idx + len(marker):]
+        rel_and_query = stored_url[idx + len(marker) :]
         rel = rel_and_query.split("?", 1)[0]
         return self.get_url(rel, user_id)
 

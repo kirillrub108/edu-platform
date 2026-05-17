@@ -124,9 +124,7 @@ async def get_lesson_for_student(
     return out
 
 
-async def _get_progress(
-    user: User, lesson_id: UUID, db: AsyncSession
-) -> LessonProgress:
+async def _get_progress(user: User, lesson_id: UUID, db: AsyncSession) -> LessonProgress:
     lesson = await db.get(Lesson, lesson_id)
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")

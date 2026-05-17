@@ -94,7 +94,8 @@ def _extract_rtf_text(content: bytes) -> str:
 
 def _extract_odt_text(content: bytes) -> str:
     """Extract text paragraphs from an ODT (OpenDocument Text)."""
-    from odf import teletype, text as odf_text
+    from odf import teletype
+    from odf import text as odf_text
     from odf.opendocument import load
 
     doc = load(io.BytesIO(content))
@@ -151,12 +152,18 @@ def _extract_via_libreoffice(content: bytes, suffix: str) -> str:
         try:
             subprocess.run(
                 [
-                    "libreoffice", "--headless",
+                    "libreoffice",
+                    "--headless",
                     f"-env:UserInstallation=file://{tmp}/lo_profile",
-                    "--convert-to", "txt:Text (encoded):UTF8",
-                    "--outdir", tmp, src,
+                    "--convert-to",
+                    "txt:Text (encoded):UTF8",
+                    "--outdir",
+                    tmp,
+                    src,
                 ],
-                check=True, capture_output=True, timeout=60,
+                check=True,
+                capture_output=True,
+                timeout=60,
             )
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
             raise RuntimeError(f"LibreOffice conversion failed: {exc}") from exc

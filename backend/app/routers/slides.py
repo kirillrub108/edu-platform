@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1/lessons", tags=["slides"])
 
 
-
 def _row_to_out(row: SlideText, user_id: str) -> SlideTextOut:
     image_url: str | None = None
     if row.image_path:
@@ -92,7 +91,9 @@ async def analysis_status(
         )
     elif result.ready():
         if result.failed():
-            payload["error"] = str(result.result) if result.result is not None else "Analysis failed"
+            payload["error"] = (
+                str(result.result) if result.result is not None else "Analysis failed"
+            )  # noqa: E501
             payload["traceback"] = result.traceback
         elif isinstance(result.result, dict):
             err = result.result.get("error")
@@ -110,9 +111,7 @@ async def list_slides(
     db: AsyncSession = Depends(get_db),
 ):
     rows_q = await db.execute(
-        select(SlideText)
-        .where(SlideText.lesson_id == lesson_id)
-        .order_by(SlideText.slide_number)
+        select(SlideText).where(SlideText.lesson_id == lesson_id).order_by(SlideText.slide_number)
     )
     rows = list(rows_q.scalars())
     return SlideListResponse(
@@ -175,9 +174,7 @@ async def regenerate_slide_text(
             context_lines.append(f"Слайд {s.slide_number}: {cleaned}")
     previous_context = "\n".join(context_lines)
 
-    total_q = await db.execute(
-        select(SlideText).where(SlideText.lesson_id == lesson_id)
-    )
+    total_q = await db.execute(select(SlideText).where(SlideText.lesson_id == lesson_id))
     total = len(list(total_q.scalars()))
 
     image_full_path = storage_service.get_full_path(row.image_path)

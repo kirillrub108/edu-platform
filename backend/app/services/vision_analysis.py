@@ -3,7 +3,6 @@ import base64
 import hashlib
 import logging
 import os
-from pathlib import Path
 from typing import Any
 
 import httpx
@@ -93,8 +92,9 @@ SLIDE_USER_PROMPT_TEMPLATE = """\
 
 def _encode_image(image_path: str, max_dim: int = 1280) -> str:
     """Resize image to max_dim on the longest side, convert to JPEG, return base64."""
-    from PIL import Image
     import io as _io
+
+    from PIL import Image
 
     with Image.open(image_path) as img:
         img = img.convert("RGB")
@@ -208,9 +208,7 @@ class VisionAnalysisService:
 
             results.append(text)
             if text:
-                context_lines.append(
-                    f"Слайд {slide_number}: {_summarise_for_context(text)}"
-                )
+                context_lines.append(f"Слайд {slide_number}: {_summarise_for_context(text)}")
 
             if progress_cb is not None:
                 try:
@@ -244,12 +242,8 @@ class VisionAnalysisService:
             {"type": "text", "text": user_text},
         ]
         if self.provider == "ollama":
-            return await self._call_ollama(
-                user_content, system=SLIDE_SUMMARY_SYSTEM_PROMPT
-            )
-        return await self._call_yandex(
-            user_content, system=SLIDE_SUMMARY_SYSTEM_PROMPT
-        )
+            return await self._call_ollama(user_content, system=SLIDE_SUMMARY_SYSTEM_PROMPT)
+        return await self._call_yandex(user_content, system=SLIDE_SUMMARY_SYSTEM_PROMPT)
 
     async def summarize_presentation(
         self,

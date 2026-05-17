@@ -70,6 +70,7 @@ def _concat_wav(paths: list[str], output_path: str) -> None:
     """Concatenate WAV files (same params) into output_path."""
     if len(paths) == 1:
         import shutil
+
         shutil.move(paths[0], output_path)
         return
 
@@ -93,7 +94,12 @@ class TTSService:
 
         provider = settings.TTS_PROVIDER
         effective_voice = voice or settings.SILERO_TTS_VOICE
-        logger.info("TTS synthesize — provider=%s, voice=%s, output=%s", provider, effective_voice, output_path)
+        logger.info(
+            "TTS synthesize — provider=%s, voice=%s, output=%s",
+            provider,
+            effective_voice,
+            output_path,
+        )  # noqa: E501
 
         if provider == "silero":
             return self._synthesize_silero(text, output_path, effective_voice)

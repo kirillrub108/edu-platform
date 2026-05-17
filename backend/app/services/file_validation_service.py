@@ -2,36 +2,52 @@
 and ZIP integrity checks. Defends against fake-extension uploads, oversized
 payloads, ZIP bombs, and zip-slip path traversal — without an external scanner.
 """
+
 import os
 import zipfile
 from io import BytesIO
 
 from fastapi import HTTPException, UploadFile
 
-
 SIZE_LIMITS: dict[str, int] = {
     ".pptx": 50 * 1024 * 1024,
-    ".ppt":  50 * 1024 * 1024,
-    ".pdf":  50 * 1024 * 1024,
-    ".txt":  10 * 1024 * 1024,
-    ".md":   10 * 1024 * 1024,
+    ".ppt": 50 * 1024 * 1024,
+    ".pdf": 50 * 1024 * 1024,
+    ".txt": 10 * 1024 * 1024,
+    ".md": 10 * 1024 * 1024,
     ".markdown": 10 * 1024 * 1024,
     ".docx": 10 * 1024 * 1024,
-    ".doc":  10 * 1024 * 1024,
-    ".rtf":  10 * 1024 * 1024,
-    ".odt":  10 * 1024 * 1024,
+    ".doc": 10 * 1024 * 1024,
+    ".rtf": 10 * 1024 * 1024,
+    ".odt": 10 * 1024 * 1024,
     ".html": 10 * 1024 * 1024,
-    ".htm":  10 * 1024 * 1024,
-    ".mp4":  500 * 1024 * 1024,
+    ".htm": 10 * 1024 * 1024,
+    ".mp4": 500 * 1024 * 1024,
     ".webm": 500 * 1024 * 1024,
-    ".mov":  500 * 1024 * 1024,
+    ".mov": 500 * 1024 * 1024,
 }
 
 # Suffixes treated as suspicious when they appear *before* the final extension —
 # catches double-extension tricks like "file.php.pdf" or "malware.exe.txt".
 _DANGEROUS_INNER_EXTS: set[str] = {
-    "exe", "php", "phtml", "js", "html", "htm", "sh", "bat", "cmd", "ps1",
-    "py", "vbs", "scr", "com", "msi", "jar", "pl", "rb",
+    "exe",
+    "php",
+    "phtml",
+    "js",
+    "html",
+    "htm",
+    "sh",
+    "bat",
+    "cmd",
+    "ps1",
+    "py",
+    "vbs",
+    "scr",
+    "com",
+    "msi",
+    "jar",
+    "pl",
+    "rb",
 }
 
 _ZIP_EXTS = {".pptx", ".docx", ".odt"}
@@ -58,8 +74,7 @@ def _check_filename(filename: str, allowed_types: list[str]) -> str:
     ext = _ext(filename)
     if ext not in allowed_types:
         raise _bad(
-            f"File type {ext or 'unknown'} not allowed. "
-            f"Accepted: {', '.join(allowed_types)}"
+            f"File type {ext or 'unknown'} not allowed. Accepted: {', '.join(allowed_types)}"
         )
 
     # Double-extension trap: only flag when an *inner* segment looks like an

@@ -9,6 +9,7 @@ from app.config import settings
 def _env_bool(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
 
+
 celery_app = Celery(
     "edu_platform",
     broker=settings.REDIS_URL,
@@ -25,7 +26,7 @@ celery_app.conf.update(
     task_track_started=True,
     task_time_limit=60 * 30,
     task_queues=(
-        Queue("video",  routing_key="video"),
+        Queue("video", routing_key="video"),
         Queue("vision", routing_key="vision"),
     ),
     task_default_queue="video",

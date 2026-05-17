@@ -4,7 +4,7 @@ from pathlib import Path
 
 import aiofiles
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.services.signed_url_service import verify_signed_url

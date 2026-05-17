@@ -34,6 +34,7 @@ class SlideRenderError(RuntimeError):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _letterbox(img: Image.Image) -> Image.Image:
     """Fit *img* into TARGET_W×TARGET_H with black bars; never distort."""
     iw, ih = img.size
@@ -52,10 +53,13 @@ def _pptx_to_pdf(pptx_path: Path, work_dir: Path) -> Path:
     lo_profile = work_dir / "_lo_profile"
 
     cmd = [
-        "libreoffice", "--headless",
+        "libreoffice",
+        "--headless",
         f"-env:UserInstallation=file://{lo_profile}",
-        "--convert-to", "pdf",
-        "--outdir", str(pdf_dir),
+        "--convert-to",
+        "pdf",
+        "--outdir",
+        str(pdf_dir),
         str(pptx_path),
     ]
     logger.info("LibreOffice: converting %s to PDF", pptx_path.name)
@@ -100,9 +104,7 @@ def _pdf_to_pngs(pdf_path: Path, output_dir: Path) -> list[Path]:
     try:
         pages: list[Image.Image] = convert_from_path(str(pdf_path), dpi=RENDER_DPI)
     except Exception as exc:
-        raise SlideRenderError(
-            f"PDF rasterization failed for {pdf_path.name}: {exc}"
-        ) from exc
+        raise SlideRenderError(f"PDF rasterization failed for {pdf_path.name}: {exc}") from exc
 
     if not pages:
         raise SlideRenderError(f"No pages found in {pdf_path.name}")
@@ -120,6 +122,7 @@ def _pdf_to_pngs(pdf_path: Path, output_dir: Path) -> list[Path]:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def render_slides(input_path: "str | Path", output_dir: "str | Path") -> list[Path]:
     """Convert a PPTX or PDF file into 1920×1080 letterboxed PNG frames.
@@ -142,9 +145,7 @@ def render_slides(input_path: "str | Path", output_dir: "str | Path") -> list[Pa
 
     suffix = input_path.suffix.lower()
     if suffix not in {".pptx", ".ppt", ".pdf"}:
-        raise SlideRenderError(
-            f"Unsupported file type: {suffix!r} — expected .pptx, .ppt, or .pdf"
-        )
+        raise SlideRenderError(f"Unsupported file type: {suffix!r} — expected .pptx, .ppt, or .pdf")
     if not input_path.exists():
         raise SlideRenderError(f"Input file not found: {input_path}")
 
@@ -162,8 +163,7 @@ def render_slides(input_path: "str | Path", output_dir: "str | Path") -> list[Pa
     missing = [p for p in slides if not p.exists()]
     if missing:
         raise SlideRenderError(
-            f"{len(missing)} PNG file(s) missing after render "
-            f"(first: {missing[0].name})"
+            f"{len(missing)} PNG file(s) missing after render (first: {missing[0].name})"
         )
 
     logger.info("render_slides: produced %d slides from %s", len(slides), input_path.name)

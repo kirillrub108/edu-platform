@@ -5,6 +5,7 @@ HMAC-SHA256 with `settings.SECRET_KEY`. Verification uses `hmac.compare_digest`
 to avoid timing side-channels. The signature *is* the auth mechanism for
 `/files/*` — no JWT is required at the file endpoint.
 """
+
 import hashlib
 import hmac
 import time
@@ -25,9 +26,7 @@ def _normalize(file_path: str) -> str:
     return file_path.lstrip("/").replace("\\", "/")
 
 
-def generate_signed_url(
-    file_path: str, user_id: str, expires_in: int | None = None
-) -> str:
+def generate_signed_url(file_path: str, user_id: str, expires_in: int | None = None) -> str:
     """Return a signed URL path: `/files/<file_path>?uid=...&expires=...&sig=...`.
 
     `uid` is included in the URL so the file endpoint can verify the HMAC
@@ -43,9 +42,7 @@ def generate_signed_url(
     return f"/files/{clean_path}?{query}"
 
 
-def verify_signed_url(
-    file_path: str, user_id: str, expires: int, sig: str
-) -> bool:
+def verify_signed_url(file_path: str, user_id: str, expires: int, sig: str) -> bool:
     if expires <= int(time.time()):
         return False
     clean_path = _normalize(file_path)

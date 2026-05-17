@@ -10,9 +10,7 @@ from app.database import Base
 
 class SlideText(Base):
     __tablename__ = "slide_texts"
-    __table_args__ = (
-        UniqueConstraint("lesson_id", "slide_number", name="uq_slide_lesson_number"),
-    )
+    __table_args__ = (UniqueConstraint("lesson_id", "slide_number", name="uq_slide_lesson_number"),)
     # See User.__mapper_args__ for rationale.
     __mapper_args__ = {"eager_defaults": True}
 

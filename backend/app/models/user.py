@@ -1,7 +1,8 @@
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, Enum as SAEnum, String
+from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -44,6 +45,4 @@ class User(Base):
     )
 
     courses = relationship("Course", back_populates="owner", cascade="all, delete-orphan")
-    enrollments = relationship(
-        "Enrollment", back_populates="student", cascade="all, delete-orphan"
-    )
+    enrollments = relationship("Enrollment", back_populates="student", cascade="all, delete-orphan")

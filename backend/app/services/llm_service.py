@@ -89,7 +89,9 @@ class LLMService:
     def _strip_think(text: str) -> str:
         return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
-    async def _chat(self, system: str, user: str, json_mode: bool = False, think: bool = False) -> str:
+    async def _chat(
+        self, system: str, user: str, json_mode: bool = False, think: bool = False
+    ) -> str:  # noqa: E501
         if not think:
             user = user + "\n/no_think"
         kwargs: dict[str, Any] = {
@@ -123,7 +125,9 @@ class LLMService:
             for i, t in enumerate(slide_texts):
                 snippet = (t or "").strip().replace("\n", " ")[:300]
                 anchor_lines.append(f"Slide {i + 1}: {snippet}")
-            anchors = "Slide visible texts (alignment anchors):\n" + "\n".join(anchor_lines) + "\n\n"
+            anchors = (
+                "Slide visible texts (alignment anchors):\n" + "\n".join(anchor_lines) + "\n\n"
+            )  # noqa: E501
 
         user = (
             f"Slides count: {slides_count}\n\n"
@@ -177,10 +181,7 @@ class LLMService:
         rough script that should be expanded for the audience.
         """
         system = LECTURE_ENHANCEMENT_PROMPT
-        user = (
-            (f"Курс: {course_title}\n\n" if course_title else "")
-            + f"Черновик доклада:\n{draft}"
-        )
+        user = (f"Курс: {course_title}\n\n" if course_title else "") + f"Черновик доклада:\n{draft}"
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": [

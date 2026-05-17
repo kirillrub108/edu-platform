@@ -42,7 +42,6 @@ from app.models.user import User, UserRole
 from app.redis_client import get_redis
 from app.schemas.auth import TokenResponse
 
-
 # ── Password hashing (argon2id — OWASP-recommended defaults from argon2-cffi).
 # Memory-hard, no 72-byte input limit, no pre-hash hacks.
 
@@ -61,6 +60,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 
 # ── JWT primitives ───────────────────────────────────────────────────────────
+
 
 def _encode(payload: dict[str, Any]) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
@@ -124,6 +124,7 @@ def decode_token(token: str, *, verify_exp: bool = True) -> dict[str, Any]:
 
 # ── Service ──────────────────────────────────────────────────────────────────
 
+
 class AuthService:
     def __init__(self, db: AsyncSession, redis: Redis) -> None:
         self.db = db
@@ -172,7 +173,9 @@ class AuthService:
         now = datetime.now(timezone.utc)
         absolute_expires_at = now + timedelta(days=settings.REFRESH_TOKEN_ABSOLUTE_MAX_DAYS)
         sliding_days = (
-            settings.REFRESH_TOKEN_EXPIRE_DAYS if remember_me else settings.REFRESH_TOKEN_SESSION_DAYS
+            settings.REFRESH_TOKEN_EXPIRE_DAYS
+            if remember_me
+            else settings.REFRESH_TOKEN_SESSION_DAYS  # noqa: E501
         )
         return await self._mint_pair(
             user=user,
