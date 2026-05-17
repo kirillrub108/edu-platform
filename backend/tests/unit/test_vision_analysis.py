@@ -89,6 +89,37 @@ async def test_analyze_slide_returns_empty_when_llm_yields_empty(
     assert result == ""
 
 
+def test_cache_key_changes_with_different_model(slide_png: Path) -> None:
+    """Changing the model must invalidate the cache (different key)."""
+    svc = VisionAnalysisService()
+    original = svc._model
+    try:
+        svc._model = "model-a"
+        key_a = svc._cache_key(str(slide_png))
+        svc._model = "model-b"
+        key_b = svc._cache_key(str(slide_png))
+    finally:
+        svc._model = original
+    assert key_a != key_b
+
+
+async def test_summarize_presentation_cache_miss_writes_cache_file(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path, tmp_path: Path
+) -> None:
+    """On a cache miss the result is persisted to a .txt file in SUMMARY_CACHE_DIR."""
+    cache_dir = tmp_path / "summaries_cache"
+    monkeypatch.setattr(vis_mod, "SUMMARY_CACHE_DIR", str(cache_dir))
+
+    svc = VisionAnalysisService()
+    monkeypatch.setattr(svc, "_ollama_client", _stub_ollama_client("written text"))
+
+    await svc.summarize_presentation([str(slide_png)])
+
+    cache_files = list(Path(str(cache_dir)).glob("*.txt"))
+    assert len(cache_files) == 1
+    assert cache_files[0].read_text(encoding="utf-8") == "written text"
+
+
 async def test_summarize_presentation_uses_disk_cache(
     monkeypatch: pytest.MonkeyPatch, slide_png: Path, tmp_path: Path
 ) -> None:

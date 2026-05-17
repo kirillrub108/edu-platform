@@ -179,6 +179,136 @@ def test_convert_pptx_to_images_caches_repeat_calls(
 
 # ── concatenate_segments ────────────────────────────────────────────────────
 
+# ── convert_pptx_to_images: disk cache hit ──────────────────────────────────
+
+def test_convert_pptx_to_images_disk_cache_hit_skips_subprocess(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PNGs already on disk → no subprocess call even with a cold TTLCache."""
+    with vs_mod._slides_cache_lock:
+        vs_mod._slides_cache.clear()
+
+    pptx = tmp_path / "deck.pptx"
+    pptx.write_bytes(b"PK\x03\x04 fake pptx content for hash")
+
+    cache_dir = tmp_path / "cache"
+    cache_key = vs_mod._pptx_cache_key(str(pptx))
+    cached_subdir = cache_dir / cache_key
+    cached_subdir.mkdir(parents=True)
+    (cached_subdir / "slide-1.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    call_count: dict[str, int] = {"n": 0}
+
+    class _Completed:
+        returncode = 0
+        stdout = ""
+        stderr = b""
+
+    def _fake_run(cmd: list[str], **_kw: Any) -> _Completed:
+        call_count["n"] += 1
+        return _Completed()
+
+    monkeypatch.setattr(vs_mod.subprocess, "run", _fake_run)
+
+    svc = VideoService()
+    images = svc.convert_pptx_to_images(
+        str(pptx), str(tmp_path / "out"), cache_dir=str(cache_dir)
+    )
+
+    assert len(images) == 1
+    assert call_count["n"] == 0  # no subprocess calls on disk-cache hit
+
+
+# ── convert_pptx_to_images: libreoffice failure ──────────────────────────────
+
+def test_convert_pptx_to_images_libreoffice_nonzero_exit_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Failed:
+        returncode = 1
+        stdout = ""
+        stderr = b"lo: conversion failed"
+
+    monkeypatch.setattr(vs_mod.subprocess, "run", lambda *a, **kw: _Failed())
+
+    pptx = tmp_path / "bad.pptx"
+    pptx.write_bytes(b"PK\x03\x04 fake pptx for fail test")
+
+    with vs_mod._slides_cache_lock:
+        vs_mod._slides_cache.clear()
+
+    svc = VideoService()
+    with pytest.raises(RuntimeError):
+        svc.convert_pptx_to_images(str(pptx), str(tmp_path / "out"))
+
+
+# ── encode_segment ───────────────────────────────────────────────────────────
+
+def test_encode_segment_calls_ffmpeg_with_still_image_args(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ffmpeg_calls: list[list[str]] = []
+
+    class _Completed:
+        returncode = 0
+        stdout = "2.5\n"
+        stderr = b""
+
+    def _fake_run(cmd: list[str], **_kw: Any) -> _Completed:
+        if Path(cmd[0]).name == "ffmpeg":
+            ffmpeg_calls.append(list(cmd))
+            out = Path(cmd[-1])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_bytes(b"MKV")
+        return _Completed()
+
+    monkeypatch.setattr(vs_mod.subprocess, "run", _fake_run)
+
+    img = tmp_path / "slide-1.png"
+    img.write_bytes(b"\x89PNG\r\n\x1a\n")
+    aud = tmp_path / "slide-1.wav"
+    _write_wav(aud, duration_s=2.0)
+
+    svc = VideoService()
+    result = svc.encode_segment(0, str(img), str(aud), str(tmp_path))
+
+    assert result.endswith(".mkv")
+    encoding_calls = [c for c in ffmpeg_calls if "-loop" in c]
+    assert encoding_calls, "Expected an ffmpeg call with -loop (still-image encoding)"
+    cmd = encoding_calls[0]
+    assert str(img) in cmd
+    assert "libx264" in cmd
+    assert "stillimage" in cmd  # -tune stillimage
+
+
+# ── _trim_trailing_silence: ffmpeg failure ───────────────────────────────────
+
+def test_trim_trailing_silence_returns_false_when_ffmpeg_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    class _Completed:
+        def __init__(self, rc: int = 0) -> None:
+            self.returncode = rc
+            self.stdout = ""
+            self.stderr = b""
+
+    def _fake_run(cmd: list[str], **_kw: Any) -> _Completed:
+        if Path(cmd[0]).name == "ffmpeg":
+            return _Completed(rc=1)
+        return _Completed()
+
+    monkeypatch.setattr(vs_mod.subprocess, "run", _fake_run)
+
+    src = tmp_path / "src.wav"
+    _write_wav(src, duration_s=1.0)
+    dest = tmp_path / "dest.wav"
+
+    ok = _trim_trailing_silence(str(src), str(dest))
+    assert ok is False
+
+
+# ── concatenate_segments ────────────────────────────────────────────────────
+
 def test_concatenate_segments_invokes_ffmpeg_concat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

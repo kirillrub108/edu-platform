@@ -110,3 +110,15 @@ def test_decode_token_with_verify_exp_false_accepts_expired() -> None:
 
     payload = decode_token(token, verify_exp=False)
     assert payload["sub"] == str(user.id)
+
+
+def test_decode_token_does_not_enforce_type() -> None:
+    """decode_token never validates the 'type' claim — callers are responsible.
+    The HTTP-layer check lives in get_current_token_payload (dependencies.py)."""
+    family = str(uuid.uuid4())
+    absolute = datetime.now(timezone.utc) + timedelta(days=14)
+    token, _jti, _exp = create_refresh_token(
+        "uid-z", family, sliding_days=14, absolute_expires_at=absolute
+    )
+    payload = decode_token(token)
+    assert payload["type"] == "refresh"

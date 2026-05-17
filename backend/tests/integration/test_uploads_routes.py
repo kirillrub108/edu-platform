@@ -101,3 +101,87 @@ async def test_upload_script_too_large_returns_400(
     )
     # validate_upload trips the SIZE_LIMITS check first → 400.
     assert resp.status_code == 400
+
+
+async def test_upload_pptx_unauthenticated_returns_401(
+    client: AsyncClient,
+    sample_pptx_bytes: bytes,
+) -> None:
+    resp = await client.post(
+        "/api/v1/uploads/pptx",
+        files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+    )
+    assert resp.status_code == 401
+
+
+async def test_upload_pptx_without_lesson_id_returns_file_path(
+    client: AsyncClient,
+    teacher_token: dict[str, str],
+    sample_pptx_bytes: bytes,
+) -> None:
+    """Upload without lesson_id saves the file but doesn't attach it to any lesson."""
+    resp = await client.post(
+        "/api/v1/uploads/pptx",
+        files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+        headers=teacher_token,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "file_path" in body
+    assert "file_url" in body
+
+
+async def test_upload_script_pdf_returns_extracted_text(
+    client: AsyncClient,
+    teacher_token: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.routers import uploads as uploads_mod
+
+    monkeypatch.setattr(uploads_mod, "_extract_pdf_text", lambda _bytes: "extracted pdf text")
+
+    resp = await client.post(
+        "/api/v1/uploads/script",
+        files={"file": ("lecture.pdf", b"%PDF-1.4 fake content", "application/pdf")},
+        headers=teacher_token,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["script"] == "extracted pdf text"
+    assert body["chars"] == len("extracted pdf text")
+
+
+async def test_upload_script_unauthenticated_returns_401(
+    client: AsyncClient,
+) -> None:
+    resp = await client.post(
+        "/api/v1/uploads/script",
+        files={"file": ("notes.txt", b"hello world", "text/plain")},
+    )
+    assert resp.status_code == 401
+
+
+async def test_upload_pptx_with_refresh_token_returns_401(
+    client: AsyncClient,
+    teacher_user: Any,
+    sample_pptx_bytes: bytes,
+) -> None:
+    """The HTTP auth layer (get_current_token_payload) must reject refresh tokens
+    used as Bearer credentials — this is the type-check that decode_token itself
+    does not perform."""
+    import uuid
+    from datetime import datetime, timedelta, timezone
+
+    from app.services.auth_service import create_refresh_token
+
+    family = str(uuid.uuid4())
+    absolute = datetime.now(timezone.utc) + timedelta(days=14)
+    refresh_token, _, _ = create_refresh_token(
+        str(teacher_user.id), family, sliding_days=14, absolute_expires_at=absolute
+    )
+    resp = await client.post(
+        "/api/v1/uploads/pptx",
+        files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+        headers={"Authorization": f"Bearer {refresh_token}"},
+    )
+    assert resp.status_code == 401
