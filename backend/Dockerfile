@@ -58,9 +58,10 @@ RUN groupadd -g 1000 appgroup && useradd -u 1000 -g appgroup -d /app -s /sbin/no
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY requirements.txt requirements-dev.txt ./
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r requirements.txt
+    pip install -r requirements.txt && \
+    pip install -r requirements-dev.txt
 
 # ── Custom .ttf fonts ─────────────────────────────────────────────────────
 # If the project ships its own typefaces (e.g. corporate branding fonts),

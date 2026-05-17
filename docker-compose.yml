@@ -49,10 +49,31 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
+    environment:
+      # When running pytest inside this container, testcontainers spawns
+      # sibling Postgres/Ryuk containers via the host Docker. Their ports
+      # are exposed on the host, not on this container's bridge — so we
+      # tell testcontainers to reach them via host.docker.internal.
+      # Ryuk (the cleanup reaper) is unreachable in DooD setups, disable it.
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    # host.docker.internal isn't auto-resolved on Linux Docker Engine;
+    # extra_hosts pins it to the host gateway IP.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/app:/app/app
       - ./backend/alembic:/app/alembic
+      # Tests use `testcontainers` to spin up a sibling Postgres via the
+      # host's Docker daemon. Mounting the socket lets the test process
+      # inside this container talk to the host Docker. Dev-only — do not
+      # ship this mount to prod.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Bind tests/, conftest, and pyproject so editing tests on the host
+      # shows up in the container without rebuilding.
+      - ./backend/tests:/app/tests
+      - ./backend/pyproject.toml:/app/pyproject.toml
     ports:
       - "8000:8000"
     depends_on:

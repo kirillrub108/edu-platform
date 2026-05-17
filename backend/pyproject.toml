@@ -1,0 +1,60 @@
+[tool.pytest.ini_options]
+minversion = "8.0"
+asyncio_mode = "auto"
+# Share one event loop across the whole session so the asyncpg pool held by
+# session-scoped fixtures (_async_engine, db_session) is not bound to a loop
+# that pytest-asyncio tears down between tests.
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
+testpaths = ["tests"]
+addopts = [
+  "-ra",
+  "--strict-markers",
+  "--tb=short",
+]
+markers = [
+  "unit: pure-function tests, no DB or external IO",
+  "integration: requires the PostgreSQL testcontainer fixture",
+  "slow: needs real FFmpeg / LibreOffice / Ollama / Silero (skipped in CI)",
+]
+# pytest-env: applied BEFORE app modules are imported, so the celery_app /
+# config singletons see the test values.
+env = [
+  "SECRET_KEY=test-secret-do-not-use-in-prod",
+  "CELERY_TASK_ALWAYS_EAGER=1",
+  "CELERY_TASK_EAGER_PROPAGATES=1",
+  # Placeholder; conftest.py overwrites with the real testcontainer URL
+  # before any model/router module is imported.
+  "DATABASE_URL=postgresql+asyncpg://placeholder:placeholder@localhost/placeholder",
+  "REDIS_URL=memory://",
+  "STORAGE_PATH=/tmp/edu-test-storage",
+  "BASE_URL=http://testserver",
+  "TTS_PROVIDER=silero",
+  "VISION_PROVIDER=ollama",
+  "LLM_BASE_URL=http://llm.invalid/v1",
+  "LLM_API_KEY=test",
+  "LLM_MODEL=test-model",
+  "SILERO_TTS_URL=http://silero.invalid",
+  "VISION_OLLAMA_BASE_URL=http://vision.invalid/v1",
+  "VISION_API_KEY=test",
+]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+omit = [
+  "app/alembic/*",
+  "app/tasks/video_pipeline.py",
+  "app/tasks/vision_pipeline.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+  "pragma: no cover",
+  "raise NotImplementedError",
+  "if TYPE_CHECKING:",
+  "if __name__ == .__main__.:",
+]

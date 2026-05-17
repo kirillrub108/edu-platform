@@ -1002,7 +1002,6 @@ docker-compose exec backend alembic upgrade head
 
 ## 7.4 DX и поддерживаемость
 
-- **Нет тестов вообще** (`backend/tests/` пуст). Любой рефакторинг — слепая зона.
 - **Нет линтера/форматтера в CI** (хотя `pyrightconfig.json` есть).
 - **Нет CONTRIBUTING.md** и единого стиля комментариев.
 - **`pages/lessons/[id].vue` — 640 строк** — пора декомпозировать.

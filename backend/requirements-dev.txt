@@ -1,0 +1,23 @@
+-r requirements.txt
+
+# ── Test runner ──────────────────────────────────────────────────────────────
+pytest>=8,<9
+pytest-asyncio>=0.24,<1
+pytest-mock>=3.14,<4
+pytest-cov>=5,<7
+pytest-env>=1.1,<2
+
+# ── HTTP + ASGI in tests ─────────────────────────────────────────────────────
+# httpx already in requirements.txt; asgi-lifespan lets us wrap ASGITransport
+# without running the real `lifespan` (which calls alembic.upgrade against
+# hard-coded /app paths).
+asgi-lifespan>=2.1,<3
+
+# ── Real PostgreSQL via Docker (local + GH Actions). Requires docker socket. ─
+testcontainers[postgres]>=4,<5
+
+# ── Async-compatible in-memory Redis. Drop-in for redis.asyncio.Redis. ───────
+fakeredis>=2.26,<3
+
+# ── Deterministic time for token-expiry tests. ───────────────────────────────
+freezegun>=1.5,<2

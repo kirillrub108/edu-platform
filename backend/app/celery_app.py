@@ -1,7 +1,13 @@
+import os
+
 from celery import Celery
 from kombu import Queue
 
 from app.config import settings
+
+
+def _env_bool(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
 
 celery_app = Celery(
     "edu_platform",
@@ -24,4 +30,9 @@ celery_app.conf.update(
     ),
     task_default_queue="video",
     task_default_routing_key="video",
+    # Test-only knobs: when set to "1" in pytest, .delay()/.apply_async()
+    # run synchronously in-process. Defaults to off, so production is
+    # untouched.
+    task_always_eager=_env_bool("CELERY_TASK_ALWAYS_EAGER"),
+    task_eager_propagates=_env_bool("CELERY_TASK_EAGER_PROPAGATES"),
 )

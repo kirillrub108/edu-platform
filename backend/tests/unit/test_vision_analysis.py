@@ -1,0 +1,119 @@
+"""Unit tests for app.services.vision_analysis.VisionAnalysisService."""
+
+from __future__ import annotations
+
+import io
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+from PIL import Image
+
+from app.services import vision_analysis as vis_mod
+from app.services.vision_analysis import VisionAnalysisService, vision_analysis_service
+
+pytestmark = pytest.mark.unit
+
+
+@pytest.fixture()
+def slide_png(tmp_path: Path) -> Path:
+    p = tmp_path / "slide.png"
+    Image.new("RGB", (100, 100), (200, 200, 200)).save(p, format="PNG")
+    return p
+
+
+def _llm_response(content: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
+    )
+
+
+def _stub_ollama_client(content: str | Exception):
+    async def _create(**_kwargs: Any) -> SimpleNamespace:
+        if isinstance(content, Exception):
+            raise content
+        return _llm_response(content)
+
+    return SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
+    )
+
+
+def test_cache_key_is_deterministic(slide_png: Path) -> None:
+    svc = VisionAnalysisService()
+    k1 = svc._cache_key(str(slide_png))
+    k2 = svc._cache_key(str(slide_png))
+    assert k1 == k2
+    assert len(k1) == 64  # sha256 hex
+
+
+def test_cache_key_changes_with_content(tmp_path: Path) -> None:
+    svc = VisionAnalysisService()
+    a = tmp_path / "a.png"
+    b = tmp_path / "b.png"
+    Image.new("RGB", (10, 10), (0, 0, 0)).save(a, format="PNG")
+    Image.new("RGB", (10, 10), (255, 255, 255)).save(b, format="PNG")
+    assert svc._cache_key(str(a)) != svc._cache_key(str(b))
+
+
+async def test_analyze_slide_returns_text_from_ollama(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path
+) -> None:
+    svc = VisionAnalysisService()
+    monkeypatch.setattr(svc, "_ollama_client", _stub_ollama_client("narration"))
+
+    result = await svc.analyze_slide(
+        slide_image_path=str(slide_png),
+        slide_number=1,
+        total_slides=1,
+        course_title="Course",
+        previous_context="",
+    )
+    assert result == "narration"
+
+
+async def test_analyze_slide_returns_empty_when_llm_yields_empty(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path
+) -> None:
+    svc = VisionAnalysisService()
+    monkeypatch.setattr(svc, "_ollama_client", _stub_ollama_client(""))
+
+    # Real behaviour: returns "" (whitespace-stripped). NOT ValueError.
+    result = await svc.analyze_slide(
+        slide_image_path=str(slide_png),
+        slide_number=1,
+        total_slides=1,
+        course_title="Course",
+    )
+    assert result == ""
+
+
+async def test_summarize_presentation_uses_disk_cache(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path, tmp_path: Path
+) -> None:
+    """First call hits the LLM; second call must read the cached file."""
+    cache_dir = tmp_path / "summaries_cache"
+    monkeypatch.setattr(vis_mod, "SUMMARY_CACHE_DIR", str(cache_dir))
+
+    svc = VisionAnalysisService()
+    call_count = {"n": 0}
+
+    async def _counting_create(**_kwargs: Any) -> SimpleNamespace:
+        call_count["n"] += 1
+        return _llm_response("summary one")
+
+    monkeypatch.setattr(
+        svc,
+        "_ollama_client",
+        SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=_counting_create))
+        ),
+    )
+
+    result_1 = await svc.summarize_presentation([str(slide_png)])
+    result_2 = await svc.summarize_presentation([str(slide_png)])
+
+    assert result_1 == ["summary one"]
+    assert result_2 == ["summary one"]
+    assert call_count["n"] == 1  # second call served from cache
