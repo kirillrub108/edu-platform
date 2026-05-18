@@ -1002,7 +1002,6 @@ docker-compose exec backend alembic upgrade head
 
 ## 7.4 DX и поддерживаемость
 
-- **Нет линтера/форматтера в CI** (хотя `pyrightconfig.json` есть).
 - **Нет CONTRIBUTING.md** и единого стиля комментариев.
 - **`pages/lessons/[id].vue` — 640 строк** — пора декомпозировать.
 - **Дублируется `_get_owned_lesson`** в `routers/lessons.py` и `routers/slides.py` — копипаста.
