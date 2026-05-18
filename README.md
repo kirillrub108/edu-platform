@@ -32,6 +32,7 @@ cp .env.example .env
 
 # 1. Поднять Ollama локально (https://ollama.com/download) и скачать модель
 ollama pull qwen3:8b
+ollama pull qwen2.5vl:7b
 
 # 2. Поднять стек
 docker-compose up --build
