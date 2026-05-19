@@ -9,7 +9,7 @@ interface TokenResponse {
 // Singleflight: if a burst of requests gets 401 simultaneously, only ONE
 // /auth/refresh call runs — the rest await the same promise. Without this
 // every parallel request would burn a refresh-token rotation, and only the
-// last one would land in localStorage; the others would race and 401 again.
+// last one would land in the store; the others would race and 401 again.
 let refreshPromise: Promise<TokenResponse | null> | null = null
 
 const isAuthEndpoint = (path: string): boolean =>
@@ -21,7 +21,6 @@ const isAuthEndpoint = (path: string): boolean =>
 // whether the token is *about* to be rejected by the server. The 5-second
 // skew margin makes us refresh slightly BEFORE the server's clock would
 // reject the token, so a request never goes out with an expired bearer.
-// Returns true when we should refresh proactively.
 const isAccessTokenExpired = (token: string): boolean => {
   // Browser-only — tokens never exist on the server side of this app
   // (routeRules sets ssr:false), so we can rely on `atob` here.
@@ -44,12 +43,10 @@ export const useApi = () => {
   const config = useRuntimeConfig()
   const base = config.public.apiBase as string
 
-  const getToken = (): string | null =>
-    import.meta.client ? localStorage.getItem('access_token') : null
-
   const tryRefresh = async (): Promise<TokenResponse | null> => {
     if (!import.meta.client) return null
-    const refresh_token = localStorage.getItem('refresh_token')
+    const store = useAuthStore()
+    const refresh_token = store.getRefreshToken()
     if (!refresh_token) return null
 
     if (!refreshPromise) {
@@ -57,10 +54,12 @@ export const useApi = () => {
         baseURL: base,
         method: 'POST',
         body: { refresh_token },
+        // Explicit empty headers: must NOT forward a stale access token in
+        // Authorization — that would cause the refresh request itself to 401.
+        headers: {},
       })
         .then((tokens) => {
-          localStorage.setItem('access_token', tokens.access_token)
-          localStorage.setItem('refresh_token', tokens.refresh_token)
+          store.persistTokens(tokens)
           return tokens
         })
         .catch(() => null)
@@ -75,18 +74,20 @@ export const useApi = () => {
   const apiFetch = async <T = unknown>(
     path: string,
     options: FetchOptions = {},
-    _retried = false,
+    _isRetry = false,
   ): Promise<T> => {
+    const store = useAuthStore()
+
     // Proactive refresh: if the cached access token is already past its `exp`,
     // skip the doomed request and rotate first. Without this, every page load
     // after a 15-min idle would surface a noisy GET /auth/me 401 in the
     // browser console (recovered via retry, but visible) — and worse, parallel
     // requests racing on an expired token could each fail before the retry
     // kicks in, leaving UI buttons stuck in their `disabled/loading` state.
-    let token = getToken()
+    let token = store.getAccessToken()
     if (
       token &&
-      !_retried &&
+      !_isRetry &&
       !isAuthEndpoint(path) &&
       import.meta.client &&
       isAccessTokenExpired(token)
@@ -96,7 +97,7 @@ export const useApi = () => {
         // Refresh failed — the session is dead. Don't fire the doomed request
         // anonymously; clear the stale tokens and bounce to /login so the user
         // gets a clear signal instead of a half-broken UI with stuck buttons.
-        useAuthStore().clearSession()
+        store.clearSession()
         await navigateTo('/login')
         throw new Error('Session expired')
       }
@@ -121,10 +122,14 @@ export const useApi = () => {
       // ahead of ours and the proactive check let an "already-expired" token
       // through anyway. Skip on auth endpoints — refreshing a failed
       // /auth/refresh would loop, and refreshing on a wrong-password
-      // /auth/login is moot.
-      if (is401 && !_retried && token && import.meta.client && !isAuthEndpoint(path)) {
+      // /auth/login is moot. Skip on retry — if the fresh token is also
+      // rejected, the session is genuinely dead; don't loop.
+      if (is401 && !_isRetry && token && import.meta.client && !isAuthEndpoint(path)) {
         const tokens = await tryRefresh()
         if (tokens) {
+          // All parallel callers that reached this point awaited the same
+          // refreshPromise. Now each retries its own original request with
+          // the new token from the store.
           return apiFetch<T>(path, options, true)
         }
       }
@@ -132,7 +137,7 @@ export const useApi = () => {
       // Refresh impossible or also failed → session expired (had a token) → redirect.
       // If there was no token at all, the user is simply unauthenticated — not an error.
       if (is401 && import.meta.client && !isAuthEndpoint(path)) {
-        useAuthStore().clearSession()
+        store.clearSession()
         if (token) await navigateTo('/login')
       }
       throw err

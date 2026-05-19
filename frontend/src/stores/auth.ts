@@ -20,6 +20,12 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserOut | null>(null)
   const isAuthenticated = computed(() => !!user.value)
 
+  const getAccessToken = (): string | null =>
+    import.meta.client ? localStorage.getItem('access_token') : null
+
+  const getRefreshToken = (): string | null =>
+    import.meta.client ? localStorage.getItem('refresh_token') : null
+
   const persistTokens = (tokens: TokenResponse) => {
     if (!import.meta.client) return
     localStorage.setItem('access_token', tokens.access_token)
@@ -70,7 +76,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   const logout = async () => {
     if (import.meta.client) {
-      const refresh_token = localStorage.getItem('refresh_token')
+      const refresh_token = getRefreshToken()
       try {
         await apiFetch('/auth/logout', {
           method: 'POST',
@@ -84,5 +90,16 @@ export const useAuthStore = defineStore('auth', () => {
     await navigateTo('/login')
   }
 
-  return { user, isAuthenticated, login, register, logout, fetchMe, clearSession }
+  return {
+    user,
+    isAuthenticated,
+    login,
+    register,
+    logout,
+    fetchMe,
+    clearSession,
+    getAccessToken,
+    getRefreshToken,
+    persistTokens,
+  }
 })
