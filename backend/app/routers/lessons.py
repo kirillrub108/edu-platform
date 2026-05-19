@@ -8,7 +8,7 @@ from app.celery_app import celery_app
 from app.database import get_db
 from app.dependencies import get_owned_lesson, require_teacher
 from app.models.course import Course
-from app.models.lesson import Lesson, LessonStatus, Module
+from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.user import User
 from app.schemas.lesson import (
     LessonCreate,
@@ -145,9 +145,7 @@ async def cancel_video(
         result.revoke(terminate=True, signal="SIGKILL")
         lesson.video_task_id = None
 
-    from app.models.lesson import LessonStatus
-
-    if lesson.creation_mode and str(lesson.creation_mode) in ("presentation_auto",):
+    if lesson.creation_mode == CreationMode.presentation_auto:
         lesson.status = LessonStatus.ready_for_edit
     else:
         lesson.status = LessonStatus.draft

@@ -18,7 +18,19 @@ const uploading = ref(false)
 const uploadError = ref('')
 
 const script = ref('')
-const savingScript = ref(false)
+const scriptSaveStatus = ref<'idle' | 'saving' | 'saved' | 'error'>('idle')
+const isDirty = ref(false)
+let scriptDebounceTimer: ReturnType<typeof setTimeout> | null = null
+// Prevents the watch from treating programmatic script.value assignments as user edits.
+let programmaticUpdate = false
+
+watch(script, () => {
+  if (programmaticUpdate) return
+  isDirty.value = true
+  scriptSaveStatus.value = 'idle'
+  if (scriptDebounceTimer) clearTimeout(scriptDebounceTimer)
+  scriptDebounceTimer = setTimeout(saveScript, 500)
+}, { flush: 'sync' })
 
 const scriptFile = ref<File | null>(null)
 const uploadingScript = ref(false)
@@ -66,7 +78,11 @@ const pollForAnalysisCompletion = async () => {
       stopStatusPolling()
       analyzing.value = false
       lesson.value = data
-      script.value = data.script ?? data.text_content ?? ''
+      if (!isDirty.value) {
+        programmaticUpdate = true
+        script.value = data.script ?? data.text_content ?? ''
+        programmaticUpdate = false
+      }
       if (data.status === 'ready_for_edit') {
         showSlideEditor.value = true
       } else if (data.status === 'error') {
@@ -85,7 +101,11 @@ const pollForVideoCompletion = async () => {
       stopStatusPolling()
       generating.value = false
       lesson.value = data
-      script.value = data.script ?? data.text_content ?? ''
+      if (!isDirty.value) {
+        programmaticUpdate = true
+        script.value = data.script ?? data.text_content ?? ''
+        programmaticUpdate = false
+      }
       if (data.status === 'error') {
         taskError.value = 'Ошибка генерации видео.'
       }
@@ -100,7 +120,10 @@ const load = async () => {
   error.value = ''
   try {
     lesson.value = await apiFetch<any>(`/lessons/${route.params.id}`)
+    programmaticUpdate = true
     script.value = lesson.value.script ?? lesson.value.text_content ?? ''
+    programmaticUpdate = false
+    isDirty.value = false
     if (lesson.value.creation_mode) {
       mode.value = lesson.value.creation_mode as CreationModeValue
     }
@@ -181,14 +204,17 @@ const uploadPptx = async () => {
 }
 
 const saveScript = async () => {
-  savingScript.value = true
+  if (!isDirty.value) return
+  scriptSaveStatus.value = 'saving'
   try {
     await apiFetch(`/lessons/${route.params.id}/script`, {
       method: 'PUT',
       body: { script: script.value },
     })
-  } finally {
-    savingScript.value = false
+    isDirty.value = false
+    scriptSaveStatus.value = 'saved'
+  } catch {
+    scriptSaveStatus.value = 'error'
   }
 }
 
@@ -204,7 +230,10 @@ const uploadScriptFile = async () => {
       `/uploads/script?lesson_id=${route.params.id}`,
       { method: 'POST', body: form },
     )
-    script.value = result.script
+    programmaticUpdate = true
+    script.value = result.script ?? ''
+    programmaticUpdate = false
+    isDirty.value = true  // uploaded file text should be auto-saved
     scriptFile.value = null
   } catch (e: any) {
     scriptUploadError.value = e?.data?.detail ?? 'Не удалось обработать файл'
@@ -333,6 +362,7 @@ const pollStatus = async () => {
   }
 }
 
+const cancellingAnalysis = ref(false)
 const cancellingVideo = ref(false)
 const warningDismissed = ref(false)
 
@@ -355,6 +385,8 @@ const generateVideo = async () => {
   stopStatusPolling()
 
   if (mode.value === CreationMode.PRESENTATION_AND_TEXT) {
+    if (scriptDebounceTimer) { clearTimeout(scriptDebounceTimer); scriptDebounceTimer = null }
+    isDirty.value = true  // force save even if debounce hadn't fired yet
     await saveScript()
   }
 
@@ -372,6 +404,24 @@ const generateVideo = async () => {
   }
 }
 
+const cancelAnalysis = async () => {
+  cancellingAnalysis.value = true
+  try {
+    await apiFetch(`/lessons/${route.params.id}/analysis-cancel`, { method: 'POST' })
+    stopAnalyzePolling()
+    stopStatusPolling()
+    analyzing.value = false
+    analyzeTaskId.value = null
+    analyzeStatus.value = ''
+    analyzeMeta.value = null
+    lesson.value = { ...lesson.value, status: 'draft', analyze_task_id: null }
+  } catch (e: any) {
+    analyzeError.value = e?.data?.detail ?? 'Не удалось отменить анализ'
+  } finally {
+    cancellingAnalysis.value = false
+  }
+}
+
 const cancelVideo = async () => {
   cancellingVideo.value = true
   try {
@@ -383,6 +433,9 @@ const cancelVideo = async () => {
     taskMeta.value = null
     taskError.value = ''
     await load()
+    // Ensure slide editor is visible after cancel regardless of what status load() saw
+    // (e.g. task completed just before cancel committed → load sees 'published').
+    if (isAuto.value) showSlideEditor.value = true
   } catch {
     // ignore
   } finally {
@@ -407,6 +460,12 @@ onUnmounted(() => {
   stopPolling()
   stopAnalyzePolling()
   stopStatusPolling()
+  // Flush pending debounce on navigation away — fire-and-forget (no await in onUnmounted).
+  if (scriptDebounceTimer) {
+    clearTimeout(scriptDebounceTimer)
+    scriptDebounceTimer = null
+  }
+  if (isDirty.value) saveScript()
 })
 
 const isAuto = computed(() => mode.value === CreationMode.PRESENTATION_AUTO)
@@ -475,13 +534,12 @@ const canGenerateVideo = computed(() => {
     <LessonScriptPanel
       v-if="isManual"
       v-model="script"
-      :saving="savingScript"
+      :save-status="scriptSaveStatus"
       :open="showScriptEditor"
       :script-file="scriptFile"
       :uploading-script="uploadingScript"
       :script-upload-error="scriptUploadError"
       @toggle="showScriptEditor = !showScriptEditor"
-      @save="saveScript"
       @script-file-change="scriptFile = $event; scriptUploadError = ''"
       @upload-script="uploadScriptFile"
     />
@@ -500,7 +558,9 @@ const canGenerateVideo = computed(() => {
       :lesson-status="lesson.status"
       :show-slide-editor="showSlideEditor"
       :lesson-id="String(route.params.id)"
+      :cancelling-analysis="cancellingAnalysis"
       @start-analyze="startAnalyze"
+      @cancel-analyze="cancelAnalysis"
       @toggle-slide-editor="showSlideEditor = !showSlideEditor"
       @slide-back="showSlideEditor = false"
       @slide-ready="async () => { showSlideEditor = false; await generateVideo() }"

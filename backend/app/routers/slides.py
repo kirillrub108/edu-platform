@@ -68,6 +68,24 @@ async def analyze_lesson_slides(
     return {"task_id": task.id, "lesson_id": str(lesson.id), "status": "analyzing"}
 
 
+@router.post("/{lesson_id}/analysis-cancel")
+async def cancel_analysis(
+    lesson_id: UUID,
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    if lesson.status != LessonStatus.analyzing:
+        raise HTTPException(status_code=400, detail="Lesson is not being analyzed")
+
+    if lesson.analyze_task_id:
+        celery_app.control.revoke(lesson.analyze_task_id, terminate=True, signal="SIGTERM")
+
+    lesson.status = LessonStatus.draft
+    lesson.analyze_task_id = None
+    await db.commit()
+    return {"ok": True}
+
+
 @router.get(
     "/{lesson_id}/analysis-status/{task_id}",
     response_model=AnalyzeStatusResponse,

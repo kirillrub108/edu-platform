@@ -8,9 +8,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import delete
+
 from app.database import get_db
 from app.dependencies import require_teacher
-from app.models.lesson import Lesson
+from app.models.lesson import Lesson, LessonStatus
+from app.models.slide_text import SlideText
 from app.models.user import User
 from app.services.file_validation_service import validate_upload
 from app.services.storage_service import storage_service
@@ -211,6 +214,10 @@ async def upload_pptx(
         if lesson is None:
             raise HTTPException(status_code=404, detail="Lesson not found")
         lesson.pptx_path = relative
+        lesson.status = LessonStatus.draft
+        lesson.analyze_task_id = None
+        lesson.video_task_id = None
+        await db.execute(delete(SlideText).where(SlideText.lesson_id == lesson.id))
         await db.commit()
 
     return {

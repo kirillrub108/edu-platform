@@ -3,7 +3,7 @@ import { ChevronDown, FileText } from 'lucide-vue-next'
 
 const props = defineProps<{
   modelValue: string
-  saving: boolean
+  saveStatus: 'idle' | 'saving' | 'saved' | 'error'
   open: boolean
   scriptFile: File | null
   uploadingScript: boolean
@@ -12,7 +12,6 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
-  save: []
   toggle: []
   'script-file-change': [file: File | null]
   'upload-script': []
@@ -78,14 +77,18 @@ const onScriptFileChange = (e: Event) => {
       />
       <div class="flex justify-between items-center mt-2">
         <span class="text-xs text-gray-500">{{ wordCount }} слов</span>
-        <UiButton
-          variant="secondary"
-          size="sm"
-          :loading="saving"
-          @click="emit('save')"
-        >
-          Сохранить
-        </UiButton>
+        <span
+          v-if="saveStatus === 'saving'"
+          class="text-xs text-gray-400"
+        >Сохранение…</span>
+        <span
+          v-else-if="saveStatus === 'saved'"
+          class="text-xs text-emerald-600"
+        >Сохранено</span>
+        <span
+          v-else-if="saveStatus === 'error'"
+          class="text-xs text-rose-600"
+        >Ошибка сохранения</span>
       </div>
     </div>
   </section>

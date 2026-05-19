@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Sparkles, ChevronDown, AlertCircle } from 'lucide-vue-next'
+import { Sparkles, ChevronDown, AlertCircle, Square } from 'lucide-vue-next'
 
 defineProps<{
   hasPptx: boolean
@@ -13,10 +13,12 @@ defineProps<{
   lessonStatus: string
   showSlideEditor: boolean
   lessonId: string
+  cancellingAnalysis: boolean
 }>()
 
 const emit = defineEmits<{
   'start-analyze': []
+  'cancel-analyze': []
   'toggle-slide-editor': []
   'slide-back': []
   'slide-ready': []
@@ -65,6 +67,15 @@ const emit = defineEmits<{
         >
           <template #icon><Sparkles class="w-4 h-4" /></template>
           {{ (lessonStatus === 'ready_for_edit' || lessonStatus === 'published') ? 'Перезапустить анализ' : 'Запустить анализ' }}
+        </UiButton>
+        <UiButton
+          v-if="analyzing"
+          variant="secondary"
+          :loading="cancellingAnalysis"
+          @click="emit('cancel-analyze')"
+        >
+          <template #icon><Square class="w-4 h-4" /></template>
+          Остановить
         </UiButton>
       </div>
     </section>
