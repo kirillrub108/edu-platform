@@ -1003,7 +1003,6 @@ docker-compose exec backend alembic upgrade head
 ## 7.4 DX и поддерживаемость
 
 - **Нет CONTRIBUTING.md** и единого стиля комментариев.
-- **`pages/lessons/[id].vue` — 640 строк** — пора декомпозировать.
 - **Дублируется `_get_owned_lesson`** в `routers/lessons.py` и `routers/slides.py` — копипаста.
 - **`utils/slide_renderer.py` дублирует логику из `services/video_service.py:convert_pptx_to_images`** — два пайплайна делают одно и то же. Один из них мёртвый код.
 - **Магические числа без констант:** `_SILERO_MAX_CHARS = 800`, `MAX_SCRIPT_BYTES`, `_SLIDE_DPI = 150`. Хорошо, что вынесены, плохо — раскиданы по разным файлам.
