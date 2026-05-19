@@ -262,12 +262,14 @@ const pollAnalyzeStatus = async () => {
     if (res.status === 'SUCCESS') {
       stopAnalyzePolling()
       analyzing.value = false
+      visionPanelRef.value?.clearSnapshot()
       await load()
       showSlideEditor.value = true
     } else if (res.status === 'FAILURE' || res.error) {
       stopAnalyzePolling()
       analyzing.value = false
       analyzeError.value = res.error ?? 'Ошибка анализа'
+      visionPanelRef.value?.restoreFromSnapshot()
     }
   } catch {
     // network glitch — keep polling
@@ -278,6 +280,9 @@ const startAnalyze = async () => {
   if (!lesson.value?.pptx_path) {
     analyzeError.value = 'Сначала загрузите презентацию'
     return
+  }
+  if (showSlideEditor.value) {
+    visionPanelRef.value?.takeSnapshot()
   }
   analyzeError.value = ''
   analyzeMeta.value = null
@@ -362,6 +367,7 @@ const pollStatus = async () => {
   }
 }
 
+const visionPanelRef = ref()
 const cancellingAnalysis = ref(false)
 const cancellingVideo = ref(false)
 const warningDismissed = ref(false)
@@ -415,6 +421,7 @@ const cancelAnalysis = async () => {
     analyzeStatus.value = ''
     analyzeMeta.value = null
     lesson.value = { ...lesson.value, status: 'draft', analyze_task_id: null }
+    visionPanelRef.value?.restoreFromSnapshot()
   } catch (e: any) {
     analyzeError.value = e?.data?.detail ?? 'Не удалось отменить анализ'
   } finally {
@@ -432,7 +439,10 @@ const cancelVideo = async () => {
     taskStatus.value = ''
     taskMeta.value = null
     taskError.value = ''
+    const savedScrollY = window.scrollY
     await load()
+    await nextTick()
+    window.scrollTo({ top: savedScrollY, behavior: 'instant' })
     // Ensure slide editor is visible after cancel regardless of what status load() saw
     // (e.g. task completed just before cancel committed → load sees 'published').
     if (isAuto.value) showSlideEditor.value = true
@@ -547,6 +557,7 @@ const canGenerateVideo = computed(() => {
     <!-- 3b+3c. Auto: vision analysis + slide editor -->
     <LessonVisionPanel
       v-if="isAuto"
+      ref="visionPanelRef"
       :has-pptx="!!lesson.pptx_path"
       :analyzing="analyzing"
       :analyze-status="analyzeStatus"

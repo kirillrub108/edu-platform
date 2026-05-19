@@ -1,6 +1,14 @@
 <script setup lang="ts">
 import { Sparkles, ChevronDown, AlertCircle, Square } from 'lucide-vue-next'
 
+const slideEditorRef = ref()
+
+defineExpose({
+  takeSnapshot: () => slideEditorRef.value?.takeSnapshot(),
+  clearSnapshot: () => slideEditorRef.value?.clearSnapshot(),
+  restoreFromSnapshot: () => slideEditorRef.value?.restoreFromSnapshot(),
+})
+
 defineProps<{
   hasPptx: boolean
   analyzing: boolean
@@ -101,6 +109,7 @@ const emit = defineEmits<{
       </button>
       <div v-if="showSlideEditor" class="px-6 pb-6">
         <SlideTextEditor
+          ref="slideEditorRef"
           :lesson-id="lessonId"
           @back="emit('slide-back')"
           @ready="emit('slide-ready')"

@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     LLM_TEMPERATURE: float = 0.7
     LLM_MAX_TOKENS: int = 2048
 
+    # Model used to refine vision output during single-slide regeneration.
+    # Defaults to the same text LLM as LLM_MODEL; set independently if you
+    # want a different model for the polish pass (e.g. qwen3:8b vs a heavier model).
+    REGEN_LLM_MODEL: str = "qwen3:8b"
+
     # Vision LLM
     VISION_PROVIDER: str = "ollama"  # ollama | yandex
     VISION_MODEL: str = "qwen2-vl:7b"

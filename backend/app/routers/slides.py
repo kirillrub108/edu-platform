@@ -18,6 +18,8 @@ from app.schemas.slide import (
     SlideTextOut,
     SlideTextUpdate,
 )
+from app.config import settings
+from app.services.llm_service import llm_service
 from app.services.storage_service import storage_service
 from app.services.vision_analysis import vision_analysis_service
 from app.tasks.vision_pipeline import analyze_presentation_task
@@ -197,12 +199,19 @@ async def regenerate_slide_text(
 
     image_full_path = storage_service.get_full_path(row.image_path)
     try:
-        text = await vision_analysis_service.analyze_slide(
+        # Phase 1: vision model (VISION_MODEL) extracts narration from the slide image.
+        # Phase 2: text LLM (REGEN_LLM_MODEL = qwen3:8b) polishes the raw vision output.
+        # Two phases because analyze_slide is vision-only — there is no text-LLM pass
+        # inside the standard vision pipeline that we could redirect.
+        vision_text = await vision_analysis_service.analyze_slide(
             slide_image_path=image_full_path,
             slide_number=row.slide_number,
             total_slides=total,
             course_title=lesson.title or "",
             previous_context=previous_context,
+        )
+        text = await llm_service.refine_slide_narration(
+            vision_text, model=settings.REGEN_LLM_MODEL
         )
     except Exception as exc:
         logger.exception("regenerate failed for slide %s", slide_id)

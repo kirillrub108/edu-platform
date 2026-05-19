@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ChevronLeft, ChevronRight, Sparkles, Save, FileText } from 'lucide-vue-next'
+import { ChevronLeft, ChevronRight, Sparkles, Save, FileText, RotateCcw } from 'lucide-vue-next'
 import ProgressBar from './ProgressBar.vue'
 import UiButton from './UiButton.vue'
 
@@ -29,6 +29,14 @@ const buffer = ref('')
 const savingIds = ref<Set<string>>(new Set())
 const regenIds = ref<Set<string>>(new Set())
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+const previousText = ref('')
+const canRevert = ref(false)
+const regenController = ref<AbortController | null>(null)
+
+const snapshot = ref<SlideText[] | null>(null)
+const restoreNotice = ref('')
+let restoreNoticeTimer: ReturnType<typeof setTimeout> | null = null
 
 const current = computed<SlideText | null>(() => slides.value[currentIdx.value] ?? null)
 const wordsPerMinute = 130
@@ -98,22 +106,43 @@ const goTo = async (idx: number) => {
 const next = () => goTo(currentIdx.value + 1)
 const prev = () => goTo(currentIdx.value - 1)
 
+const cancelRegen = () => {
+  regenController.value?.abort()
+}
+
+const revertText = () => {
+  buffer.value = previousText.value
+  canRevert.value = false
+  scheduleSave()
+}
+
 const regenerate = async () => {
   const slide = current.value
   if (!slide) return
+  // Abort any in-flight regen for this slot before starting a new one
+  regenController.value?.abort()
+  previousText.value = buffer.value
+  canRevert.value = false
+  const controller = new AbortController()
+  regenController.value = controller
   regenIds.value.add(slide.id)
   try {
     const updated = await apiFetch<SlideText>(
       `/lessons/${props.lessonId}/slides/${slide.id}/regenerate`,
-      { method: 'POST' },
+      { method: 'POST', signal: controller.signal },
     )
     const idx = slides.value.findIndex(s => s.id === slide.id)
     if (idx >= 0) slides.value[idx] = updated
     if (slide.id === current.value?.id) {
       buffer.value = updated.edited_text ?? updated.generated_text ?? ''
+      canRevert.value = true
     }
+  } catch (err: any) {
+    if (err?.name === 'AbortError' || err?.cause?.name === 'AbortError') return
+    throw err
   } finally {
     regenIds.value.delete(slide.id)
+    if (regenController.value === controller) regenController.value = null
   }
 }
 
@@ -130,6 +159,48 @@ const onKeydown = (e: KeyboardEvent) => {
 const isSavingCurrent = computed(() => current.value && savingIds.value.has(current.value.id))
 const isRegenCurrent = computed(() => current.value && regenIds.value.has(current.value.id))
 
+const takeSnapshot = () => {
+  snapshot.value = slides.value.map(s => ({ ...s }))
+}
+
+const clearSnapshot = () => {
+  snapshot.value = null
+}
+
+const restoreFromSnapshot = async () => {
+  if (!snapshot.value || snapshot.value.length === 0) return
+  const toRestore = snapshot.value
+  snapshot.value = null
+  try {
+    const results = await Promise.all(
+      toRestore.map(s =>
+        apiFetch<SlideText>(
+          `/lessons/${props.lessonId}/slides/${s.id}`,
+          { method: 'PATCH', body: { edited_text: s.edited_text ?? s.generated_text } },
+        ),
+      ),
+    )
+    slides.value = results
+    if (slides.value.length > 0) {
+      buffer.value = current.value?.edited_text ?? current.value?.generated_text ?? ''
+    }
+  } catch {
+    // restore failed silently — slides.value may be stale, loadSlides() will fix on next open
+  }
+  // eslint-disable-next-line no-console
+  console.warn('[SlideTextEditor] Текст слайдов восстановлен из снапшота')
+  if (restoreNoticeTimer) clearTimeout(restoreNoticeTimer)
+  restoreNotice.value = 'Текущий текст восстановлен'
+  restoreNoticeTimer = setTimeout(() => { restoreNotice.value = '' }, 4000)
+}
+
+watch(currentIdx, () => {
+  regenController.value?.abort()
+  regenController.value = null
+  canRevert.value = false
+  previousText.value = ''
+})
+
 onMounted(() => {
   loadSlides()
   window.addEventListener('keydown', onKeydown)
@@ -138,13 +209,21 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', onKeydown)
   if (saveTimer) clearTimeout(saveTimer)
+  if (restoreNoticeTimer) clearTimeout(restoreNoticeTimer)
+  regenController.value?.abort()
 })
 
-defineExpose({ persistCurrent })
+defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot })
 </script>
 
 <template>
   <div class="space-y-4">
+    <div
+      v-if="restoreNotice"
+      class="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-2"
+    >
+      {{ restoreNotice }}
+    </div>
     <div v-if="loading" class="text-sm text-gray-500">Загрузка слайдов…</div>
 
     <div
@@ -223,7 +302,7 @@ defineExpose({ persistCurrent })
               placeholder="Введите текст, который будет озвучен на этом слайде…"
               class="flex-1 min-h-[260px] resize-none px-4 py-3 text-sm leading-relaxed bg-white
                      border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition"
-              @input="scheduleSave"
+              @input="scheduleSave(); canRevert = false"
               @blur="persistCurrent"
             />
             <div class="flex justify-between text-xs text-gray-500 mt-2">
@@ -283,16 +362,35 @@ defineExpose({ persistCurrent })
             />
           </div>
           <div class="px-5 py-3 flex flex-wrap gap-2 justify-between items-center">
-            <UiButton
-              variant="secondary"
-              size="sm"
-              :loading="!!isRegenCurrent"
-              :disabled="!current.image_url"
-              @click="regenerate"
-            >
-              <template #icon><Sparkles class="w-4 h-4" /></template>
-              Регенерировать LLM
-            </UiButton>
+            <div class="flex gap-2 items-center">
+              <UiButton
+                variant="secondary"
+                size="sm"
+                :loading="!!isRegenCurrent"
+                :disabled="!current.image_url"
+                @click="regenerate"
+              >
+                <template #icon><Sparkles class="w-4 h-4" /></template>
+                Регенерировать LLM
+              </UiButton>
+              <UiButton
+                v-if="isRegenCurrent"
+                variant="ghost"
+                size="sm"
+                @click="cancelRegen"
+              >
+                Отмена
+              </UiButton>
+              <UiButton
+                v-if="canRevert && !isRegenCurrent"
+                variant="ghost"
+                size="sm"
+                @click="revertText"
+              >
+                <template #icon><RotateCcw class="w-4 h-4" /></template>
+                Откатить
+              </UiButton>
+            </div>
 
             <div class="flex flex-wrap gap-2">
               <UiButton

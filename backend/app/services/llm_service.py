@@ -90,12 +90,17 @@ class LLMService:
         return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
 
     async def _chat(
-        self, system: str, user: str, json_mode: bool = False, think: bool = False
-    ) -> str:  # noqa: E501
+        self,
+        system: str,
+        user: str,
+        json_mode: bool = False,
+        think: bool = False,
+        model: str | None = None,
+    ) -> str:
         if not think:
             user = user + "\n/no_think"
         kwargs: dict[str, Any] = {
-            "model": self.model,
+            "model": model if model is not None else self.model,
             "messages": [
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -193,6 +198,24 @@ class LLMService:
         }
         response = await self.client.chat.completions.create(**kwargs)
         return self._strip_think(response.choices[0].message.content or "")
+
+    async def refine_slide_narration(self, vision_text: str, model: str) -> str:
+        """Polish the raw vision-model output into clean narration.
+
+        Called after analyze_slide() because regenerate uses a vision-only path
+        (no separate text LLM phase). This step cleans up any vision artifacts
+        and ensures the text reads as natural spoken narration.
+        """
+        system = (
+            "Ты — редактор текста озвучки учебной видеолекции.\n"
+            "Получаешь текст, сгенерированный моделью анализа изображений.\n"
+            "Задача: убрать артефакты (незавершённые фразы, описания дизайна, "
+            "технические метки), исправить стиль — текст должен звучать как "
+            "живая речь преподавателя. Не добавляй новую информацию, не сокращай смысл.\n"
+            "Выведи только готовый текст без комментариев."
+        )
+        logger.debug("refine_slide_narration: using model=%s", model)
+        return await self._chat(system, vision_text, model=model)
 
     async def generate_quiz(
         self, lesson_text: str, questions_count: int = 5

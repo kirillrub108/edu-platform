@@ -90,7 +90,8 @@ const hint = computed(() => {
           v-if="isProcessing"
           variant="secondary"
           :loading="cancellingVideo"
-          @click="emit('cancel')"
+          type="button"
+          @click.prevent="emit('cancel')"
         >
           <template #icon><Square class="w-4 h-4" /></template>
           Остановить

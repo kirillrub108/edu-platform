@@ -90,6 +90,8 @@ const addLesson = async (moduleId: string) => {
 
 const statusLabel: Record<string, string> = {
   draft: 'Черновик',
+  analyzing: 'Анализируется',
+  ready_for_edit: 'Готов к правке',
   processing: 'Генерируется',
   published: 'Готов',
   error: 'Ошибка',
@@ -97,6 +99,8 @@ const statusLabel: Record<string, string> = {
 
 const statusColor: Record<string, string> = {
   draft: 'bg-gray-100 text-gray-500',
+  analyzing: 'bg-violet-100 text-violet-700',
+  ready_for_edit: 'bg-indigo-100 text-indigo-700',
   processing: 'bg-yellow-100 text-yellow-700',
   published: 'bg-green-100 text-green-700',
   error: 'bg-red-100 text-red-600',
