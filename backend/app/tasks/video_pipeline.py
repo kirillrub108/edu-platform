@@ -4,7 +4,7 @@ import os
 import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -13,6 +13,7 @@ from app.celery_app import celery_app
 from app.config import settings
 from app.models.course import Course
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
+from app.models.lesson_video import LessonVideo
 from app.models.slide_text import SlideText
 from app.services.llm_service import llm_service
 from app.services.storage_service import storage_service
@@ -190,18 +191,12 @@ def generate_video_lesson(
             for i, chunk in enumerate(slide_scripts):
                 plain = _TAG_RE.sub("", chunk).strip()
                 if not plain:
-                    fallback_text = (
-                        slide_summaries[i].strip()
-                        if slide_summaries and i < len(slide_summaries)
-                        else ""
-                    ).strip()
-                    if not fallback_text:
-                        fallback_text = f"Слайд {i + 1}"
-                    slide_scripts[i] = f"<p>{fallback_text}</p>"
+                    # slide_summaries are alignment anchors for the LLM, not spoken
+                    # narration — never feed them to TTS. Use a silent placeholder.
+                    slide_scripts[i] = f"<p>Слайд {i + 1}</p>"
                     logger.warning(
-                        "Slide %d had empty SSML chunk; replaced with: %r",
+                        "Slide %d had empty SSML chunk; replaced with placeholder",
                         i + 1,
-                        slide_scripts[i],
                     )
             _progress("llm", 1, 1)
 
@@ -261,7 +256,9 @@ def generate_video_lesson(
                     _progress("encoding", enc_done, total_slides)
 
             # ── 4. Concatenate segments → final MP4 ───────────────────────────
-            video_relative = f"videos/{lesson_id}.mp4"
+            # Each generation gets its own file so history entries stay independent.
+            video_uuid = uuid4()
+            video_relative = f"videos/{lesson_id}/{video_uuid}.mp4"
             video_full = storage_service.get_full_path(video_relative)
             os.makedirs(os.path.dirname(video_full), exist_ok=True)
 
@@ -277,10 +274,22 @@ def generate_video_lesson(
             owner_module = session.get(Module, owner_lesson.module_id)
             owner_course = session.get(Course, owner_module.course_id)
             video_url = storage_service.get_url(video_relative, str(owner_course.owner_id))
-            _set_status(session, lesson_uuid, LessonStatus.published, video_url)
+
+            new_video = LessonVideo(
+                id=video_uuid,
+                lesson_id=lesson_uuid,
+                video_url=video_url,
+                voice=effective_voice,
+                creation_mode=mode.value,
+                is_published=False,
+            )
+            session.add(new_video)
+            video_id = str(video_uuid)
+            # _set_status commits the session, which also persists new_video.
+            _set_status(session, lesson_uuid, LessonStatus.published)
 
             _success = True
-            return {"status": "ok", "video_url": video_url}
+            return {"status": "ok", "video_id": video_id, "video_url": video_url}
 
         except Exception as exc:
             logger.exception("Video pipeline failed for lesson %s", lesson_id)

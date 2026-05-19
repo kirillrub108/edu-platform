@@ -19,10 +19,7 @@ declare global {
   interface Window { __scrollRestoring?: boolean }
 }
 
-const log = (...args: unknown[]) => console.log('[FS]', `t=${(performance.now() | 0)}ms`, ...args)
-
 export default defineNuxtPlugin(() => {
-  log('plugin loaded v3 — capture-outside-fullscreen')
 
   let lastUserY = 0
   let lastUserPath = window.location.pathname + window.location.search + window.location.hash
@@ -34,15 +31,12 @@ export default defineNuxtPlugin(() => {
     if (!fsEl) {
       lastUserY = window.scrollY
       lastUserPath = window.location.pathname + window.location.search + window.location.hash
-    } else {
-      log('scroll IGNORED (in fullscreen) | fsEl=', fsEl.tagName, '| browser scrollY=', window.scrollY)
     }
   }, { passive: true })
 
   const apply = (target: number) => window.scrollTo({ top: target, left: 0 })
 
   const restore = (target: number, path: string) => {
-    log('=== RESTORE START === target=', target, '| currentY=', window.scrollY, '| body.scrollHeight=', document.body.scrollHeight)
     window.__scrollRestoring = true
 
     requestAnimationFrame(() => {
@@ -58,19 +52,13 @@ export default defineNuxtPlugin(() => {
       try { sessionStorage.setItem('scroll:' + path, String(target)) } catch {}
       setTimeout(() => {
         window.__scrollRestoring = false
-        log('=== RESTORE END === finalY=', window.scrollY)
       }, 300)
     }, 1200)
   }
 
   document.addEventListener('fullscreenchange', () => {
     const el = document.fullscreenElement
-    log('fullscreenchange | el=', el?.tagName ?? 'null', '| browser scrollY=', window.scrollY, '| lastUserY=', lastUserY)
-
-    if (el) {
-      log('>>> ENTER fullscreen — will restore to lastUserY=', lastUserY, '(browser sees scrollY=', window.scrollY, ')')
-    } else {
-      log('<<< EXIT fullscreen — restoring to', lastUserY)
+    if (!el) {
       restore(lastUserY, lastUserPath)
     }
   })

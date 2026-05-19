@@ -112,6 +112,11 @@ class Lesson(Base):
         cascade="all, delete-orphan",
         order_by="SlideText.slide_number",
     )
+    videos = relationship(
+        "LessonVideo",
+        back_populates="lesson",
+        cascade="all, delete-orphan",
+    )
 
 
 class QuizQuestion(Base):

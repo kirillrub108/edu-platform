@@ -400,8 +400,10 @@ def mock_llm_split(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
 @pytest.fixture()
 def mock_vision(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """Patch vision_analysis_service.analyze_slide / analyze_presentation /
-    summarize_presentation so the pipelines complete without an LLM call.
+    summarize_presentation AND llm_service.refine_slide_narration so the
+    pipelines complete without a real LLM call.
     """
+    from app.services import llm_service as llm_mod
     from app.services import vision_analysis as vis_mod
 
     state: dict[str, Any] = {
@@ -438,6 +440,10 @@ def mock_vision(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         state["summarize_calls"] += 1
         return [f"summary {i + 1}" for i in range(len(slide_image_paths))]
 
+    async def _refine_slide_narration(vision_text: str, model: str | None = None) -> str:
+        # Pass the vision text through unchanged — tests assert on the vision return value.
+        return vision_text
+
     monkeypatch.setattr(vis_mod.vision_analysis_service, "analyze_slide", _analyze_slide)
     monkeypatch.setattr(
         vis_mod.vision_analysis_service, "analyze_presentation", _analyze_presentation
@@ -445,6 +451,7 @@ def mock_vision(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     monkeypatch.setattr(
         vis_mod.vision_analysis_service, "summarize_presentation", _summarize_presentation
     )
+    monkeypatch.setattr(llm_mod.llm_service, "refine_slide_narration", _refine_slide_narration)
     return state
 
 

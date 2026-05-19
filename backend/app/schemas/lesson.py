@@ -25,6 +25,18 @@ class LessonUpdate(BaseModel):
     creation_mode: CreationMode | None = None
 
 
+class LessonVideoOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    lesson_id: UUID
+    video_url: str
+    voice: str
+    creation_mode: str
+    is_published: bool
+    created_at: datetime
+
+
 class LessonOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -42,6 +54,7 @@ class LessonOut(BaseModel):
     analyze_task_id: str | None = None
     video_task_id: str | None = None
     last_warning: str | None = None
+    published_video: LessonVideoOut | None = None
     created_at: datetime
     updated_at: datetime
 

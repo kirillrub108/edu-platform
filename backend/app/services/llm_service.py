@@ -124,6 +124,10 @@ class LLMService:
         Returns (chunks, warning) where warning is non-None when the LLM returned
         the wrong number of chunks and fallback splitting was used.
         """
+        # Single slide — nothing to split, annotate the whole script directly.
+        if slides_count == 1:
+            return [await self._annotate_ssml(script)], None
+
         anchors = ""
         if slide_texts:
             anchor_lines = []
@@ -151,12 +155,54 @@ class LLMService:
                 f"LLM вернул {got} чанков вместо {slides_count}. "
                 "Использован fallback — качество озвучки может быть ниже."
             )
-            return self._fallback_ssml(script, slides_count), warning
         except json.JSONDecodeError:
             logger.error("Failed to parse LLM SSML JSON: %s", raw[:300])
-        return self._fallback_ssml(script, slides_count), None
+            warning = None
 
-    def _fallback_ssml(self, text: str, n: int) -> list[str]:
+        # Mechanical split, then annotate each chunk so SSML markup is preserved.
+        raw_chunks = self._split_sentences(script, slides_count)
+        annotated = [await self._annotate_ssml(c) for c in raw_chunks]
+        return annotated, warning
+
+    async def _annotate_ssml(self, text: str) -> str:
+        """Apply the same cleanup + number-to-words + SSML rules as the main
+        split-and-annotate pipeline, but for a single pre-split chunk."""
+        if not text.strip():
+            return "<p></p>"
+        _ANNOTATE_SYSTEM = """\
+You are a strict text formatter for an audio narration system. You DO NOT rewrite or paraphrase content. You DO NOT add new sentences or remove informational sentences.
+
+Apply the following operations to the input text:
+
+A) Cleanup — only remove these meta-tokens that should not be spoken:
+   - Slide labels: "Слайд 1", "Slide 1:", "Слайд №2 —", standalone numerical headers like "1." at the start of lines.
+   - Bullet glyphs at line start: •, *, ‣, –, —, -.
+   - Editor notes in parentheses or brackets that clearly are NOT spoken content: (пауза), (слайд 3), [см. слайд], (note).
+   - DO NOT remove any actual words of the lecture, even if they look redundant.
+
+B) Number-to-words conversion — replace all digits and numeric expressions with their spoken Russian equivalents, choosing the grammatically correct form based on context:
+   - Cardinal/genitive by context: "до 7 метров" → "до семи метров", "100 человек" → "ста человек".
+   - Years: "в 2024 году" → "в две тысячи двадцать четвёртом году".
+   - Percentages: "35%" → "тридцать пять процентов".
+   - Ordinals: "3-й этап" → "третий этап", "1-е место" → "первое место".
+   - Ranges: "5–10 лет" → "от пяти до десяти лет".
+   - Decimals: "3.5 кг" → "три с половиной килограмма".
+   - Large numbers: "1 000 000" → "один миллион".
+   Apply to ALL digits in the output — no digit characters should remain.
+
+C) SSML annotation — wrap the cleaned text with semantic markup. DO NOT wrap in <speak>. Allowed tags only:
+   - <p>...</p> around each paragraph / coherent thought.
+   - <break time="500ms"/> between distinct points within a paragraph.
+   - <break time="800ms"/> between major topic shifts.
+   - <prosody rate="slow">term</prosody> ONLY around defined technical terms when they first appear.
+   Do NOT add prosody pitch, do NOT add <s>, do NOT add anything else.
+
+Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
+        result = await self._chat(_ANNOTATE_SYSTEM, text)
+        return result.strip() if result.strip() else f"<p>{text}</p>"
+
+    def _split_sentences(self, text: str, n: int) -> list[str]:
+        """Mechanically split text into N parts by sentences."""
         sentences = re.split(r"(?<=[.!?])\s+", text.strip())
         chunk_size = max(1, len(sentences) // n)
         chunks: list[str] = []
@@ -164,9 +210,11 @@ class LLMService:
             start = i * chunk_size
             end = start + chunk_size if i < n - 1 else len(sentences)
             chunk = " ".join(sentences[start:end]).strip()
-            ssml = f"<p>{chunk or f'Слайд {i + 1}'}</p>"
-            chunks.append(ssml)
+            chunks.append(chunk or f"Слайд {i + 1}")
         return chunks
+
+    def _fallback_ssml(self, text: str, n: int) -> list[str]:
+        return [f"<p>{c}</p>" for c in self._split_sentences(text, n)]
 
     async def generate_script_from_slide(self, slide_text: str) -> str:
         system = (

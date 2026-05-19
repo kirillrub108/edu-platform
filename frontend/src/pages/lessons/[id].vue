@@ -9,6 +9,8 @@ const lessonId = computed(() => {
   return Array.isArray(id) ? id[0] : id
 })
 
+const { apiFetch } = useApi()
+
 const showSlideEditor = ref(false)
 const warningDismissed = ref(false)
 const visionPanelRef = ref<{
@@ -44,7 +46,64 @@ const lessonStatusForBadge = computed(() => {
   return ['draft', 'analyzing', 'ready_for_edit', 'processing', 'published', 'error'].includes(s) ? s : 'draft'
 })
 
-onMounted(async () => { await load(); await restoreScroll() })
+// ── Video history ─────────────────────────────────────────────────────────────
+
+interface VideoItem {
+  id: string
+  video_url: string
+  voice: string
+  creation_mode: string
+  is_published: boolean
+  created_at: string
+}
+
+const videoHistory = ref<VideoItem[]>([])
+const previewVideoUrl = ref<string | null>(null)
+const publishingVideoId = ref<string | null>(null)
+
+const modeLabels: Record<string, string> = {
+  presentation_and_text: 'Слайды + текст',
+  presentation_auto: 'Слайды (авто)',
+  text_only: 'Только текст',
+  prompt: 'Промпт',
+}
+
+const voiceLabel = (v: string) => voices.find(x => x.value === v)?.label ?? v
+
+const formatDate = (iso: string) =>
+  new Date(iso).toLocaleString('ru-RU', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+
+const loadVideos = async () => {
+  try {
+    videoHistory.value = await apiFetch<VideoItem[]>(`/lessons/${lessonId.value}/videos`)
+  } catch { /* ignore — no history if endpoint fails */ }
+}
+
+const publishVideo = async (video: VideoItem) => {
+  if (video.is_published || publishingVideoId.value) return
+  publishingVideoId.value = video.id
+  try {
+    await apiFetch(`/lessons/${lessonId.value}/videos/${video.id}/publish`, { method: 'POST' })
+    // Optimistic update of the list.
+    videoHistory.value = videoHistory.value.map(v => ({ ...v, is_published: v.id === video.id }))
+    // Refresh lesson so video_url and published_video reflect the new state.
+    lesson.value = await apiFetch<any>(`/lessons/${lessonId.value}`)
+  } catch { /* ignore */ } finally {
+    publishingVideoId.value = null
+  }
+}
+
+// Refresh video list whenever generation finishes (success or failure).
+watch(generating, async (newVal, oldVal) => {
+  if (oldVal && !newVal) await loadVideos()
+})
+
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
+
+onMounted(async () => { await load(); await loadVideos(); await restoreScroll() })
 
 onUnmounted(() => { stopVisionPolling(); stopVideoPolling() })
 
@@ -55,7 +114,10 @@ watch(lessonId, (newId, oldId) => {
   stopVideoPolling()
   showSlideEditor.value = false
   warningDismissed.value = false
+  videoHistory.value = []
+  previewVideoUrl.value = null
   void load()
+  void loadVideos()
 })
 </script>
 
@@ -149,5 +211,59 @@ watch(lessonId, (newId, oldId) => {
       @generate="generateVideo"
       @cancel="cancelVideo"
     />
+
+    <!-- Video history -->
+    <section
+      v-if="videoHistory.length > 0"
+      class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft space-y-4"
+    >
+      <h2 class="text-lg font-semibold text-gray-900">История генераций</h2>
+
+      <!-- Inline preview player -->
+      <video
+        v-if="previewVideoUrl"
+        :key="previewVideoUrl"
+        :src="previewVideoUrl"
+        controls
+        autoplay
+        class="w-full rounded-xl bg-black"
+      />
+
+      <div class="divide-y divide-gray-100">
+        <div
+          v-for="video in videoHistory"
+          :key="video.id"
+          class="flex flex-wrap items-center gap-x-4 gap-y-2 py-3"
+        >
+          <span class="text-sm text-gray-500 w-36 shrink-0 tabular-nums">
+            {{ formatDate(video.created_at) }}
+          </span>
+          <span class="text-sm text-gray-700">{{ voiceLabel(video.voice) }}</span>
+          <span class="text-sm text-gray-400">{{ modeLabels[video.creation_mode] ?? video.creation_mode }}</span>
+          <span
+            v-if="video.is_published"
+            class="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium"
+          >Опубликовано</span>
+
+          <div class="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              class="text-sm text-gray-500 hover:text-gray-800 transition px-2 py-1 rounded-lg hover:bg-gray-100"
+              title="Предпросмотр"
+              @click="previewVideoUrl = video.video_url"
+            >▶</button>
+            <button
+              type="button"
+              :disabled="video.is_published || publishingVideoId === video.id"
+              class="text-sm font-medium px-3 py-1 rounded-lg border border-violet-200 text-violet-700 hover:bg-violet-50 transition disabled:opacity-40 disabled:pointer-events-none"
+              @click="publishVideo(video)"
+            >
+              <span v-if="publishingVideoId === video.id">…</span>
+              <span v-else>Опубликовать</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 </template>

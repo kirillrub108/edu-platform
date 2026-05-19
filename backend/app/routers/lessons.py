@@ -2,6 +2,7 @@ from uuid import UUID
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
@@ -9,11 +10,13 @@ from app.database import get_db
 from app.dependencies import get_owned_lesson, require_teacher
 from app.models.course import Course
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
+from app.models.lesson_video import LessonVideo
 from app.models.user import User
 from app.schemas.lesson import (
     LessonCreate,
     LessonOut,
     LessonUpdate,
+    LessonVideoOut,
     ScriptUpdateRequest,
     TaskStatusResponse,
     VideoGenerateRequest,
@@ -22,8 +25,17 @@ from app.services.storage_service import storage_service
 from app.tasks.video_pipeline import generate_video_lesson
 
 
-def _lesson_out(lesson: Lesson, user_id: str) -> LessonOut:
+def _lesson_out(
+    lesson: Lesson, user_id: str, published_video: LessonVideoOut | None = None
+) -> LessonOut:
     out = LessonOut.model_validate(lesson)
+    out.video_url = storage_service.resign_url(out.video_url, user_id)
+    out.published_video = published_video
+    return out
+
+
+def _video_out(video: LessonVideo, user_id: str) -> LessonVideoOut:
+    out = LessonVideoOut.model_validate(video)
     out.video_url = storage_service.resign_url(out.video_url, user_id)
     return out
 
@@ -62,8 +74,16 @@ async def get_lesson(
     lesson_id: UUID,
     user: User = Depends(require_teacher),
     lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
 ):
-    return _lesson_out(lesson, str(user.id))
+    result = await db.execute(
+        select(LessonVideo)
+        .where(LessonVideo.lesson_id == lesson_id, LessonVideo.is_published.is_(True))
+        .limit(1)
+    )
+    published = result.scalar_one_or_none()
+    published_out = _video_out(published, str(user.id)) if published else None
+    return _lesson_out(lesson, str(user.id), published_out)
 
 
 @router.put("/{lesson_id}", response_model=LessonOut)
@@ -168,6 +188,7 @@ async def task_status(
     lesson_id: UUID,
     task_id: str,
     lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
 ):
     celery_status = _LESSON_STATUS_TO_CELERY.get(lesson.status, "PENDING")
 
@@ -181,7 +202,17 @@ async def task_status(
     }
 
     if lesson.status == LessonStatus.published:
-        payload["result"] = {"video_url": lesson.video_url}
+        latest_result = await db.execute(
+            select(LessonVideo)
+            .where(LessonVideo.lesson_id == lesson_id)
+            .order_by(LessonVideo.created_at.desc())
+            .limit(1)
+        )
+        lv = latest_result.scalar_one_or_none()
+        payload["result"] = {
+            "video_url": lv.video_url if lv else lesson.video_url,
+            "video_id": str(lv.id) if lv else None,
+        }
         return payload
 
     # Try Redis for live progress details; fails gracefully if Redis is down.
@@ -202,3 +233,56 @@ async def task_status(
         pass
 
     return payload
+
+
+@router.get("/{lesson_id}/videos", response_model=list[LessonVideoOut])
+async def list_videos(
+    lesson_id: UUID,
+    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(LessonVideo)
+        .where(LessonVideo.lesson_id == lesson_id)
+        .order_by(LessonVideo.created_at.desc())
+    )
+    return [_video_out(v, str(user.id)) for v in result.scalars().all()]
+
+
+@router.post("/{lesson_id}/videos/{video_id}/publish", response_model=LessonVideoOut)
+async def publish_video(
+    lesson_id: UUID,
+    video_id: UUID,
+    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(LessonVideo).where(
+            LessonVideo.id == video_id,
+            LessonVideo.lesson_id == lesson_id,
+        )
+    )
+    video = result.scalar_one_or_none()
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    # Idempotent: already published — return as-is.
+    if video.is_published:
+        return _video_out(video, str(user.id))
+
+    # Unpublish all other videos for this lesson.
+    await db.execute(
+        update(LessonVideo)
+        .where(LessonVideo.lesson_id == lesson_id, LessonVideo.is_published.is_(True))
+        .values(is_published=False)
+    )
+
+    video.is_published = True
+    # Keep lesson.video_url in sync so the student player keeps working.
+    lesson.video_url = video.video_url
+    await db.commit()
+    await db.refresh(video)
+
+    return _video_out(video, str(user.id))

@@ -26,6 +26,7 @@ from app.models.lesson import (
     LessonStatus,
     Module,
 )
+from app.models.lesson_video import LessonVideo
 from app.models.slide_text import SlideText
 from app.models.user import User, UserRole
 from app.services.auth_service import hash_password
@@ -58,7 +59,7 @@ def sync_session(_alembic_upgraded: None) -> Iterator[Session]:
                 text(
                     "TRUNCATE TABLE "
                     "lesson_progress, enrollments, slide_texts, quiz_questions, "
-                    "lessons, modules, courses, users "
+                    "lesson_videos, lessons, modules, courses, users "
                     "RESTART IDENTITY CASCADE"
                 )
             )
@@ -183,12 +184,18 @@ def test_generate_video_lesson_happy_path(
     ).get()
     assert result["status"] == "ok"
     assert result["video_url"]
+    assert result["video_id"]
 
     sync_session.expire_all()
     refreshed = sync_session.get(Lesson, lesson.id)
     assert refreshed is not None
     assert refreshed.status == LessonStatus.published
-    assert refreshed.video_url is not None
+    # video_url on the lesson is only set via /publish — pipeline writes to lesson_videos.
+    lv = sync_session.query(LessonVideo).filter(LessonVideo.lesson_id == lesson.id).one()
+    assert lv.video_url == result["video_url"]
+    assert str(lv.id) == result["video_id"]
+    assert lv.is_published is False
+    assert lv.voice == "xenia"
 
 
 def test_generate_video_lesson_marks_error_on_tts_failure(
