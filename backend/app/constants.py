@@ -13,3 +13,7 @@ ENCODE_WORKERS: int = 3  # concurrent FFmpeg processes; leaves headroom for LO a
 
 # Quiz
 QUIZ_PASS_THRESHOLD: float = 0.6
+QUIZ_NUM_QUESTIONS: int = 5
+QUIZ_NUM_OPTIONS: int = 4
+QUIZ_LLM_TEMPERATURE: float = 0.2
+QUIZ_MAX_MATERIAL_CHARS: int = 12000

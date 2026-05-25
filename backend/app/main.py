@@ -15,7 +15,7 @@ from app.config import settings
 from app.database import engine
 from app.limiter import limiter
 from app.redis_client import close_redis
-from app.routers import auth, courses, files, lessons, slides, students, uploads
+from app.routers import auth, courses, files, lessons, quiz_teacher, slides, students, uploads
 
 logging.basicConfig(
     level=logging.INFO,
@@ -166,6 +166,7 @@ app.include_router(auth.router)
 app.include_router(courses.router)
 app.include_router(lessons.router)
 app.include_router(slides.router)
+app.include_router(quiz_teacher.router)
 app.include_router(uploads.router)
 app.include_router(students.router)
 app.include_router(files.router)

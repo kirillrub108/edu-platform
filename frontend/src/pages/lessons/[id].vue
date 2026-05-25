@@ -289,6 +289,9 @@ watch(lessonId, (newId, oldId) => {
       </div>
     </section>
 
+    <!-- Quiz authoring -->
+    <QuizEditor :lesson-id="lessonId" :initial-task-id="lesson.quiz_task_id ?? null" />
+
     <!-- Quiz results -->
     <section
       v-if="quizResults.length > 0"

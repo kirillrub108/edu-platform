@@ -1,13 +1,19 @@
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.constants import QUIZ_LLM_TEMPERATURE
+from app.schemas.quiz import FlagKind, GeneratedQuestion, QuestionFlag, RegenerateMode
 
 logger = logging.getLogger(__name__)
+
+
+class LLMOutputError(RuntimeError):
+    """Raised when the LLM returns malformed output after the retry budget."""
 
 LECTURE_ENHANCEMENT_PROMPT = """\
 Ты — методист и редактор образовательного контента.
@@ -96,6 +102,7 @@ class LLMService:
         json_mode: bool = False,
         think: bool = False,
         model: str | None = None,
+        temperature: float = 0.1,
     ) -> str:
         if not think:
             user = user + "\n/no_think"
@@ -105,13 +112,45 @@ class LLMService:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ],
-            "temperature": 0.1,
+            "temperature": temperature,
         }
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
         response = await self.client.chat.completions.create(**kwargs)
         return self._strip_think(response.choices[0].message.content or "")
+
+    async def _chat_json_validated[T](
+        self,
+        system: str,
+        user: str,
+        validator: Callable[[dict[str, Any]], T],
+        *,
+        temperature: float = 0.1,
+        purpose: str = "llm",
+    ) -> T:
+        """Call the LLM in JSON mode, parse, validate; retry once on malformed
+        output. Raises LLMOutputError if both attempts fail validation.
+
+        The validator returns the typed payload or raises ValueError for shape
+        problems — the retry only triggers on JSONDecodeError or ValueError.
+        """
+        last_error: str | None = None
+        for attempt in range(2):
+            raw = await self._chat(system, user, json_mode=True, temperature=temperature)
+            try:
+                data = json.loads(raw)
+                return validator(data)
+            except (json.JSONDecodeError, ValueError) as exc:
+                last_error = str(exc)
+                logger.warning(
+                    "%s: malformed LLM output (attempt %d/2): %s; raw=%s",
+                    purpose,
+                    attempt + 1,
+                    exc,
+                    raw[:300],
+                )
+        raise LLMOutputError(f"{purpose}: LLM returned invalid output: {last_error}")
 
     async def split_and_annotate_ssml(
         self,
@@ -266,22 +305,241 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         return await self._chat(system, vision_text, model=model)
 
     async def generate_quiz(
-        self, lesson_text: str, questions_count: int = 5
-    ) -> list[dict[str, Any]]:
-        system = (
-            "Generate a multiple-choice quiz from the lesson. "
-            'Output JSON: {"questions": [{"question": "...", "options": ["a","b","c","d"], '
-            '"correct_index": 0}, ...]}'
-        )
-        user = f"Questions count: {questions_count}\n\nLesson:\n{lesson_text}"
+        self,
+        material: str,
+        *,
+        num_questions: int,
+        num_options: int,
+    ) -> list[GeneratedQuestion]:
+        """Generate a multiple-choice quiz strictly grounded in `material`.
 
-        raw = await self._chat(system, user, json_mode=True, think=True)
-        try:
-            data = json.loads(raw)
-            return data.get("questions", [])
-        except json.JSONDecodeError:
-            logger.error("Failed to parse quiz JSON: %s", raw)
+        Returns validated questions. Raises LLMOutputError if the LLM refuses
+        to produce well-formed output after one retry.
+        """
+        system = _QUIZ_GENERATE_SYSTEM
+        user = (
+            f"Кол-во вопросов: {num_questions}\n"
+            f"Кол-во вариантов на вопрос: {num_options}\n\n"
+            f"Материал:\n{material}"
+        )
+
+        def _validate(data: dict[str, Any]) -> list[GeneratedQuestion]:
+            raw_questions = data.get("questions")
+            if not isinstance(raw_questions, list) or not raw_questions:
+                raise ValueError("missing or empty 'questions' array")
+            if len(raw_questions) != num_questions:
+                raise ValueError(
+                    f"expected {num_questions} questions, got {len(raw_questions)}"
+                )
+            return [_parse_question(item, num_options) for item in raw_questions]
+
+        return await self._chat_json_validated(
+            system,
+            user,
+            _validate,
+            temperature=QUIZ_LLM_TEMPERATURE,
+            purpose="generate_quiz",
+        )
+
+    async def regenerate_quiz_question(
+        self,
+        material: str,
+        question: GeneratedQuestion,
+        mode: RegenerateMode,
+        num_options: int,
+    ) -> GeneratedQuestion:
+        """Apply a single-question transformation. For `improve_distractors`
+        the correct option text must remain identical — enforced as a
+        retry-triggering validation error so the user never gets a silently
+        mutated answer.
+        """
+        system = _QUIZ_REGENERATE_SYSTEM_BASE + "\n\n" + _REGENERATE_MODE_RULES[mode]
+        current = {
+            "question": question.question,
+            "options": list(question.options),
+            "correct_index": question.correct_index,
+        }
+        user = (
+            f"Кол-во вариантов: {num_options}\n\n"
+            f"Материал:\n{material}\n\n"
+            f"Текущий вопрос (JSON):\n{json.dumps(current, ensure_ascii=False)}"
+        )
+
+        expected_correct = question.options[question.correct_index].strip().lower()
+
+        def _validate(data: dict[str, Any]) -> GeneratedQuestion:
+            parsed = _parse_question(data, num_options)
+            if mode == "improve_distractors":
+                got = parsed.options[parsed.correct_index].strip().lower()
+                if got != expected_correct:
+                    raise ValueError(
+                        "improve_distractors must preserve the correct option text"
+                    )
+            return parsed
+
+        return await self._chat_json_validated(
+            system,
+            user,
+            _validate,
+            temperature=QUIZ_LLM_TEMPERATURE,
+            purpose=f"regenerate_quiz_question:{mode}",
+        )
+
+    async def qa_review_quiz(
+        self,
+        material: str,
+        questions: list[dict[str, Any]],
+    ) -> list[QuestionFlag]:
+        """Review each question against `material` and return per-question
+        flags. Pure read — no DB writes. UUIDs are taken from the input list
+        (the LLM is given them only to address answers, but its echoed ids are
+        ignored to avoid hallucinated values).
+        """
+        if not questions:
             return []
+
+        system = _QUIZ_QA_SYSTEM
+        payload = [
+            {
+                "question_id": str(q["id"]),
+                "question": q["question"],
+                "options": list(q["options"]),
+                "correct_index": int(q["correct_index"]),
+            }
+            for q in questions
+        ]
+        user = (
+            f"Материал:\n{material}\n\n"
+            f"Вопросы (JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+        )
+
+        valid_kinds: set[FlagKind] = {"ok", "wrong_answer", "ambiguous", "duplicate"}
+
+        def _validate(data: dict[str, Any]) -> list[QuestionFlag]:
+            raw_flags = data.get("flags")
+            if not isinstance(raw_flags, list):
+                raise ValueError("missing 'flags' array")
+            if len(raw_flags) != len(questions):
+                raise ValueError(
+                    f"expected {len(questions)} flags, got {len(raw_flags)}"
+                )
+            flags: list[QuestionFlag] = []
+            for idx, item in enumerate(raw_flags):
+                if not isinstance(item, dict):
+                    raise ValueError(f"flag #{idx} is not an object")
+                kind = item.get("kind")
+                if kind not in valid_kinds:
+                    raise ValueError(f"flag #{idx}: invalid kind={kind!r}")
+                note = item.get("note") or ""
+                if not isinstance(note, str):
+                    raise ValueError(f"flag #{idx}: note must be a string")
+                flags.append(
+                    QuestionFlag(
+                        question_id=questions[idx]["id"],
+                        kind=kind,
+                        note=note.strip()[:300],
+                    )
+                )
+            return flags
+
+        return await self._chat_json_validated(
+            system,
+            user,
+            _validate,
+            temperature=QUIZ_LLM_TEMPERATURE,
+            purpose="qa_review_quiz",
+        )
+
+
+def _parse_question(item: Any, num_options: int) -> GeneratedQuestion:
+    """Strict parser for a single quiz question from raw LLM JSON."""
+    if not isinstance(item, dict):
+        raise ValueError("question item is not a JSON object")
+    question = item.get("question")
+    options = item.get("options")
+    correct_index = item.get("correct_index")
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("'question' must be a non-empty string")
+    if not isinstance(options, list) or len(options) != num_options:
+        raise ValueError(f"'options' must be a list of exactly {num_options} strings")
+    cleaned: list[str] = []
+    for opt in options:
+        if not isinstance(opt, str) or not opt.strip():
+            raise ValueError("each option must be a non-empty string")
+        cleaned.append(opt.strip())
+    seen: set[str] = set()
+    for opt in cleaned:
+        key = opt.lower()
+        if key in seen:
+            raise ValueError(f"duplicate option: {opt!r}")
+        seen.add(key)
+    if not isinstance(correct_index, int) or isinstance(correct_index, bool):
+        raise ValueError("'correct_index' must be an integer")
+    if not 0 <= correct_index < num_options:
+        raise ValueError(f"'correct_index' out of range: {correct_index}")
+    return GeneratedQuestion(
+        question=question.strip(),
+        options=cleaned,
+        correct_index=correct_index,
+    )
+
+
+_QUIZ_GENERATE_SYSTEM = """\
+Ты — методист, составляющий проверочный тест по материалу лекции.
+Делай ровно N вопросов с одиночным выбором (multiple choice, один правильный).
+Требования:
+- Все вопросы и варианты — на русском, в стиле учебной проверки понимания.
+- Варианты в одном вопросе НЕ повторяются и не являются перефразом друг друга.
+- Ровно K вариантов на вопрос; correct_index — индекс правильного варианта (0..K-1).
+- Не задавай вопросы про оформление слайдов или мета-информацию — только про содержание.
+- Не выходи за рамки предоставленного материала: не выдумывай факты.
+
+Формат ответа — СТРОГО JSON-объект:
+{"questions":[{"question":"...","options":["...","...","...","..."],"correct_index":0}, ...]}
+Никакого текста вне JSON.
+"""
+
+
+_QUIZ_REGENERATE_SYSTEM_BASE = """\
+Ты — методист, редактирующий один вопрос проверочного теста.
+Сохраняй смысл вопроса в рамках предоставленного материала; не выдумывай факты.
+Варианты не должны повторяться; ровно K вариантов; correct_index в диапазоне 0..K-1.
+
+Формат ответа — СТРОГО JSON-объект:
+{"question":"...","options":["...","...","..."],"correct_index":0}
+Никакого текста вне JSON.
+"""
+
+
+_REGENERATE_MODE_RULES: dict[RegenerateMode, str] = {
+    "rephrase": "Задача: перефразируй вопрос и варианты, сохраняя смысл и тот же правильный ответ.",
+    "harder": (
+        "Задача: сделай вопрос сложнее — более тонкая формулировка, "
+        "правдоподобные дистракторы; правильный ответ по сути тот же."
+    ),
+    "easier": "Задача: упрости формулировку и варианты, сохрани правильный ответ.",
+    "improve_distractors": (
+        "Задача: оставь вопрос и правильный ответ ТЕКСТУАЛЬНО неизменными. "
+        "Перепиши только неправильные варианты так, чтобы они были правдоподобны, "
+        "но однозначно неверны согласно материалу."
+    ),
+}
+
+
+_QUIZ_QA_SYSTEM = """\
+Ты — рецензент тестов. Получаешь материал лекции и список вопросов с правильными ответами.
+Для каждого вопроса оцени:
+- "ok" — корректен, ответ соответствует материалу;
+- "wrong_answer" — отмеченный correct_index НЕ является верным согласно материалу;
+- "ambiguous" — несколько вариантов могут быть верны / формулировка неоднозначна;
+- "duplicate" — этот вопрос дублирует другой (укажи смысловой дубликат).
+Поле note: краткое (до 160 симв.) объяснение. Для "ok" — пустая строка.
+
+Формат ответа — СТРОГО JSON:
+{"flags":[{"question_id":"<uuid>","kind":"ok|wrong_answer|ambiguous|duplicate","note":"..."}, ...]}
+По одному элементу на каждый вопрос, в том же порядке, что и во входе.
+Никакого текста вне JSON.
+"""
 
 
 llm_service = LLMService()

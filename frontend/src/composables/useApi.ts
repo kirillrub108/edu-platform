@@ -73,7 +73,7 @@ export const useApi = () => {
 
   const apiFetch = async <T = unknown>(
     path: string,
-    options: FetchOptions = {},
+    options: FetchOptions<'json'> = {},
     _isRetry = false,
   ): Promise<T> => {
     const store = useAuthStore()
