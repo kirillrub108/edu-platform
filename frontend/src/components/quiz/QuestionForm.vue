@@ -19,6 +19,9 @@ const emit = defineEmits<{
 
 const local = reactive<Record<string, any>>({ ...props.payload })
 
+// Unique prefix so radio groups don't collide across question cards on the page.
+const uid = Math.random().toString(36).slice(2)
+
 // Sync external changes (e.g. regenerate) into local without losing reactivity.
 watch(
   () => props.payload,
@@ -125,23 +128,32 @@ const removeOrderingItem = (idx: number) => {
     <!-- single_choice -->
     <template v-if="type === 'single_choice'">
       <div class="space-y-1">
+        <p class="text-xs text-gray-400">Нажмите на строку, чтобы отметить правильный ответ</p>
         <div
           v-for="(opt, i) in local.options ?? []"
           :key="i"
-          class="flex items-center gap-2"
+          class="flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer transition-colors"
+          :class="local.correct_index === i
+            ? 'bg-emerald-50 border border-emerald-200'
+            : 'border border-transparent hover:bg-gray-50'"
+          @click="() => { local.correct_index = i; flush() }"
         >
           <input
             type="radio"
+            :name="`scq-${uid}`"
             :checked="local.correct_index === i"
+            class="accent-emerald-600 shrink-0"
+            @click.stop
             @change="() => { local.correct_index = i; flush() }"
           />
           <input
             v-model="local.options[i]"
-            class="flex-1 rounded-lg border border-gray-200 px-2 py-1 text-sm"
+            class="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm focus:border-gray-300 focus:bg-white focus:outline-none"
             placeholder="Вариант"
+            @click.stop
             @input="flush"
           />
-          <button type="button" class="text-xs text-red-500" @click="removeOption(i)">✕</button>
+          <button type="button" class="text-xs text-red-400 hover:text-red-600 shrink-0" @click.stop="removeOption(i)">✕</button>
         </div>
         <button type="button" class="text-xs text-violet-600" @click="addOption">+ вариант</button>
       </div>
@@ -150,23 +162,31 @@ const removeOrderingItem = (idx: number) => {
     <!-- multiple_choice -->
     <template v-if="type === 'multiple_choice'">
       <div class="space-y-1">
+        <p class="text-xs text-gray-400">Нажмите на строку, чтобы отметить правильные ответы</p>
         <div
           v-for="(opt, i) in local.options ?? []"
           :key="i"
-          class="flex items-center gap-2"
+          class="flex items-center gap-2 rounded-lg px-2 py-1.5 cursor-pointer transition-colors"
+          :class="(local.correct_indices ?? []).includes(i)
+            ? 'bg-emerald-50 border border-emerald-200'
+            : 'border border-transparent hover:bg-gray-50'"
+          @click="() => toggleMcIndex(i)"
         >
           <input
             type="checkbox"
             :checked="(local.correct_indices ?? []).includes(i)"
+            class="accent-emerald-600 shrink-0"
+            @click.stop
             @change="() => toggleMcIndex(i)"
           />
           <input
             v-model="local.options[i]"
-            class="flex-1 rounded-lg border border-gray-200 px-2 py-1 text-sm"
+            class="flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-sm focus:border-gray-300 focus:bg-white focus:outline-none"
             placeholder="Вариант"
+            @click.stop
             @input="flush"
           />
-          <button type="button" class="text-xs text-red-500" @click="removeOption(i)">✕</button>
+          <button type="button" class="text-xs text-red-400 hover:text-red-600 shrink-0" @click.stop="removeOption(i)">✕</button>
         </div>
         <button type="button" class="text-xs text-violet-600" @click="addOption">+ вариант</button>
       </div>
@@ -174,18 +194,32 @@ const removeOrderingItem = (idx: number) => {
 
     <!-- true_false -->
     <template v-if="type === 'true_false'">
-      <div class="flex gap-3 text-sm">
-        <label class="flex items-center gap-1">
+      <div class="flex gap-2 text-sm">
+        <label
+          class="flex items-center gap-2 rounded-lg px-3 py-1.5 cursor-pointer transition-colors"
+          :class="local.correct === true
+            ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+            : 'border border-transparent text-gray-700 hover:bg-gray-50'"
+        >
           <input
             type="radio"
+            :name="`tf-${uid}`"
             :checked="local.correct === true"
+            class="accent-emerald-600"
             @change="() => { local.correct = true; flush() }"
           /> Верно
         </label>
-        <label class="flex items-center gap-1">
+        <label
+          class="flex items-center gap-2 rounded-lg px-3 py-1.5 cursor-pointer transition-colors"
+          :class="local.correct === false
+            ? 'bg-emerald-50 border border-emerald-200 text-emerald-800'
+            : 'border border-transparent text-gray-700 hover:bg-gray-50'"
+        >
           <input
             type="radio"
+            :name="`tf-${uid}`"
             :checked="local.correct === false"
+            class="accent-emerald-600"
             @change="() => { local.correct = false; flush() }"
           /> Неверно
         </label>

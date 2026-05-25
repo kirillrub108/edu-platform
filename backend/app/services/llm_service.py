@@ -3,16 +3,45 @@ import logging
 import re
 from typing import Any, Awaitable, Callable
 
+import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
 from app.constants import (
     QUIZ_LLM_OPEN_MAX_TOKENS,
     QUIZ_LLM_TEMPERATURE,
+    QUIZ_MIN_FOR_DISTRIBUTION,
+    QUIZ_TYPE_DISTRIBUTION,
 )
 from app.schemas.quiz import FlagKind, QuestionFlag, RegenerateMode
 
 logger = logging.getLogger(__name__)
+
+
+def _compute_type_counts(n: int, types: list[str]) -> dict[str, int]:
+    """Return how many questions of each type to request.
+
+    If n < QUIZ_MIN_FOR_DISTRIBUTION or types has only one entry, all n go to
+    types[0]. Otherwise uses QUIZ_TYPE_DISTRIBUTION for the known four types,
+    with short_answer absorbing the rounding remainder.
+    """
+    if n < QUIZ_MIN_FOR_DISTRIBUTION or len(types) == 1:
+        return {types[0]: n}
+
+    ordered = ["single_choice", "multiple_choice", "true_false", "short_answer"]
+    active = [t for t in ordered if t in types]
+    if len(active) < 2:
+        return {types[0]: n}
+
+    counts: dict[str, int] = {}
+    for t in active[:-1]:
+        frac = QUIZ_TYPE_DISTRIBUTION.get(t, 0.0)
+        counts[t] = round(n * frac)
+    counts[active[-1]] = n - sum(counts.values())
+    # Clamp negatives from extreme rounding.
+    for t in active:
+        counts[t] = max(0, counts[t])
+    return counts
 
 
 class LLMOutputError(RuntimeError):
@@ -91,6 +120,7 @@ class LLMService:
         self.client = AsyncOpenAI(
             base_url=settings.LLM_BASE_URL,
             api_key=settings.LLM_API_KEY,
+            timeout=httpx.Timeout(None),
         )
         self.model = settings.LLM_MODEL
 
@@ -327,10 +357,23 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         """
         if not types:
             types = ["single_choice"]
-        type_list = ", ".join(types)
+        type_counts = _compute_type_counts(num_questions, types)
+
+        # Build a human-readable breakdown line for the prompt.
+        _type_labels = {
+            "single_choice": "single-choice",
+            "multiple_choice": "multiple-choice",
+            "true_false": "true/false",
+            "short_answer": "short-answer (fill-in-the-blank)",
+        }
+        breakdown = ", ".join(
+            f"{cnt} {_type_labels.get(t, t)}"
+            for t, cnt in type_counts.items()
+            if cnt > 0
+        )
         user = (
-            f"Кол-во вопросов: {num_questions}\n"
-            f"Разрешённые типы: {type_list}\n"
+            f"Кол-во вопросов: {num_questions} ({breakdown})\n"
+            f"Разрешённые типы: {', '.join(t for t, c in type_counts.items() if c > 0)}\n"
             f"Для multiple/single choice: {num_options} вариантов.\n\n"
             f"Материал:\n{material}"
         )
@@ -344,6 +387,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
                     f"expected {num_questions} questions, got {len(raw_questions)}"
                 )
             out: list[dict[str, Any]] = []
+            actual_counts: dict[str, int] = {}
             for idx, item in enumerate(raw_questions):
                 if not isinstance(item, dict):
                     raise ValueError(f"q{idx}: not an object")
@@ -357,6 +401,14 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
                     "weight": "1.0",
                     "order": idx,
                 })
+                actual_counts[qtype] = actual_counts.get(qtype, 0) + 1
+            # Warn if the LLM deviated from the requested distribution.
+            for t, want in type_counts.items():
+                got = actual_counts.get(t, 0)
+                if want > 0 and got != want:
+                    logger.warning(
+                        "generate_quiz_v2: type %r: requested %d, got %d", t, want, got
+                    )
             return out
 
         return await self._chat_json_validated(

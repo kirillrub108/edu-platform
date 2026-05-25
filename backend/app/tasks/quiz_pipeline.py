@@ -27,7 +27,7 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.constants import QUIZ_GRADING_WORKERS
+from app.constants import QUIZ_GRADING_WORKERS, QUIZ_TYPE_DISTRIBUTION
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import Lesson
 from app.models.quiz import (
@@ -71,7 +71,7 @@ def generate_quiz_task(
     types: list[str] | None = None,
 ) -> dict:
     lesson_uuid = UUID(lesson_id)
-    allowed_types = list(types) if types else ["single_choice"]
+    allowed_types = list(types) if types else list(QUIZ_TYPE_DISTRIBUTION.keys())
 
     def _progress(step: str, done: int, total: int) -> None:
         self.update_state(state="PROGRESS", meta={"step": step, "done": done, "total": total})

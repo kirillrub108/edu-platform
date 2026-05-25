@@ -7,12 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
 from app.database import get_db
-from app.dependencies import get_owned_lesson, require_teacher
+from app.dependencies import get_current_user, get_owned_lesson, require_teacher
 from app.models.course import Course
 from app.models.enrollment import Enrollment
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
-from app.models.quiz import AttemptStatus, Quiz, QuizAttempt
+from app.models.quiz import AttemptStatus, Quiz, QuizAttempt, QuizQuestion
 from app.models.user import User
 from app.schemas.lesson import (
     LessonCreate,
@@ -23,7 +23,7 @@ from app.schemas.lesson import (
     TaskStatusResponse,
     VideoGenerateRequest,
 )
-from app.schemas.quiz import QuizTeacherResultRow
+from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
 from app.services.storage_service import storage_service
 from app.tasks.video_pipeline import generate_video_lesson
 
@@ -236,6 +236,26 @@ async def task_status(
         pass
 
     return payload
+
+
+@router.get("/{lesson_id}/quiz/questions", response_model=list[QuizQuestionTeacherRead])
+async def get_quiz_questions(
+    lesson_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    lesson = await db.get(Lesson, lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson_id))
+    if quiz is None:
+        return []
+    result = await db.execute(
+        select(QuizQuestion)
+        .where(QuizQuestion.quiz_id == quiz.id, QuizQuestion.superseded_at.is_(None))
+        .order_by(QuizQuestion.order)
+    )
+    return result.scalars().all()
 
 
 @router.get("/{lesson_id}/quiz-results", response_model=list[QuizTeacherResultRow])

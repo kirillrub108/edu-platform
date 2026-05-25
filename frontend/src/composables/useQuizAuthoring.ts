@@ -142,7 +142,11 @@ export function useQuizAuthoring(lessonId: Readonly<Ref<string>>) {
         stopPolling()
         generating.value = false
         taskId.value = null
-        await load()
+        if (res.error) {
+          generationError.value = res.error
+        } else {
+          await load()
+        }
       } else if (res.status === 'FAILURE' || res.error) {
         stopPolling()
         generating.value = false

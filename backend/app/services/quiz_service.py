@@ -77,7 +77,7 @@ async def assemble_material(
     if not material:
         material = (lesson.text_content or "").strip()
     if not material:
-        raise EmptyMaterialError("lesson has no slides, script, or text_content")
+        raise EmptyMaterialError("У урока нет материала для генерации теста: загрузите презентацию или добавьте текст урока")
     return _truncate(material, max_chars)
 
 
@@ -103,7 +103,7 @@ def assemble_material_sync(
     if not material:
         material = (lesson.text_content or "").strip()
     if not material:
-        raise EmptyMaterialError("lesson has no slides, script, or text_content")
+        raise EmptyMaterialError("У урока нет материала для генерации теста: загрузите презентацию или добавьте текст урока")
     return _truncate(material, max_chars)
 
 

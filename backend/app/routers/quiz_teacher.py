@@ -23,6 +23,7 @@ from app.constants import (
     QUIZ_DEFAULT_WEIGHT,
     QUIZ_NUM_OPTIONS,
     QUIZ_NUM_QUESTIONS,
+    QUIZ_TYPE_DISTRIBUTION,
 )
 from app.database import get_db
 from app.dependencies import get_owned_lesson
@@ -69,6 +70,8 @@ from app.tasks.quiz_pipeline import generate_quiz_task
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/lessons", tags=["quiz-teacher"])
+
+_OPEN_ENDED_TYPES = {"short_answer", "essay"}
 
 
 async def _load_question(
@@ -347,7 +350,7 @@ async def generate_quiz(
 ) -> QuizGenerateResponse:
     num_questions = payload.num_questions or QUIZ_NUM_QUESTIONS
     num_options = payload.num_options or QUIZ_NUM_OPTIONS
-    types: list[str] = list(payload.types) if payload.types else ["single_choice"]
+    types: list[str] = list(payload.types) if payload.types else list(QUIZ_TYPE_DISTRIBUTION.keys())
 
     try:
         await assemble_material(db, lesson)
@@ -460,20 +463,33 @@ async def ai_review(
     if not rows:
         return []
 
-    try:
-        material = await assemble_material(db, lesson)
-    except EmptyMaterialError as exc:
-        raise HTTPException(status_code=409, detail=str(exc))
+    structured: dict[UUID, QuestionFlag] = {}
+    open_ended: list[QuizQuestion] = []
+    for r in rows:
+        if r.type.value in _OPEN_ENDED_TYPES:
+            open_ended.append(r)
+        else:
+            structured[r.id] = QuestionFlag(question_id=r.id, kind="ok", note="")
 
-    payload = [
-        {"id": r.id, "type": r.type.value, "payload": r.payload}
-        for r in rows
-    ]
-    try:
-        return await llm_service.qa_review_quiz(material, payload)
-    except LLMOutputError as exc:
-        logger.warning("qa_review_quiz LLM error: %s", exc)
-        raise HTTPException(status_code=502, detail=f"LLM returned invalid output: {exc}")
+    open_ended_by_id: dict[UUID, QuestionFlag] = {}
+    if open_ended:
+        try:
+            material = await assemble_material(db, lesson)
+        except EmptyMaterialError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
+
+        payload = [
+            {"id": r.id, "type": r.type.value, "payload": r.payload}
+            for r in open_ended
+        ]
+        try:
+            llm_flags = await llm_service.qa_review_quiz(material, payload)
+        except LLMOutputError as exc:
+            logger.warning("qa_review_quiz LLM error: %s", exc)
+            raise HTTPException(status_code=502, detail=f"LLM returned invalid output: {exc}")
+        open_ended_by_id = {f.question_id: f for f in llm_flags}
+
+    return [structured.get(r.id) or open_ended_by_id[r.id] for r in rows]
 
 
 # ── Attempts (teacher review + manual override) ─────────────────────────────

@@ -1,6 +1,6 @@
 export default defineNuxtConfig({
   srcDir: 'src/',
-  devtools: { enabled: true },
+  devtools: { enabled: false },
   modules: ['@nuxtjs/tailwindcss', '@pinia/nuxt'],
   // Hybrid rendering: SSG for landing, CSR for everything else
   routeRules: {

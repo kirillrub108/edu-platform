@@ -79,21 +79,21 @@ const onAddQuestion = async (type: QuestionType) => {
 const defaultPayload = (type: QuestionType): Record<string, any> => {
   switch (type) {
     case 'single_choice':
-      return { type, prompt: '', options: ['', ''], correct_index: 0, explanation: '' }
+      return { type, prompt: 'Введите вопрос', options: ['Вариант 1', 'Вариант 2'], correct_index: 0, explanation: '' }
     case 'multiple_choice':
-      return { type, prompt: '', options: ['', '', ''], correct_indices: [0], explanation: '' }
+      return { type, prompt: 'Введите вопрос', options: ['Вариант 1', 'Вариант 2', 'Вариант 3'], correct_indices: [0], explanation: '' }
     case 'true_false':
-      return { type, prompt: '', correct: true, explanation: '' }
+      return { type, prompt: 'Введите утверждение', correct: true, explanation: '' }
     case 'short_answer':
-      return { type, prompt: '', reference_answer: '', rubric: '' }
+      return { type, prompt: 'Введите вопрос', reference_answer: 'Эталонный ответ', rubric: '' }
     case 'essay':
-      return { type, prompt: '', rubric: '' }
+      return { type, prompt: 'Введите вопрос', rubric: 'Критерии оценки' }
     case 'matching':
-      return { type, prompt: '', left: ['', ''], right: ['', ''], correct_pairs: [[0, 0], [1, 1]], explanation: '' }
+      return { type, prompt: 'Сопоставьте элементы', left: ['Элемент 1', 'Элемент 2'], right: ['Пара 1', 'Пара 2'], correct_pairs: [[0, 0], [1, 1]], explanation: '' }
     case 'ordering':
-      return { type, prompt: '', items: ['', ''], correct_order: [0, 1], explanation: '' }
+      return { type, prompt: 'Упорядочьте элементы', items: ['Элемент 1', 'Элемент 2'], correct_order: [0, 1], explanation: '' }
     case 'fill_blank':
-      return { type, prompt: 'Пример с ___ пропуском.', blanks: [['']], case_insensitive: true, explanation: '' }
+      return { type, prompt: 'Введите текст с ___ пропуском.', blanks: [['ответ']], case_insensitive: true, explanation: '' }
   }
 }
 
@@ -110,11 +110,37 @@ const onDelete = async (q: TeacherQuestion) => {
   await deleteQuestion(q)
 }
 
-const onGenerate = async () => {
+// Generation modal state
+const GENERATABLE_TYPES: { value: QuestionType; label: string }[] = [
+  { value: 'single_choice',   label: 'Один из' },
+  { value: 'multiple_choice', label: 'Несколько из' },
+  { value: 'true_false',      label: 'Верно/Неверно' },
+  { value: 'short_answer',    label: 'Короткий ответ' },
+]
+
+const showGenModal = ref(false)
+const genNumQuestions = ref(5)
+const genTypes = ref<QuestionType[]>(['single_choice', 'multiple_choice', 'true_false', 'short_answer'])
+
+const toggleGenType = (type: QuestionType) => {
+  const idx = genTypes.value.indexOf(type)
+  if (idx === -1) {
+    genTypes.value.push(type)
+  } else if (genTypes.value.length > 1) {
+    genTypes.value.splice(idx, 1)
+  }
+}
+
+const onGenerate = () => {
+  showGenModal.value = true
+}
+
+const onConfirmGenerate = async () => {
   if (questions.value.length > 0) {
     if (!confirm('Существующие вопросы будут заменены. Продолжить?')) return
   }
-  await generate()
+  showGenModal.value = false
+  await generate(genNumQuestions.value, 4, genTypes.value)
 }
 
 const flagBadge = (kind: string) => {
@@ -356,5 +382,60 @@ onUnmounted(() => {
         @click="onAddQuestion(t)"
       >+ {{ TYPE_LABELS[t] }}</button>
     </div>
+
+    <!-- Generation modal -->
+    <Teleport to="body">
+      <div
+        v-if="showGenModal"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        @click.self="showGenModal = false"
+      >
+        <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-5">
+          <h3 class="text-base font-semibold text-gray-900">Настройки генерации</h3>
+
+          <label class="flex flex-col gap-1">
+            <span class="text-sm text-gray-600">Количество вопросов</span>
+            <input
+              v-model.number="genNumQuestions"
+              type="number" min="1" max="20"
+              class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm w-24"
+            />
+          </label>
+
+          <div class="flex flex-col gap-2">
+            <span class="text-sm text-gray-600">Типы вопросов</span>
+            <div class="flex flex-col gap-1.5">
+              <label
+                v-for="t in GENERATABLE_TYPES"
+                :key="t.value"
+                class="flex items-center gap-2 cursor-pointer text-sm"
+              >
+                <input
+                  type="checkbox"
+                  :checked="genTypes.includes(t.value)"
+                  class="accent-violet-600"
+                  @change="toggleGenType(t.value)"
+                />
+                {{ t.label }}
+              </label>
+            </div>
+          </div>
+
+          <div class="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              class="text-sm px-4 py-1.5 rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-50 transition"
+              @click="showGenModal = false"
+            >Отмена</button>
+            <button
+              type="button"
+              class="text-sm px-4 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition disabled:opacity-50"
+              :disabled="genTypes.length === 0"
+              @click="onConfirmGenerate"
+            >Сгенерировать</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </section>
 </template>

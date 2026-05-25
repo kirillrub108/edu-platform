@@ -314,7 +314,7 @@ GeneratableType = Literal[
 class QuizGenerateRequest(BaseModel):
     num_questions: int | None = Field(default=None, ge=1, le=20)
     num_options: int | None = Field(default=None, ge=2, le=8)
-    types: list[GeneratableType] | None = None  # None = single_choice only
+    types: list[GeneratableType] | None = None  # None = use QUIZ_TYPE_DISTRIBUTION default mix
 
 
 class QuizGenerateResponse(BaseModel):
