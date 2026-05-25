@@ -8,11 +8,9 @@ import httpx
 import numpy as np
 
 from app.config import settings
+from app.constants import SILERO_MAX_CHARS
 
 logger = logging.getLogger(__name__)
-
-# Conservative limit: Silero returns 500 on very long inputs.
-_SILERO_MAX_CHARS = 800
 
 
 def _strip_ssml_tags(text: str) -> str:
@@ -28,7 +26,7 @@ def _strip_ssml_tags(text: str) -> str:
     return text.strip()
 
 
-def _split_for_tts(text: str, max_chars: int = _SILERO_MAX_CHARS) -> list[str]:
+def _split_for_tts(text: str, max_chars: int = SILERO_MAX_CHARS) -> list[str]:
     """Split text into chunks ≤ max_chars, breaking at sentence boundaries."""
     if len(text) <= max_chars:
         return [text]

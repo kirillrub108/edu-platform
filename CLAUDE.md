@@ -23,10 +23,13 @@ docker-compose up --build
 docker-compose exec backend alembic revision --autogenerate -m "describe change"
 docker-compose exec backend alembic upgrade head     # usually unnecessary, see "Migrations" below
 
-# Backend tests — run inside the backend image. Coverage is currently minimal
-# (only tests/test_slide_renderer.py exists), so a green run does not imply correctness.
-docker-compose exec backend pytest                    # all
-docker-compose exec backend pytest tests/test_slide_renderer.py::test_name   # single
+# Backend tests — run inside the backend image. Suite is split into
+# tests/unit/ (pure-function / service tests) and tests/integration/ (route tests
+# using the conftest async client + factories).
+docker-compose exec backend pytest                            # all
+docker-compose exec backend pytest tests/unit                 # unit only
+docker-compose exec backend pytest tests/integration          # routes only
+docker-compose exec backend pytest tests/unit/test_tts_service.py::test_name   # single
 
 # Frontend dev server runs in its container on :3000. To run locally instead:
 cd frontend && npm install && npm run dev
@@ -54,7 +57,10 @@ Open URLs:
 Everything (uploaded PPTX, generated PNG/WAV/MP4, caches) is in `backend/storage/`, bind-mounted into the backend and both celery containers. Exposed read-only via FastAPI `StaticFiles` at `/files/*` (URLs are signed — see `services/signed_url_service.py`). Cache directories `slides_cache/` and `summaries_cache/` are keyed by content hash; deleting them is safe and just forces re-rendering.
 
 ### Video pipeline concurrency
-`app/tasks/video_pipeline.py` runs two thread pools in parallel (TTS pool + FFmpeg encoder pool) and chains them with `as_completed` so encoding slide *k* starts the moment its WAV is ready. If you touch this file, preserve the streaming relationship — going back to "TTS all → encode all" roughly doubles pipeline latency.
+`app/tasks/video_pipeline.py` runs two thread pools in parallel (TTS pool + FFmpeg encoder pool) and chains them with `as_completed` so encoding slide *k* starts the moment its WAV is ready. If you touch this file, preserve the streaming relationship — going back to "TTS all → encode all" roughly doubles pipeline latency. Pool sizes and other tunables (`TTS_WORKERS`, `ENCODE_WORKERS`, `SILERO_MAX_CHARS`, `SLIDE_DPI`, `MAX_SCRIPT_BYTES`) live in `app/constants.py` — change them there, not inline.
+
+### Slide rendering
+PPTX → PNG is done inside `services/video_service.py` by shelling out to headless `libreoffice` (PPTX → PDF) then `pdftoppm`. There is no separate `slide_renderer` module anymore. Rendered PNGs are cached under `storage/slides_cache/<content-hash>/` and reused across re-runs.
 
 ### Middleware order in `main.py`
 CORS is added **last** intentionally — `add_middleware` prepends, so the last-registered middleware is outermost. The long comment in `main.py` explains why; do not "clean it up" by reordering.

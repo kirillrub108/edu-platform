@@ -552,44 +552,6 @@ def _disable_rate_limit() -> Iterator[None]:
         yield
 
 
-# ── 8. Legacy fixture preserved for test_slide_renderer.py ──────────────────
-# Existing slide-renderer integration test relies on `sample_pdf`. Keep the
-# tiny inline PDF factory so it still passes when poppler is available.
-
-def _make_minimal_pdf(width: int = 792, height: int = 612) -> bytes:
-    obj1 = b"1 0 obj\n<</Type/Catalog/Pages 2 0 R>>\nendobj\n"
-    obj2 = b"2 0 obj\n<</Type/Pages/Kids[3 0 R]/Count 1>>\nendobj\n"
-    obj3 = (
-        f"3 0 obj\n<</Type/Page/Parent 2 0 R"
-        f"/MediaBox[0 0 {width} {height}]/Resources<<>>>>\nendobj\n"
-    ).encode()
-    header = b"%PDF-1.4\n"
-    buf = header
-    offsets: dict[int, int] = {}
-    for n, obj in [(1, obj1), (2, obj2), (3, obj3)]:
-        offsets[n] = len(buf)
-        buf += obj
-    xref_pos = len(buf)
-    xref = b"xref\n0 4\n0000000000 65535 f \n"
-    for n in (1, 2, 3):
-        xref += f"{offsets[n]:010d} 00000 n \n".encode()
-    buf += xref + b"trailer\n<</Size 4/Root 1 0 R>>\n"
-    buf += f"startxref\n{xref_pos}\n%%EOF\n".encode()
-    return buf
-
-
-@pytest.fixture(scope="session")
-def fixtures_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
-    return tmp_path_factory.mktemp("fixtures")
-
-
-@pytest.fixture(scope="session")
-def sample_pdf(fixtures_dir: Path) -> Path:
-    pdf_path = fixtures_dir / "test_slide.pdf"
-    pdf_path.write_bytes(_make_minimal_pdf())
-    return pdf_path
-
-
 # ── 9. Sample PPTX fixture (session-scope, built once) ──────────────────────
 
 @pytest.fixture(scope="session")

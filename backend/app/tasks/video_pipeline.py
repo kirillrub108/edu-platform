@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.celery_app import celery_app
 from app.config import settings
+from app.constants import ENCODE_WORKERS, TTS_WORKERS
 from app.models.course import Course
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
@@ -29,10 +30,8 @@ _sync_url = settings.DATABASE_URL.replace("+asyncpg", "+psycopg2")
 sync_engine = create_engine(_sync_url, pool_pre_ping=True)
 SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
-# Matches NUMBER_OF_THREADS in the silero-tts docker-compose service.
-_TTS_WORKERS = 4
-# Matches VideoService._ENCODE_WORKERS — kept in sync to avoid over-subscribing CPU.
-_ENCODE_WORKERS = 3
+_TTS_WORKERS = TTS_WORKERS
+_ENCODE_WORKERS = ENCODE_WORKERS
 
 
 def _set_status(

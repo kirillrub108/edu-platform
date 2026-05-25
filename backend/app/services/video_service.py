@@ -13,6 +13,7 @@ from cachetools import TTLCache
 from pptx import Presentation
 
 from app.config import settings
+from app.constants import ENCODE_WORKERS as _ENCODE_WORKERS_DEFAULT, SLIDE_DPI
 
 # Bundled LibreOffice font-substitution profile; maps Windows/macOS emoji fonts
 # (Segoe UI Emoji, Apple Color Emoji) to Noto Color Emoji which is installed in
@@ -20,10 +21,6 @@ from app.config import settings
 # LibreOffice picks it up (the -env:UserInstallation flag overrides the default
 # ~/.config/libreoffice path, making any static home-dir config irrelevant).
 _LO_XCU_SRC = Path(__file__).parent.parent.parent / "lo-emoji-substitution.xcu"
-
-# 150 DPI is indistinguishable from 300 DPI on a 1080p screen but produces
-# 4× smaller PNG files and cuts pdftoppm + FFmpeg encoding time significantly.
-_SLIDE_DPI = 150
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +120,7 @@ def _pptx_cache_key(pptx_path: str) -> str:
     with open(pptx_path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
-    return f"{h.hexdigest()}_dpi{_SLIDE_DPI}"
+    return f"{h.hexdigest()}_dpi{SLIDE_DPI}"
 
 
 # TTLCache is not thread-safe; the Lock serialises concurrent get/set.
@@ -136,9 +133,7 @@ _slides_cache_lock = threading.Lock()
 
 class VideoService:
     FRAME_RATE = 25
-    # Concurrent FFmpeg processes for segment encoding. 3 on a 4-core machine
-    # leaves room for LibreOffice, TTS threads, and the OS.
-    _ENCODE_WORKERS = 3
+    _ENCODE_WORKERS = _ENCODE_WORKERS_DEFAULT
 
     def extract_slide_texts(self, pptx_path: str) -> list[str]:
         if Path(pptx_path).suffix.lower() not in {".pptx", ".ppt"}:
@@ -243,7 +238,7 @@ class VideoService:
                 "pdftoppm",
                 "-png",
                 "-r",
-                str(_SLIDE_DPI),
+                str(SLIDE_DPI),
                 "-aa",
                 "yes",
                 "-aaVector",
@@ -259,7 +254,7 @@ class VideoService:
         )
         if not images:
             raise RuntimeError(f"No slides produced from {pptx_path}")
-        logger.info("Produced %d slide images at %d DPI", len(images), _SLIDE_DPI)
+        logger.info("Produced %d slide images at %d DPI", len(images), SLIDE_DPI)
 
         # ── populate cache ─────────────────────────────────────────────────────
         if cache_dir and suffix != ".pdf":

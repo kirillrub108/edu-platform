@@ -15,12 +15,11 @@ from app.dependencies import require_teacher
 from app.models.lesson import Lesson, LessonStatus
 from app.models.slide_text import SlideText
 from app.models.user import User
+from app.constants import MAX_SCRIPT_BYTES
 from app.services.file_validation_service import validate_upload
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/uploads", tags=["uploads"])
-
-MAX_SCRIPT_BYTES = 10 * 1024 * 1024  # 10 MB
 
 
 def _decode_text(content: bytes) -> str:
