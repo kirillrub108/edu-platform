@@ -15,9 +15,9 @@ import httpx
 import numpy as np
 import pytest
 
+from app.constants import SILERO_MAX_CHARS as _SILERO_MAX_CHARS
 from app.services import tts_service as tts_mod
 from app.services.tts_service import (
-    _SILERO_MAX_CHARS,
     _split_for_tts,
     _strip_ssml_tags,
     tts_service,
