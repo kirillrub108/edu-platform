@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { AlertCircle } from 'lucide-vue-next'
 
-definePageMeta({ middleware: ['auth', 'teacher'] })
+definePageMeta({ middleware: ['auth', 'teacher'], layout: 'workspace' })
 
 const route = useRoute()
+const router = useRouter()
+
 const lessonId = computed(() => {
   const id = route.params.id
   return Array.isArray(id) ? id[0] : id
@@ -45,6 +47,37 @@ const lessonStatusForBadge = computed(() => {
   const s = lesson.value?.status
   return ['draft', 'analyzing', 'ready_for_edit', 'processing', 'published', 'error'].includes(s) ? s : 'draft'
 })
+
+// ── Tab state (query-driven) ───────────────────────────────────────────────────
+
+const VALID_TABS = ['lesson', 'quiz'] as const
+type TabId = (typeof VALID_TABS)[number]
+
+const TAB_ITEMS: { id: string; label: string }[] = [
+  { id: 'lesson', label: 'Урок' },
+  { id: 'quiz', label: 'Тест' },
+]
+
+const activeTab = computed<TabId>(() => {
+  const t = route.query.tab as string
+  return (VALID_TABS as readonly string[]).includes(t) ? (t as TabId) : 'lesson'
+})
+
+// Normalize missing or invalid ?tab without adding a history entry.
+// Runs once on mount and whenever the query changes.
+watch(
+  () => route.query.tab,
+  () => {
+    if (route.query.tab !== activeTab.value) {
+      router.replace({ query: { ...route.query, tab: activeTab.value } })
+    }
+  },
+  { immediate: true },
+)
+
+const setTab = (id: string) => {
+  router.replace({ query: { ...route.query, tab: id } })
+}
 
 // ── Video history ─────────────────────────────────────────────────────────────
 
@@ -126,6 +159,7 @@ const loadQuizResults = async () => {
 
 onMounted(async () => { await load(); await loadVideos(); await loadQuizResults(); await restoreScroll() })
 
+// Both polling loops must outlive tab switches — only stop on full unmount.
 onUnmounted(() => { stopVisionPolling(); stopVideoPolling() })
 
 // Stop stale polling when navigating between lessons within the same route pattern.
@@ -155,7 +189,7 @@ watch(lessonId, (newId, oldId) => {
     <div>{{ error }}</div>
   </div>
 
-  <div v-else-if="lesson" class="space-y-6 max-w-4xl">
+  <div v-else-if="lesson" class="space-y-6">
     <LessonHeader :title="lesson.title" :status="lessonStatusForBadge" />
 
     <div
@@ -172,168 +206,188 @@ watch(lessonId, (newId, oldId) => {
       >✕</button>
     </div>
 
-    <section class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
-      <CreationModeChooser :model-value="mode" @update:model-value="onModeSelect" />
-    </section>
-
-    <LessonUploadSection
-      v-if="isManual || isAuto"
-      ref="visionPanelRef"
-      :pptx-path="lesson.pptx_path ?? null"
-      :uploading="uploading"
-      :upload-error="uploadError"
-      :selected-file="pptxFile"
-      :mode="mode"
-      :analyzing="analyzing"
-      :analyze-status="analyzeStatus"
-      :analyze-meta="analyzeMeta"
-      :analyze-error="analyzeError"
-      :generating="generating"
-      :lesson-status="lesson.status"
-      :show-slide-editor="showSlideEditor"
-      :lesson-id="lessonId"
-      :cancelling-analysis="cancellingAnalysis"
-      @file-change="pptxFile = $event; uploadError = ''"
-      @upload="uploadPptx"
-      @start-analyze="startAnalysis"
-      @cancel-analyze="cancelAnalysis"
-      @toggle-slide-editor="showSlideEditor = !showSlideEditor"
-      @slide-back="showSlideEditor = false"
-      @slide-ready="async () => { showSlideEditor = false; await generateVideo() }"
+    <UiTabs
+      :model-value="activeTab"
+      :tabs="TAB_ITEMS"
+      @update:model-value="setTab"
     />
 
-    <LessonScriptSection
-      v-if="isManual"
-      v-model="script"
-      :save-status="scriptSaveStatus"
-      :script-file="scriptFile"
-      :uploading-script="uploadingScript"
-      :script-upload-error="scriptUploadError"
-      @script-file-change="scriptFile = $event; scriptUploadError = ''"
-      @upload-script="uploadScriptFile"
-    />
-
-    <LessonVideoSection
-      v-if="isManual || isAuto"
-      v-model:selected-voice="selectedVoice"
-      :voices="voices"
-      :generating="generating"
-      :cancelling-video="cancellingVideo"
-      :lesson-status="lesson.status"
-      :show-pipeline="showPipeline"
-      :pipeline-stages="pipelineStages"
-      :current-stage-idx="currentStageIdx"
-      :task-error="taskError"
-      :can-generate-video="canGenerateVideo"
-      :video-url="lesson.video_url ?? null"
-      :analyzing="analyzing"
-      :has-pptx="!!lesson.pptx_path"
-      :is-auto="isAuto"
-      :is-manual="isManual"
-      :script-is-empty="!script.trim()"
-      @generate="generateVideo"
-      @cancel="cancelVideo"
-    />
-
-    <!-- Video history -->
-    <section
-      v-if="videoHistory.length > 0"
-      class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft space-y-4"
+    <!-- Урок tab panel — v-show keeps polling timers alive across tab switches -->
+    <div
+      v-show="activeTab === 'lesson'"
+      id="tabpanel-lesson"
+      role="tabpanel"
+      aria-labelledby="tab-lesson"
+      class="space-y-6"
     >
-      <h2 class="text-lg font-semibold text-gray-900">История генераций</h2>
+      <section class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
+        <CreationModeChooser :model-value="mode" @update:model-value="onModeSelect" />
+      </section>
 
-      <!-- Inline preview player -->
-      <video
-        v-if="previewVideoUrl"
-        :key="previewVideoUrl"
-        :src="previewVideoUrl"
-        controls
-        autoplay
-        class="w-full rounded-xl bg-black"
+      <LessonUploadSection
+        v-if="isManual || isAuto"
+        ref="visionPanelRef"
+        :pptx-path="lesson.pptx_path ?? null"
+        :uploading="uploading"
+        :upload-error="uploadError"
+        :selected-file="pptxFile"
+        :mode="mode"
+        :analyzing="analyzing"
+        :analyze-status="analyzeStatus"
+        :analyze-meta="analyzeMeta"
+        :analyze-error="analyzeError"
+        :generating="generating"
+        :lesson-status="lesson.status"
+        :show-slide-editor="showSlideEditor"
+        :lesson-id="lessonId"
+        :cancelling-analysis="cancellingAnalysis"
+        @file-change="pptxFile = $event; uploadError = ''"
+        @upload="uploadPptx"
+        @start-analyze="startAnalysis"
+        @cancel-analyze="cancelAnalysis"
+        @toggle-slide-editor="showSlideEditor = !showSlideEditor"
+        @slide-back="showSlideEditor = false"
+        @slide-ready="async () => { showSlideEditor = false; await generateVideo() }"
       />
 
-      <div class="divide-y divide-gray-100">
-        <div
-          v-for="video in videoHistory"
-          :key="video.id"
-          class="flex flex-wrap items-center gap-x-4 gap-y-2 py-3"
-        >
-          <span class="text-sm text-gray-500 w-36 shrink-0 tabular-nums">
-            {{ formatDate(video.created_at) }}
-          </span>
-          <span class="text-sm text-gray-700">{{ voiceLabel(video.voice) }}</span>
-          <span class="text-sm text-gray-400">{{ modeLabels[video.creation_mode] ?? video.creation_mode }}</span>
-          <span
-            v-if="video.is_published"
-            class="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium"
-          >Опубликовано</span>
+      <LessonScriptSection
+        v-if="isManual"
+        v-model="script"
+        :save-status="scriptSaveStatus"
+        :script-file="scriptFile"
+        :uploading-script="uploadingScript"
+        :script-upload-error="scriptUploadError"
+        @script-file-change="scriptFile = $event; scriptUploadError = ''"
+        @upload-script="uploadScriptFile"
+      />
 
-          <div class="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              class="text-sm text-gray-500 hover:text-gray-800 transition px-2 py-1 rounded-lg hover:bg-gray-100"
-              title="Предпросмотр"
-              @click="previewVideoUrl = video.video_url"
-            >▶</button>
-            <button
-              type="button"
-              :disabled="video.is_published || publishingVideoId === video.id"
-              class="text-sm font-medium px-3 py-1 rounded-lg border border-violet-200 text-violet-700 hover:bg-violet-50 transition disabled:opacity-40 disabled:pointer-events-none"
-              @click="publishVideo(video)"
-            >
-              <span v-if="publishingVideoId === video.id">…</span>
-              <span v-else>Опубликовать</span>
-            </button>
+      <LessonVideoSection
+        v-if="isManual || isAuto"
+        v-model:selected-voice="selectedVoice"
+        :voices="voices"
+        :generating="generating"
+        :cancelling-video="cancellingVideo"
+        :lesson-status="lesson.status"
+        :show-pipeline="showPipeline"
+        :pipeline-stages="pipelineStages"
+        :current-stage-idx="currentStageIdx"
+        :task-error="taskError"
+        :can-generate-video="canGenerateVideo"
+        :video-url="lesson.video_url ?? null"
+        :analyzing="analyzing"
+        :has-pptx="!!lesson.pptx_path"
+        :is-auto="isAuto"
+        :is-manual="isManual"
+        :script-is-empty="!script.trim()"
+        @generate="generateVideo"
+        @cancel="cancelVideo"
+      />
+
+      <section
+        v-if="videoHistory.length > 0"
+        class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft space-y-4"
+      >
+        <h2 class="text-lg font-semibold text-gray-900">История генераций</h2>
+
+        <video
+          v-if="previewVideoUrl"
+          :key="previewVideoUrl"
+          :src="previewVideoUrl"
+          controls
+          autoplay
+          class="w-full rounded-xl bg-black"
+        />
+
+        <div class="divide-y divide-gray-100">
+          <div
+            v-for="video in videoHistory"
+            :key="video.id"
+            class="flex flex-wrap items-center gap-x-4 gap-y-2 py-3"
+          >
+            <span class="text-sm text-gray-500 w-36 shrink-0 tabular-nums">
+              {{ formatDate(video.created_at) }}
+            </span>
+            <span class="text-sm text-gray-700">{{ voiceLabel(video.voice) }}</span>
+            <span class="text-sm text-gray-400">{{ modeLabels[video.creation_mode] ?? video.creation_mode }}</span>
+            <span
+              v-if="video.is_published"
+              class="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium"
+            >Опубликовано</span>
+
+            <div class="ml-auto flex items-center gap-2">
+              <button
+                type="button"
+                class="text-sm text-gray-500 hover:text-gray-800 transition px-2 py-1 rounded-lg hover:bg-gray-100"
+                title="Предпросмотр"
+                @click="previewVideoUrl = video.video_url"
+              >▶</button>
+              <button
+                type="button"
+                :disabled="video.is_published || publishingVideoId === video.id"
+                class="text-sm font-medium px-3 py-1 rounded-lg border border-violet-200 text-violet-700 hover:bg-violet-50 transition disabled:opacity-40 disabled:pointer-events-none"
+                @click="publishVideo(video)"
+              >
+                <span v-if="publishingVideoId === video.id">…</span>
+                <span v-else>Опубликовать</span>
+              </button>
+            </div>
           </div>
         </div>
-      </div>
-    </section>
+      </section>
+    </div>
 
-    <!-- Quiz authoring -->
-    <QuizEditor :lesson-id="lessonId" :initial-task-id="lesson.quiz_task_id ?? null" />
-
-    <!-- Quiz results -->
-    <section
-      v-if="quizResults.length > 0"
-      class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft space-y-4"
+    <!-- Тест tab panel — v-show preserves QuizEditor's polling and save timers -->
+    <div
+      v-show="activeTab === 'quiz'"
+      id="tabpanel-quiz"
+      role="tabpanel"
+      aria-labelledby="tab-quiz"
+      class="space-y-6"
     >
-      <h2 class="text-lg font-semibold text-gray-900">Результаты теста</h2>
-      <table class="w-full text-sm">
-        <thead>
-          <tr class="text-left text-gray-500 border-b border-gray-100">
-            <th class="pb-2 font-medium">Студент</th>
-            <th class="pb-2 font-medium">Email</th>
-            <th class="pb-2 font-medium text-center">Результат</th>
-            <th class="pb-2 font-medium text-center">Статус</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-50">
-          <tr v-for="row in quizResults" :key="row.student_id" class="py-2">
-            <td class="py-2 text-gray-800">{{ row.full_name ?? '—' }}</td>
-            <td class="py-2 text-gray-500">{{ row.email }}</td>
-            <td class="py-2 text-center">
-              <span v-if="row.attempted">
-                <span
-                  class="font-medium"
-                  :class="row.quiz_score !== null && row.quiz_score >= 0.6 ? 'text-green-600' : 'text-red-600'"
-                >
-                  {{ row.quiz_score !== null ? Math.round(row.quiz_score * 100) + '%' : '—' }}
+      <QuizEditor :lesson-id="lessonId" :initial-task-id="lesson.quiz_task_id ?? null" />
+
+      <section
+        v-if="quizResults.length > 0"
+        class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft space-y-4"
+      >
+        <h2 class="text-lg font-semibold text-gray-900">Результаты теста</h2>
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-gray-500 border-b border-gray-100">
+              <th class="pb-2 font-medium">Студент</th>
+              <th class="pb-2 font-medium">Email</th>
+              <th class="pb-2 font-medium text-center">Результат</th>
+              <th class="pb-2 font-medium text-center">Статус</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-50">
+            <tr v-for="row in quizResults" :key="row.student_id" class="py-2">
+              <td class="py-2 text-gray-800">{{ row.full_name ?? '—' }}</td>
+              <td class="py-2 text-gray-500">{{ row.email }}</td>
+              <td class="py-2 text-center">
+                <span v-if="row.attempted">
+                  <span
+                    class="font-medium"
+                    :class="row.quiz_score !== null && row.quiz_score >= 0.6 ? 'text-green-600' : 'text-red-600'"
+                  >
+                    {{ row.quiz_score !== null ? Math.round(row.quiz_score * 100) + '%' : '—' }}
+                  </span>
                 </span>
-              </span>
-              <span v-else class="text-gray-400 italic">не сдавал</span>
-            </td>
-            <td class="py-2 text-center">
-              <span
-                v-if="row.completed"
-                class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full"
-              >пройден</span>
-              <span v-else class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                не завершён
-              </span>
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
+                <span v-else class="text-gray-400 italic">не сдавал</span>
+              </td>
+              <td class="py-2 text-center">
+                <span
+                  v-if="row.completed"
+                  class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full"
+                >пройден</span>
+                <span v-else class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                  не завершён
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
   </div>
 </template>
