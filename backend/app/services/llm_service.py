@@ -6,8 +6,11 @@ from typing import Any, Awaitable, Callable
 from openai import AsyncOpenAI
 
 from app.config import settings
-from app.constants import QUIZ_LLM_TEMPERATURE
-from app.schemas.quiz import FlagKind, GeneratedQuestion, QuestionFlag, RegenerateMode
+from app.constants import (
+    QUIZ_LLM_OPEN_MAX_TOKENS,
+    QUIZ_LLM_TEMPERATURE,
+)
+from app.schemas.quiz import FlagKind, QuestionFlag, RegenerateMode
 
 logger = logging.getLogger(__name__)
 
@@ -304,26 +307,35 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         logger.debug("refine_slide_narration: using model=%s", model)
         return await self._chat(system, vision_text, model=model)
 
-    async def generate_quiz(
+    async def generate_quiz_v2(
         self,
         material: str,
         *,
         num_questions: int,
         num_options: int,
-    ) -> list[GeneratedQuestion]:
-        """Generate a multiple-choice quiz strictly grounded in `material`.
+        types: list[str],
+    ) -> list[dict[str, Any]]:
+        """Generate a polymorphic quiz strictly grounded in `material`.
 
-        Returns validated questions. Raises LLMOutputError if the LLM refuses
-        to produce well-formed output after one retry.
+        Returns a list of {type, payload, weight, order} dicts whose payloads
+        match the discriminated schema in `schemas.quiz`. Raises LLMOutputError
+        if the LLM refuses well-formed output after one retry.
+
+        The system prompt explicitly forbids fabricating facts/standards/IDs
+        beyond what `material` contains — this is the fix for the "ГОСТ Р ИСО
+        2150N" / "548NN" hallucinations seen in the v1 generator.
         """
-        system = _QUIZ_GENERATE_SYSTEM
+        if not types:
+            types = ["single_choice"]
+        type_list = ", ".join(types)
         user = (
             f"Кол-во вопросов: {num_questions}\n"
-            f"Кол-во вариантов на вопрос: {num_options}\n\n"
+            f"Разрешённые типы: {type_list}\n"
+            f"Для multiple/single choice: {num_options} вариантов.\n\n"
             f"Материал:\n{material}"
         )
 
-        def _validate(data: dict[str, Any]) -> list[GeneratedQuestion]:
+        def _validate(data: dict[str, Any]) -> list[dict[str, Any]]:
             raw_questions = data.get("questions")
             if not isinstance(raw_questions, list) or not raw_questions:
                 raise ValueError("missing or empty 'questions' array")
@@ -331,51 +343,137 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
                 raise ValueError(
                     f"expected {num_questions} questions, got {len(raw_questions)}"
                 )
-            return [_parse_question(item, num_options) for item in raw_questions]
+            out: list[dict[str, Any]] = []
+            for idx, item in enumerate(raw_questions):
+                if not isinstance(item, dict):
+                    raise ValueError(f"q{idx}: not an object")
+                qtype = item.get("type")
+                if qtype not in types:
+                    raise ValueError(f"q{idx}: disallowed type {qtype!r}")
+                payload = _parse_payload_v2(qtype, item, num_options)
+                out.append({
+                    "type": qtype,
+                    "payload": payload,
+                    "weight": "1.0",
+                    "order": idx,
+                })
+            return out
 
         return await self._chat_json_validated(
-            system,
+            _QUIZ_GENERATE_V2_SYSTEM,
             user,
             _validate,
             temperature=QUIZ_LLM_TEMPERATURE,
-            purpose="generate_quiz",
+            purpose="generate_quiz_v2",
         )
+
+    async def grade_open_answer(
+        self,
+        question_payload: dict[str, Any],
+        response_text: str,
+    ) -> tuple[float, str]:
+        """LLM-grade a short_answer or essay response against the question's
+        reference/rubric. Returns (score_0_to_1, feedback).
+        """
+        qtype = question_payload.get("type")
+        prompt = question_payload.get("prompt", "")
+        rubric = question_payload.get("rubric", "")
+        reference = question_payload.get("reference_answer", "")
+
+        user = (
+            f"Тип: {qtype}\n"
+            f"Вопрос: {prompt}\n"
+            f"Эталон/критерии: {reference or rubric}\n"
+            f"Ответ студента: {response_text or '[пустой]'}"
+        )
+
+        def _validate(data: dict[str, Any]) -> tuple[float, str]:
+            score = data.get("score")
+            feedback = data.get("feedback", "")
+            if not isinstance(score, (int, float)):
+                raise ValueError("score must be a number")
+            if not 0 <= float(score) <= 1:
+                raise ValueError("score must be within [0, 1]")
+            if not isinstance(feedback, str):
+                raise ValueError("feedback must be a string")
+            return float(score), feedback.strip()[:600]
+
+        kwargs: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": _OPEN_GRADE_SYSTEM},
+                {"role": "user", "content": user + "\n/no_think"},
+            ],
+            "temperature": QUIZ_LLM_TEMPERATURE,
+            "max_tokens": QUIZ_LLM_OPEN_MAX_TOKENS,
+            "response_format": {"type": "json_object"},
+        }
+        # Bypass _chat to enforce max_tokens; retry on malformed once.
+        last_error: str | None = None
+        for attempt in range(2):
+            response = await self.client.chat.completions.create(**kwargs)
+            raw = self._strip_think(response.choices[0].message.content or "")
+            try:
+                return _validate(json.loads(raw))
+            except (json.JSONDecodeError, ValueError) as exc:
+                last_error = str(exc)
+                logger.warning(
+                    "grade_open_answer: malformed (attempt %d/2): %s; raw=%s",
+                    attempt + 1, exc, raw[:300],
+                )
+        raise LLMOutputError(f"grade_open_answer: invalid output: {last_error}")
 
     async def regenerate_quiz_question(
         self,
         material: str,
-        question: GeneratedQuestion,
+        question: dict[str, Any],
         mode: RegenerateMode,
         num_options: int,
-    ) -> GeneratedQuestion:
-        """Apply a single-question transformation. For `improve_distractors`
-        the correct option text must remain identical — enforced as a
-        retry-triggering validation error so the user never gets a silently
-        mutated answer.
+    ) -> dict[str, Any]:
+        """Apply a single-question transformation. Currently supports only
+        single_choice payloads — multi/true_false/open types are out of scope
+        for one-click regenerate. For `improve_distractors` the correct
+        option text must remain identical.
+
+        Returns a NEW payload dict (same type contract), not a model instance.
         """
+        qtype = question.get("type")
+        if qtype != "single_choice":
+            raise ValueError(
+                f"regenerate is currently only supported for single_choice (got {qtype})"
+            )
+        options = question.get("options") or []
+        correct_index = int(question.get("correct_index", 0))
+        if not 0 <= correct_index < len(options):
+            raise ValueError("regenerate: malformed source question")
+
         system = _QUIZ_REGENERATE_SYSTEM_BASE + "\n\n" + _REGENERATE_MODE_RULES[mode]
         current = {
-            "question": question.question,
-            "options": list(question.options),
-            "correct_index": question.correct_index,
+            "question": question.get("prompt", ""),
+            "options": list(options),
+            "correct_index": correct_index,
         }
         user = (
             f"Кол-во вариантов: {num_options}\n\n"
             f"Материал:\n{material}\n\n"
             f"Текущий вопрос (JSON):\n{json.dumps(current, ensure_ascii=False)}"
         )
+        expected_correct = options[correct_index].strip().lower()
 
-        expected_correct = question.options[question.correct_index].strip().lower()
-
-        def _validate(data: dict[str, Any]) -> GeneratedQuestion:
-            parsed = _parse_question(data, num_options)
+        def _validate(data: dict[str, Any]) -> dict[str, Any]:
+            payload = _parse_payload_v2("single_choice", {
+                "type": "single_choice",
+                "prompt": data.get("question"),
+                "options": data.get("options"),
+                "correct_index": data.get("correct_index"),
+            }, num_options)
             if mode == "improve_distractors":
-                got = parsed.options[parsed.correct_index].strip().lower()
+                got = payload["options"][payload["correct_index"]].strip().lower()
                 if got != expected_correct:
                     raise ValueError(
                         "improve_distractors must preserve the correct option text"
                     )
-            return parsed
+            return payload
 
         return await self._chat_json_validated(
             system,
@@ -394,6 +492,9 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         flags. Pure read — no DB writes. UUIDs are taken from the input list
         (the LLM is given them only to address answers, but its echoed ids are
         ignored to avoid hallucinated values).
+
+        Input `questions` must be a list of {id, type, payload} dicts; the
+        full reference-answer-bearing payload is sent (this is teacher-side).
         """
         if not questions:
             return []
@@ -402,9 +503,8 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         payload = [
             {
                 "question_id": str(q["id"]),
-                "question": q["question"],
-                "options": list(q["options"]),
-                "correct_index": int(q["correct_index"]),
+                "type": q["type"],
+                "payload": q["payload"],
             }
             for q in questions
         ]
@@ -451,51 +551,120 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         )
 
 
-def _parse_question(item: Any, num_options: int) -> GeneratedQuestion:
-    """Strict parser for a single quiz question from raw LLM JSON."""
-    if not isinstance(item, dict):
-        raise ValueError("question item is not a JSON object")
-    question = item.get("question")
-    options = item.get("options")
-    correct_index = item.get("correct_index")
-    if not isinstance(question, str) or not question.strip():
-        raise ValueError("'question' must be a non-empty string")
+def _check_options(options: Any, num_options: int) -> list[str]:
     if not isinstance(options, list) or len(options) != num_options:
         raise ValueError(f"'options' must be a list of exactly {num_options} strings")
     cleaned: list[str] = []
+    seen: set[str] = set()
     for opt in options:
         if not isinstance(opt, str) or not opt.strip():
             raise ValueError("each option must be a non-empty string")
-        cleaned.append(opt.strip())
-    seen: set[str] = set()
-    for opt in cleaned:
-        key = opt.lower()
+        key = opt.strip().lower()
         if key in seen:
             raise ValueError(f"duplicate option: {opt!r}")
         seen.add(key)
-    if not isinstance(correct_index, int) or isinstance(correct_index, bool):
-        raise ValueError("'correct_index' must be an integer")
-    if not 0 <= correct_index < num_options:
-        raise ValueError(f"'correct_index' out of range: {correct_index}")
-    return GeneratedQuestion(
-        question=question.strip(),
-        options=cleaned,
-        correct_index=correct_index,
-    )
+        cleaned.append(opt.strip())
+    return cleaned
 
 
-_QUIZ_GENERATE_SYSTEM = """\
+def _parse_payload_v2(qtype: str, item: dict[str, Any], num_options: int) -> dict[str, Any]:
+    """Parse + validate a single LLM-emitted payload by type. Raises ValueError
+    on shape problems so the JSON-validated retry kicks in."""
+    prompt = item.get("prompt") or item.get("question")
+    if not isinstance(prompt, str) or not prompt.strip():
+        raise ValueError("'prompt' must be a non-empty string")
+    prompt = prompt.strip()
+
+    if qtype == "single_choice":
+        opts = _check_options(item.get("options"), num_options)
+        ci = item.get("correct_index")
+        if not isinstance(ci, int) or isinstance(ci, bool) or not 0 <= ci < num_options:
+            raise ValueError(f"'correct_index' out of range: {ci}")
+        return {"type": qtype, "prompt": prompt, "options": opts, "correct_index": ci, "explanation": ""}
+
+    if qtype == "multiple_choice":
+        opts = _check_options(item.get("options"), num_options)
+        raw = item.get("correct_indices")
+        if not isinstance(raw, list) or not raw:
+            raise ValueError("'correct_indices' must be a non-empty list")
+        seen: set[int] = set()
+        for i in raw:
+            if not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < num_options:
+                raise ValueError(f"correct_indices contains invalid index: {i}")
+            seen.add(i)
+        if len(seen) == num_options:
+            raise ValueError("multiple_choice cannot have all options correct")
+        return {
+            "type": qtype, "prompt": prompt, "options": opts,
+            "correct_indices": sorted(seen), "explanation": "",
+        }
+
+    if qtype == "true_false":
+        correct = item.get("correct")
+        if not isinstance(correct, bool):
+            raise ValueError("'correct' must be a boolean")
+        return {"type": qtype, "prompt": prompt, "correct": correct, "explanation": ""}
+
+    if qtype == "short_answer":
+        ref = item.get("reference_answer")
+        if not isinstance(ref, str) or not ref.strip():
+            raise ValueError("'reference_answer' must be a non-empty string")
+        rubric = item.get("rubric") or ""
+        return {
+            "type": qtype, "prompt": prompt,
+            "reference_answer": ref.strip(),
+            "rubric": str(rubric).strip(),
+        }
+
+    raise ValueError(f"unsupported generated type: {qtype!r}")
+
+
+_QUIZ_GENERATE_V2_SYSTEM = """\
 Ты — методист, составляющий проверочный тест по материалу лекции.
-Делай ровно N вопросов с одиночным выбором (multiple choice, один правильный).
-Требования:
-- Все вопросы и варианты — на русском, в стиле учебной проверки понимания.
-- Варианты в одном вопросе НЕ повторяются и не являются перефразом друг друга.
-- Ровно K вариантов на вопрос; correct_index — индекс правильного варианта (0..K-1).
-- Не задавай вопросы про оформление слайдов или мета-информацию — только про содержание.
-- Не выходи за рамки предоставленного материала: не выдумывай факты.
+Делай РОВНО N вопросов, ТОЛЬКО разрешённых типов.
 
-Формат ответа — СТРОГО JSON-объект:
-{"questions":[{"question":"...","options":["...","...","...","..."],"correct_index":0}, ...]}
+КРИТИЧНО: НЕ выдумывай факты, термины, стандарты, ГОСТы, номера, имена,
+формулы, даты, проценты, аббревиатуры, которых НЕТ в исходном тексте.
+Если материал не позволяет составить достаточно вопросов по содержанию —
+сделай столько, на сколько хватает фактического материала, и заполни
+оставшиеся пересказом существующих идей другими словами.
+ЗАПРЕЩЕНО: придумывать обозначения типа «ГОСТ Р ИСО 2150N», «548NN», и
+любые вымышленные коды/индексы.
+
+Все вопросы и варианты — на русском, в стиле учебной проверки понимания.
+Не задавай вопросов про оформление слайдов или мета-информацию (нумерация,
+названия слайдов и т.п.) — только про содержание.
+
+Формат для каждого типа в массиве questions:
+  - single_choice:
+      {"type":"single_choice","prompt":"...","options":["..."],"correct_index":0}
+      Ровно K вариантов; варианты не повторяются и не парафразят друг друга.
+  - multiple_choice:
+      {"type":"multiple_choice","prompt":"...","options":["..."],"correct_indices":[0,2]}
+      Ровно K вариантов; верных — от 1 до K-1; индексы уникальны.
+  - true_false:
+      {"type":"true_false","prompt":"...","correct":true}
+      prompt должен быть однозначным утверждением (без «возможно», «иногда»).
+  - short_answer:
+      {"type":"short_answer","prompt":"...","reference_answer":"...","rubric":"..."}
+      reference_answer — короткий точный ответ (1-15 слов).
+
+Формат ответа — СТРОГО JSON-объект (без текста вне JSON):
+{"questions":[ ... ровно N элементов ... ]}
+"""
+
+
+_OPEN_GRADE_SYSTEM = """\
+Ты — оценщик коротких/развёрнутых ответов студентов. Сравни ответ студента
+с эталоном и/или критериями. Поставь дробную оценку от 0.0 до 1.0
+(включительно): 0 — полностью неверно/пусто, 1 — полностью соответствует
+эталону по сути (необязательно дословно). Частичное соответствие — дробь.
+
+Никогда не цитируй эталон/правильный ответ в feedback — только опиши, что
+у студента верно/неверно, не раскрывая reference_answer.
+
+Формат — СТРОГО JSON:
+{"score": 0.7, "feedback": "Краткое объяснение (1-2 предложения, без цитат эталона)."}
 Никакого текста вне JSON.
 """
 
@@ -527,13 +696,14 @@ _REGENERATE_MODE_RULES: dict[RegenerateMode, str] = {
 
 
 _QUIZ_QA_SYSTEM = """\
-Ты — рецензент тестов. Получаешь материал лекции и список вопросов с правильными ответами.
+Ты — рецензент тестов. Получаешь материал лекции и список вопросов с эталонами.
 Для каждого вопроса оцени:
-- "ok" — корректен, ответ соответствует материалу;
-- "wrong_answer" — отмеченный correct_index НЕ является верным согласно материалу;
-- "ambiguous" — несколько вариантов могут быть верны / формулировка неоднозначна;
-- "duplicate" — этот вопрос дублирует другой (укажи смысловой дубликат).
+- "ok" — корректен, эталон соответствует материалу;
+- "wrong_answer" — указанный эталон НЕ соответствует материалу;
+- "ambiguous" — формулировка неоднозначна или несколько вариантов могут быть верны;
+- "duplicate" — этот вопрос дублирует другой по смыслу (укажи в note кого).
 Поле note: краткое (до 160 симв.) объяснение. Для "ok" — пустая строка.
+ВАЖНО: ни в коем случае не выдумывай факты, отсутствующие в материале.
 
 Формат ответа — СТРОГО JSON:
 {"flags":[{"question_id":"<uuid>","kind":"ok|wrong_answer|ambiguous|duplicate","note":"..."}, ...]}

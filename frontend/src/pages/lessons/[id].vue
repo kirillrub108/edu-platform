@@ -140,9 +140,10 @@ interface QuizResultRow {
   student_id: string
   full_name: string | null
   email: string
-  quiz_score: number | null
-  attempted: boolean
-  completed: boolean
+  best_score: string | null
+  attempts_count: number
+  passed: boolean
+  last_submitted_at: string | null
 }
 
 const quizResults = ref<QuizResultRow[]>([])
@@ -344,7 +345,7 @@ watch(lessonId, (newId, oldId) => {
       aria-labelledby="tab-quiz"
       class="space-y-6"
     >
-      <QuizEditor :lesson-id="lessonId" :initial-task-id="lesson.quiz_task_id ?? null" />
+      <QuizEditor :lesson-id="lessonId" />
 
       <section
         v-if="quizResults.length > 0"
@@ -356,7 +357,8 @@ watch(lessonId, (newId, oldId) => {
             <tr class="text-left text-gray-500 border-b border-gray-100">
               <th class="pb-2 font-medium">Студент</th>
               <th class="pb-2 font-medium">Email</th>
-              <th class="pb-2 font-medium text-center">Результат</th>
+              <th class="pb-2 font-medium text-center">Лучший</th>
+              <th class="pb-2 font-medium text-center">Попыток</th>
               <th class="pb-2 font-medium text-center">Статус</th>
             </tr>
           </thead>
@@ -365,23 +367,26 @@ watch(lessonId, (newId, oldId) => {
               <td class="py-2 text-gray-800">{{ row.full_name ?? '—' }}</td>
               <td class="py-2 text-gray-500">{{ row.email }}</td>
               <td class="py-2 text-center">
-                <span v-if="row.attempted">
+                <span v-if="row.best_score !== null">
                   <span
                     class="font-medium"
-                    :class="row.quiz_score !== null && row.quiz_score >= 0.6 ? 'text-green-600' : 'text-red-600'"
-                  >
-                    {{ row.quiz_score !== null ? Math.round(row.quiz_score * 100) + '%' : '—' }}
-                  </span>
+                    :class="row.passed ? 'text-green-600' : 'text-red-600'"
+                  >{{ Math.round(Number(row.best_score) * 100) }}%</span>
                 </span>
-                <span v-else class="text-gray-400 italic">не сдавал</span>
+                <span v-else class="text-gray-400 italic">—</span>
               </td>
+              <td class="py-2 text-center text-gray-600">{{ row.attempts_count }}</td>
               <td class="py-2 text-center">
                 <span
-                  v-if="row.completed"
+                  v-if="row.passed"
                   class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full"
                 >пройден</span>
+                <span
+                  v-else-if="row.attempts_count > 0"
+                  class="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full"
+                >не сдан</span>
                 <span v-else class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                  не завершён
+                  не приступал
                 </span>
               </td>
             </tr>

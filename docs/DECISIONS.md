@@ -628,6 +628,66 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## 32. Полноценный модуль тестирования: polymorphic JSONB + snapshot + hybrid grading
+
+**Контекст:** Старый тестовый модуль поддерживал только single-choice, сохранял `quiz_score` как float в `lesson_progress` без истории попыток, был привязан к `Lesson` напрямую (без сущности `Quiz`), терял эталоны при редактировании во время сдачи. LLM-генератор галлюцинировал «ГОСТ Р ИСО 2150N» и «548NN». Нужны были 8 типов вопросов, независимая публикация теста от статуса урока, ограничение числа попыток, безопасная гибридная проверка (детерминированная + LLM) с ручным override преподавателя.
+
+**Решение:**
+
+- **Полиморфные вопросы через JSONB + discriminated union**, а не отдельные таблицы на каждый тип. `quiz_questions(type, payload, weight, order)` + Pydantic v2 `Annotated[Union[...], Field(discriminator="type")]`. Параллельные семейства схем `*Teacher*` и `*Student*` — последние без полей-эталонов, чтобы утечка была невозможна на уровне типа (`to_student_payload` вызывается серверно при сериализации, никаких runtime-фильтров).
+- **Сущность `Quiz` 1:1 к Lesson** со своим жизненным циклом (`draft|published`), порогом, `attempts_allowed`, `show_answers`, `shuffle`. `Quiz.status` управляется отдельными эндпоинтами `publish/unpublish`, не зависит от `Lesson.status` — преподаватель может опубликовать тест к черновому уроку и наоборот.
+- **`QuizAttempt.questions_snapshot` целиком при старте** — JSONB с полным payload’ом всех опубликованных вопросов **на момент старта попытки**, включая эталоны. Это единственный источник правды для оценки данной попытки. Старые попытки остаются валидными, даже если преподаватель в это время перегенерировал/переписал вопросы. Альтернатива «ссылками на live-вопросы» отвергнута: запрет редактирования теста при наличии in-progress попыток замораживал бы UX, а ссылки на удалённые вопросы создавали бы dangling FK.
+- **Гибридная проверка**: закрытые типы оцениваются детерминированно в момент `submit` (мгновенный фидбек); открытые (short_answer/essay) помечаются `needs_review=true` и оцениваются LLM-задачей `grade_attempt_task` параллельно через `ThreadPoolExecutor + as_completed` (паттерн `video_pipeline.py`). Ручной override (`PATCH /attempts/{aid}/answers/{ansid}`) ставит `manually_overridden=true` и атомарно пересчитывает `score/passed` в одной транзакции через `aggregate_score` — формула одна и та же для LLM-фазы и для override’а.
+- **Очередь `quiz` отдельным воркером** (`celery_quiz`, concurrency=2). LLM-bound задачи теста не должны делить очередь с `vision` (где живёт длинный анализ слайдов), иначе генерация теста ждёт vision-jobs впереди. `quiz` зарезервирован под все Quiz-LLM-операции.
+- **Anti-hallucination guard** в системном промпте `_QUIZ_GENERATE_V2_SYSTEM` — явный запрет придумывать ГОСТы, номера, обозначения, отсутствующие в материале. LLM возвращает структурированный JSON-объект, валидируемый через `_parse_payload_v2` с retry-on-malformed (single retry, по образцу `_chat_json_validated`).
+- **`multiple_choice` — Jaccard с `max(0, …)` guard.** Объединение / пересечение множеств; отрицательного балла никогда не будет, даже при намеренно сломанном входе. Альтернатива — «−1 за лишний выбор» (academic standard для negative marking) — отложена до фактического запроса от преподавателей.
+- **passed → `lesson_progress.is_completed`** через политику best-attempt: `quiz_score = max(существующий, новый)`, повторная неудачная попытка не регрессит уже сданный урок. Старое поле `lesson_progress.quiz_score:float` оставлено как есть (legacy, не удаляется — KNOWN_PROBLEMS).
+
+**Альтернативы:**
+
+- *Таблица на каждый тип вопроса* — 8 миграций, 8 join’ов при загрузке снапшота, неудобная сериализация в JSONB-снапшот всё равно потребовалась бы.
+- *Snapshot ссылками на live-вопросы* — см. выше; для текущего workflow ломает либо UX (запрет редактирования), либо целостность (dangling).
+- *Полностью LLM-grading (включая закрытые)* — медленно, дорого, недетерминированно; для single_choice/true_false это бессмысленно.
+- *MongoDB для JSONB-payload* — добавление новой БД нарушает принцип «только Postgres + Redis», который зафиксирован для этого проекта.
+
+**Trade-offs:**
+
+- + Один источник правды (snapshot), безопасное редактирование, мгновенный фидбек по закрытым, точечный override по открытым.
+- + Расширение типов = новая Pydantic-модель + ветка в `grading_service`. Никаких миграций БД.
+- − При росте числа открытых вопросов в одной попытке Celery `prefork c=2` недоиспользует LLM-bound воркер (см. KNOWN_PROBLEMS).
+- − Перегенерация в момент чужой in-progress попытки разрешена и зафиксирована как корректное поведение — преподаватель должен помнить об этом при «срочных» правках.
+- − Per-question regenerate пока работает только для single_choice. Расширение на multi/open — отдельная задача.
+
+---
+
+## 33. Versioned quiz_questions + pointer-snapshots вместо full-snapshot
+
+**Контекст:** Решение №32 фиксировало полный payload каждого вопроса в `quiz_attempts.questions_snapshot` (full snapshot). По мере роста попыток это давало: (а) дублирование ~500 байт на каждую попытку × каждый вопрос даже если эталон не менялся; (б) расхождение между «как выглядит вопрос в редакторе» и «как он был в попытке» приходилось разруливать сериализатором, а не схемой данных; (в) regenerate/edit нельзя было откатить — старый payload жил только внутри попыток.
+
+**Решение:**
+
+- `quiz_questions` становится **write-once + versioned**: композитный PK `(id, version)`, колонка `superseded_at timestamptz`, partial index `WHERE superseded_at IS NULL`. Любое изменение `payload`/`weight`/`type` делает INSERT строки `(id, version+1)` и UPDATE `superseded_at=now()` на старой — оба write’а в одной транзакции (`services/quiz_service.supersede_with_new_version`).
+- `Quiz.questions` — view-only ORM-relationship по `superseded_at IS NULL`, чтобы редактор видел только текущие версии.
+- Reorder/soft-delete мутируют **текущую** строку в place: `order` — атрибут видимой строки и не часть payload-инварианта (попытка всё равно фиксирует order у себя), а `delete` = ставит `superseded_at` без вставки наследника.
+- `QuizAttempt.questions_snapshot` теперь — лёгкий pointer-снимок: `{"version": 1, "pointers": [{"question_id", "version", "order"}, ...]}`. Payload не копируется: грейдинг резолвит указатели в `quiz_questions` по `(id, version) IN VALUES (...)` одним SELECT через `services/quiz_service.resolve_snapshot[_sync]`, возвращая `list[ResolvedQuestion]`.
+- `grade_question(type, payload, response)` не меняется по сигнатуре — меняется только источник payload (теперь `ResolvedQuestion.payload`, а не `snap[qid]["payload"]`). За счёт этого тот же закрытый алгоритм оценки сохраняет идентичные числа.
+
+**Альтернативы:**
+
+- *Оставить full-snapshot* (решение №32) — самый простой инвариант, но без возможности откатить regenerate и с быстрым ростом storage.
+- *DB-side VIEW `quiz_questions_current`* поверх `WHERE superseded_at IS NULL` вместо ORM-relationship — кажется чище, но добавляет миграцию, которую SQLAlchemy autogenerate не видит, и заставляет руками поддерживать VIEW при изменении колонок. ORM-relationship с partial-index покрывает тот же hot path.
+- *Хранить старые версии в отдельной таблице `quiz_questions_history`* — теряем компактный SELECT по `(id, version)` для grading_service, удваиваем insert-on-write.
+
+**Trade-offs:**
+
+- + Снимок попытки в ~10× меньше; storage на масштабе тысяч попыток существенно дешевле.
+- + Полная история правок остаётся в одной таблице; диф «v3 vs v4» — SELECT в одну таблицу.
+- + Битый указатель (несуществующая `(id, version)`) — явная `BrokenSnapshotError → HTTP 500`, не молчаливый None в скоринге.
+- − Историческое раздувание таблицы при частой перегенерации; GC старых версий не входит в это решение и зафиксирован в KNOWN_PROBLEMS.
+- − Миграция со старого «full snapshot» формата на pointers для уже существующих attempts не делается автоматически — старые in-progress попытки могут оказаться битыми. Триггер миграции и обработка legacy-снимков — в KNOWN_PROBLEMS.
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.

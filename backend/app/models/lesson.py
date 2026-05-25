@@ -3,7 +3,7 @@ import uuid
 
 from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -90,7 +90,6 @@ class Lesson(Base):
     )
     analyze_task_id = Column(String(64), nullable=True)
     video_task_id = Column(String(64), nullable=True)
-    quiz_task_id = Column(String(64), nullable=True)
     last_warning = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
@@ -101,11 +100,11 @@ class Lesson(Base):
     )
 
     module = relationship("Module", back_populates="lessons")
-    quiz_questions = relationship(
-        "QuizQuestion",
+    quiz = relationship(
+        "Quiz",
         back_populates="lesson",
         cascade="all, delete-orphan",
-        order_by="QuizQuestion.order",
+        uselist=False,
     )
     slide_texts = relationship(
         "SlideText",
@@ -118,25 +117,3 @@ class Lesson(Base):
         back_populates="lesson",
         cascade="all, delete-orphan",
     )
-
-
-class QuizQuestion(Base):
-    __tablename__ = "quiz_questions"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    lesson_id = Column(
-        UUID(as_uuid=True), ForeignKey("lessons.id", ondelete="CASCADE"), nullable=False
-    )
-    question = Column(Text, nullable=False)
-    options = Column(JSONB, nullable=False)
-    correct_index = Column(Integer, nullable=False)
-    order = Column(Integer, default=0, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
-    updated_at = Column(
-        DateTime(timezone=True),
-        server_default=func.now(),
-        onupdate=func.now(),
-        nullable=False,
-    )
-
-    lesson = relationship("Lesson", back_populates="quiz_questions")

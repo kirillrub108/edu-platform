@@ -134,6 +134,29 @@ services:
     networks:
       - edu-network
 
+  celery_quiz:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    command: >
+      celery -A app.celery_app worker
+      --pool=prefork
+      --concurrency=2
+      --queues=quiz
+      --hostname=quiz@%h
+      --loglevel=info
+    env_file:
+      - .env
+    volumes:
+      - ./backend/storage:/app/storage
+      - ./backend/app:/app/app
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - edu-network
+
   frontend:
     build:
       context: ./frontend

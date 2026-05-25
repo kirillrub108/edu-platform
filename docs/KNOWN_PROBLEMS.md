@@ -429,6 +429,48 @@
 - **Почему есть:** этот файл монтируется в **сторонний контейнер** `navatusein/silero-tts-service`, у которого свой Python и свой Pydantic. Не наш код, формально.
 - **Фикс:** не трогать. Просто понимать, что это конфиг внешнего сервиса, не часть проекта.
 
+### 6.5 ⚠ Миграция `quiz`-задач с очереди `vision` на `quiz` — breaking для запущенных тасков
+
+- **Где:** [backend/app/tasks/quiz_pipeline.py](../backend/app/tasks/quiz_pipeline.py), [backend/app/celery_app.py](../backend/app/celery_app.py), [docker-compose.yml](../docker-compose.yml).
+- **Что не так:** старая версия `generate_quiz_task` ставилась в очередь `vision`. В рамках рефакторинга все Quiz-задачи переехали на новую очередь `quiz` (новый воркер `celery_quiz`). Любые таски, успевшие попасть в `vision` ДО деплоя новой версии, останутся там лежать и никогда не будут выполнены (никто их не подберёт, потому что новый код их в `vision` уже не публикует, а старый код их подписи больше нет).
+- **Почему опасно:** беззвучная потеря фоновой работы. На пользовательском фронте генерация теста просто «зависнет» (статус задачи останется `PENDING`).
+- **Фикс при деплое:** перед раскаткой остановить vision-воркер, дать ему дренировать очередь до пустой (`celery -A app.celery_app inspect active --queues=vision`), убедиться что нет pending Quiz-задач в Redis, и только затем катить новую версию. Для dev-окружения — `docker-compose down -v` обнуляет очереди в Redis.
+
+### 6.6 ⚠ `celery_quiz` с `prefork c=2` недоиспользует LLM-bound воркер при больших попытках
+
+- **Где:** [docker-compose.yml](../docker-compose.yml) (`celery_quiz` service), [backend/app/tasks/quiz_pipeline.py](../backend/app/tasks/quiz_pipeline.py) (`grade_attempt_task`).
+- **Что не так:** `grade_attempt_task` использует внутренний `ThreadPoolExecutor(max_workers=QUIZ_GRADING_WORKERS=4)` для параллельного LLM-grading'а открытых ответов. С `prefork c=2` оба процесса воркера могут параллельно проводить grading; внутри каждого — до 4 потоков (то есть пик 8 одновременных LLM-запросов). Это упирается в один Ollama-инстанс (~1-2 параллельных запроса эффективно).
+- **Почему опасно:** при большой нагрузке (много студентов сдают эссе одновременно) Ollama станет узким местом и часть запросов получит таймаут/`needs_review=true` после fail-чтения LLM.
+- **Фикс при росте нагрузки:** перейти на `--pool=gevent --concurrency=N` (греет один процесс, но даёт честную async-конкурентность); либо снизить `QUIZ_GRADING_WORKERS` до 1-2 и поднять `concurrency`; либо вынести LLM за Ollama (YandexGPT / vLLM). Решение откладывается до фактических жалоб — текущая конфигурация ок для одиночных классов до ~30 студентов.
+
+### 6.7 `multiple_choice` оценивается только по Jaccard, без negative marking
+
+- **Где:** [backend/app/services/grading_service.py](../backend/app/services/grading_service.py) (`_grade_multiple_choice`).
+- **Что не так:** партиальный балл вычисляется как `|∩| / |∪|`. Лишние выбранные опции уменьшают балл (через увеличение знаменателя), но «штраф за выбранное лишнее» как самостоятельная фича не реализован. Это делает MC-вопросы чуть «мягче», чем в академической традиции (где за выбранный неверный вариант снимают балл).
+- **Почему не критично:** Jaccard уже даёт честное «частично верно»; `max(0, …)` гарантирует, что отрицательного балла никогда не будет даже при пустом или сломанном ответе.
+- **Фикс по запросу:** добавить флаг `Quiz.negative_marking:bool` и альтернативную формулу в `_grade_multiple_choice`. Не делать без явного запроса от преподавателей — Jaccard покрывает кейсы достаточно.
+
+### 6.9 GC старых версий `quiz_questions` не реализован
+
+- **Где:** [backend/app/models/quiz.py](../backend/app/models/quiz.py), [backend/app/services/quiz_service.py](../backend/app/services/quiz_service.py).
+- **Что не так:** при `insert-on-write` каждое редактирование/regenerate создаёт новую строку (`id, version+1`), а старая остаётся в таблице с `superseded_at != NULL`. Очистки нет — раз пинами в `quiz_attempts.questions_snapshot` могут пользоваться даже очень старые попытки. На длинной дистанции (преподаватель крутит regenerate несколько раз в день) таблица будет распухать.
+- **Почему не критично сейчас:** payload-строки маленькие, индекс `ix_quiz_questions_current` partial → запросы остаются быстрыми. Storage-объём минимален относительно медиа.
+- **Фикс по запросу:** периодический джоб (Celery beat) который удаляет строки с `superseded_at < now() - retention` ПРИ УСЛОВИИ, что ни один `quiz_attempts.questions_snapshot.pointers` на них не ссылается. Проверку «никакая попытка не пинит» сделать через `NOT EXISTS (SELECT 1 FROM quiz_attempts WHERE questions_snapshot @> jsonb_build_object('pointers', jsonb_build_array(jsonb_build_object('question_id', qq.id::text, 'version', qq.version))))` или вспомогательный индекс на `pointers`.
+
+### 6.10 Legacy full-snapshot формат `quiz_attempts.questions_snapshot` не мигрируется
+
+- **Где:** [backend/app/services/quiz_service.py](../backend/app/services/quiz_service.py) (`resolve_snapshot`), [backend/alembic/versions/e1f2a3b4c5d6_quiz_polymorphic.py](../backend/alembic/versions/e1f2a3b4c5d6_quiz_polymorphic.py).
+- **Что не так:** до перехода на pointer-снимки попытки писали полный snapshot вида `{"version": 1, "questions": [{"id", "payload", ...}]}`. Резолвер ожидает `{"version": 1, "pointers": [...]}`. На уже существующих in-progress попытках со старым форматом `snapshot_pointers(...)` вернёт пустой список → битый `BrokenSnapshotError`/пустые ответы.
+- **Почему не критично сейчас:** dev-окружение `docker-compose down -v` обнуляет данные; новых попыток в старом формате не создаётся.
+- **Фикс при выкатке в прод с историей:** доп. миграция, которая по каждой записи `quiz_attempts` с `questions_snapshot.questions` собирает соответствующие `(id, version=1)` строки из `quiz_questions` (или текущую current-версию) и пересохраняет `questions_snapshot` как pointer-формат. Альтернатива — добавить fallback-ветку в `resolve_snapshot` для обоих форматов, но это сохраняет техдолг навсегда.
+
+### 6.8 `lesson_progress.quiz_score:Float` остаётся legacy после переезда на attempts
+
+- **Где:** [backend/app/models/enrollment.py](../backend/app/models/enrollment.py) (`LessonProgress.quiz_score`), [backend/app/tasks/quiz_pipeline.py](../backend/app/tasks/quiz_pipeline.py) (`_mark_lesson_progress_if_passed`).
+- **Что не так:** источник правды по результатам теста теперь — `QuizAttempt` (с историей попыток и `Decimal score`), но старое поле `lesson_progress.quiz_score:float` всё ещё обновляется как «best-attempt» агрегат, чтобы не ломать обратную совместимость и сохранять простую сортировку для UI-агрегатов.
+- **Почему не критично:** значение всегда соответствует best-attempt; рассинхронизации не возникает, потому что и фон (Celery `grade_attempt_task`), и синхронный submit пишут через одну и ту же функцию-аналог.
+- **Фикс по запросу:** удалить колонку и считать best-score через подзапрос в `/quiz-results`. Сейчас это лишний код, но цена низкая.
+
 ---
 
 ## Карта приоритетов

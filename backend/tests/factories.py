@@ -21,7 +21,14 @@ from app.models.lesson import (
     Lesson,
     LessonStatus,
     Module,
+)
+from app.models.quiz import (
+    AttemptStatus,
+    QuestionType,
+    Quiz,
+    QuizAttempt,
     QuizQuestion,
+    QuizStatus,
 )
 from app.models.slide_text import SlideText
 from app.models.user import User
@@ -91,15 +98,42 @@ async def make_enrollment(
     return enrollment
 
 
-async def make_quiz_question(
-    db: AsyncSession, lesson: Lesson, **overrides: Any
-) -> QuizQuestion:
+async def make_quiz(
+    db: AsyncSession, lesson: Lesson, *, published: bool = False, **overrides: Any
+) -> Quiz:
     defaults: dict[str, Any] = {
         "lesson_id": lesson.id,
-        "question": f"Question {uuid.uuid4().hex[:6]}?",
-        "options": ["Option A", "Option B", "Option C", "Option D"],
-        "correct_index": 0,
-        "order": 0,
+        "status": QuizStatus.published if published else QuizStatus.draft,
+    }
+    defaults.update(overrides)
+    q = Quiz(**defaults)
+    db.add(q)
+    await db.commit()
+    await db.refresh(q)
+    return q
+
+
+async def make_quiz_question(
+    db: AsyncSession, quiz: Quiz, *,
+    type: QuestionType = QuestionType.single_choice,
+    payload: dict[str, Any] | None = None,
+    weight: float = 1.0,
+    order: int = 0,
+    **overrides: Any,
+) -> QuizQuestion:
+    if payload is None:
+        payload = {
+            "type": "single_choice",
+            "prompt": f"Question {uuid.uuid4().hex[:6]}?",
+            "options": ["A", "B", "C", "D"],
+            "correct_index": 0,
+        }
+    defaults: dict[str, Any] = {
+        "quiz_id": quiz.id,
+        "type": type,
+        "payload": payload,
+        "weight": weight,
+        "order": order,
     }
     defaults.update(overrides)
     q = QuizQuestion(**defaults)
@@ -107,6 +141,30 @@ async def make_quiz_question(
     await db.commit()
     await db.refresh(q)
     return q
+
+
+async def make_quiz_attempt(
+    db: AsyncSession, quiz: Quiz, student: User, *,
+    questions_snapshot: dict[str, Any] | None = None,
+    attempt_number: int = 1,
+    status: AttemptStatus = AttemptStatus.in_progress,
+    **overrides: Any,
+) -> QuizAttempt:
+    if questions_snapshot is None:
+        questions_snapshot = {"version": 1, "pointers": []}
+    defaults: dict[str, Any] = {
+        "quiz_id": quiz.id,
+        "student_id": student.id,
+        "attempt_number": attempt_number,
+        "status": status,
+        "questions_snapshot": questions_snapshot,
+    }
+    defaults.update(overrides)
+    a = QuizAttempt(**defaults)
+    db.add(a)
+    await db.commit()
+    await db.refresh(a)
+    return a
 
 
 async def make_slide_text(

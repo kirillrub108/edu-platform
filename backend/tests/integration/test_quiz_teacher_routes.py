@@ -1,387 +1,312 @@
-"""Integration tests for the teacher quiz-authoring endpoints."""
-
+"""Integration tests for the teacher-side quiz API."""
 from __future__ import annotations
 
-import uuid
 from typing import Any
+from uuid import UUID
 
 import pytest
-import pytest_asyncio
-from httpx import AsyncClient
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.lesson import Lesson, QuizQuestion
-from app.models.user import User
-from app.schemas.quiz import GeneratedQuestion, QuestionFlag
 from tests.factories import (
     make_course,
     make_lesson,
     make_module,
+    make_quiz,
     make_quiz_question,
 )
 
-pytestmark = pytest.mark.integration
 
-
-@pytest_asyncio.fixture()
-async def lesson_with_material(
-    db_session: AsyncSession, teacher_user: User
-) -> Lesson:
-    course = await make_course(db_session, owner=teacher_user)
+@pytest.mark.asyncio
+async def test_get_quiz_creates_lazily_for_teacher(client, db_session, teacher_user, teacher_token):
+    course = await make_course(db_session, teacher_user)
     module = await make_module(db_session, course)
-    lesson = await make_lesson(
-        db_session, module, text_content="Lecture text long enough."
-    )
-    return lesson
+    lesson = await make_lesson(db_session, module)
+
+    r = await client.get(f"/api/v1/lessons/{lesson.id}/quiz", headers=teacher_token)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["status"] == "draft"
+    assert UUID(body["id"])
 
 
-@pytest_asyncio.fixture()
-async def foreign_teacher(db_session: AsyncSession) -> User:
-    from app.models.user import User as UserModel
-    from app.models.user import UserRole
-    from app.services.auth_service import hash_password
+@pytest.mark.asyncio
+async def test_update_quiz_settings(client, db_session, teacher_user, teacher_token):
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+    await make_quiz(db_session, lesson)
 
-    user = UserModel(
-        email=f"other-{uuid.uuid4().hex[:8]}@example.com",
-        hashed_password=hash_password("pw"),
-        full_name="Other Teacher",
-        role=UserRole.teacher,
-        is_active=True,
-    )
-    db_session.add(user)
-    await db_session.commit()
-    await db_session.refresh(user)
-    return user
-
-
-def _bearer(user: User) -> dict[str, str]:
-    from app.services.auth_service import create_access_token
-
-    token, _jti, _exp = create_access_token(user)
-    return {"Authorization": f"Bearer {token}"}
-
-
-# ── generate ────────────────────────────────────────────────────────────────
-
-
-async def test_generate_enqueues_and_persists_task_id(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    lesson_with_material: Lesson,
-    teacher_token: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from app.routers import quiz_teacher as qt_mod
-
-    class _Fake:
-        id = "quiz-task-1"
-
-    monkeypatch.setattr(
-        qt_mod.generate_quiz_task, "apply_async", lambda *a, **k: _Fake()
-    )
-
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/generate",
+    r = await client.put(
+        f"/api/v1/lessons/{lesson.id}/quiz",
         headers=teacher_token,
-        json={},
+        json={"pass_threshold": "0.75", "attempts_allowed": 3, "shuffle": True},
     )
-    assert resp.status_code == 202
-    body = resp.json()
-    assert body["task_id"] == "quiz-task-1"
-
-    lesson_id = lesson_with_material.id
-    db_session.expire_all()
-    refreshed = await db_session.get(Lesson, lesson_id)
-    assert refreshed is not None
-    assert refreshed.quiz_task_id == "quiz-task-1"
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["pass_threshold"].startswith("0.7")
+    assert body["attempts_allowed"] == 3
+    assert body["shuffle"] is True
 
 
-async def test_generate_returns_409_when_no_material(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    teacher_user: User,
-    teacher_token: dict[str, str],
-) -> None:
-    course = await make_course(db_session, owner=teacher_user)
+@pytest.mark.asyncio
+async def test_publish_requires_questions(client, db_session, teacher_user, teacher_token):
+    course = await make_course(db_session, teacher_user)
     module = await make_module(db_session, course)
-    lesson = await make_lesson(
-        db_session, module, script=None, text_content=None
+    lesson = await make_lesson(db_session, module)
+    await make_quiz(db_session, lesson)
+
+    r = await client.post(f"/api/v1/lessons/{lesson.id}/quiz/publish", headers=teacher_token)
+    assert r.status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_publish_unpublish_cycle(client, db_session, teacher_user, teacher_token):
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+    quiz = await make_quiz(db_session, lesson)
+    await make_quiz_question(db_session, quiz)
+
+    r = await client.post(f"/api/v1/lessons/{lesson.id}/quiz/publish", headers=teacher_token)
+    assert r.status_code == 200
+    assert r.json()["status"] == "published"
+
+    r = await client.post(f"/api/v1/lessons/{lesson.id}/quiz/unpublish", headers=teacher_token)
+    assert r.status_code == 200
+    assert r.json()["status"] == "draft"
+
+
+@pytest.mark.asyncio
+async def test_create_question_typed_payload(client, db_session, teacher_user, teacher_token):
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+    await make_quiz(db_session, lesson)
+
+    r = await client.post(
+        f"/api/v1/lessons/{lesson.id}/quiz/questions",
+        headers=teacher_token,
+        json={
+            "type": "multiple_choice",
+            "payload": {
+                "type": "multiple_choice",
+                "prompt": "Что верно?",
+                "options": ["A", "B", "C", "D"],
+                "correct_indices": [0, 2],
+            },
+            "weight": "1.5",
+            "order": 0,
+        },
     )
-    resp = await client.post(
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["type"] == "multiple_choice"
+    assert body["payload"]["correct_indices"] == [0, 2]
+    # Weight serializes as a Decimal string
+    assert body["weight"].startswith("1.5")
+
+
+@pytest.mark.asyncio
+async def test_reorder_questions(client, db_session, teacher_user, teacher_token):
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+    quiz = await make_quiz(db_session, lesson)
+    q1 = await make_quiz_question(db_session, quiz, order=1)
+    q2 = await make_quiz_question(db_session, quiz, order=2)
+
+    r = await client.post(
+        f"/api/v1/lessons/{lesson.id}/quiz/questions/reorder",
+        headers=teacher_token,
+        json={"order": [str(q2.id), str(q1.id)]},
+    )
+    assert r.status_code == 200, r.text
+    ordered = r.json()
+    assert [row["id"] for row in ordered] == [str(q2.id), str(q1.id)]
+
+
+@pytest.mark.asyncio
+async def test_other_teachers_cannot_touch(client, db_session, teacher_user, teacher_token):
+    """Owner check via get_owned_lesson — another teacher's lesson is 404."""
+    from app.models.user import User, UserRole
+    from app.services.auth_service import create_access_token, hash_password
+
+    other = User(
+        email="other@e.com", hashed_password=hash_password("x"),
+        full_name="Other", role=UserRole.teacher, is_active=True,
+    )
+    db_session.add(other)
+    await db_session.commit()
+    await db_session.refresh(other)
+
+    course = await make_course(db_session, other)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+
+    r = await client.get(f"/api/v1/lessons/{lesson.id}/quiz", headers=teacher_token)
+    assert r.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_manual_override_recomputes_score(
+    client, db_session, teacher_user, teacher_token, student_user,
+):
+    """End-to-end: build attempt with a wrong open answer scored 0.0, then
+    teacher overrides to 1.0 → attempt score and passed flip in one PATCH."""
+    from decimal import Decimal
+
+    from app.models.quiz import AttemptStatus, QuestionType, QuizAnswer
+    from tests.factories import make_quiz_attempt
+
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+    quiz = await make_quiz(db_session, lesson, published=True)
+    q = await make_quiz_question(
+        db_session, quiz,
+        type=QuestionType.essay,
+        payload={"type": "essay", "prompt": "Опишите тему", "rubric": "глубина"},
+        weight=1.0,
+    )
+    snapshot = {
+        "version": 1,
+        "pointers": [{"question_id": str(q.id), "version": int(q.version), "order": 0}],
+    }
+    attempt = await make_quiz_attempt(
+        db_session, quiz, student_user,
+        questions_snapshot=snapshot, status=AttemptStatus.submitted,
+    )
+    answer = QuizAnswer(
+        attempt_id=attempt.id, question_id=q.id,
+        response={"text": "плохой ответ"}, awarded_score=Decimal("0"),
+        max_score=Decimal("1"), is_correct=False, needs_review=True,
+    )
+    db_session.add(answer)
+    attempt.score = Decimal("0")
+    attempt.passed = False
+    await db_session.commit()
+
+    r = await client.patch(
+        f"/api/v1/lessons/{lesson.id}/quiz/attempts/{attempt.id}/answers/{answer.id}",
+        headers=teacher_token,
+        json={"awarded_score": "1.0", "feedback": "ok"},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["score"].startswith("1")
+    assert body["passed"] is True
+    ans = next(a for a in body["answers"] if a["id"] == str(answer.id))
+    assert ans["manually_overridden"] is True
+    assert ans["needs_review"] is False
+
+
+# ── Versioned-question invariants ──────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_edit_payload_bumps_version_and_supersedes_old(
+    client, db_session, teacher_user, teacher_token,
+):
+    """PATCH on a question payload must insert a new (id, version+1) row and
+    stamp `superseded_at` on the previous row, instead of mutating in place.
+    """
+    from sqlalchemy import select
+
+    from app.models.quiz import QuizQuestion
+
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+    quiz = await make_quiz(db_session, lesson)
+    q = await make_quiz_question(db_session, quiz, order=1)
+
+    r = await client.patch(
+        f"/api/v1/lessons/{lesson.id}/quiz/questions/{q.id}",
+        headers=teacher_token,
+        json={"payload": {
+            "type": "single_choice", "prompt": "edited",
+            "options": ["A", "B"], "correct_index": 1,
+        }},
+    )
+    assert r.status_code == 200, r.text
+    rows = (await db_session.execute(
+        select(QuizQuestion).where(QuizQuestion.id == q.id).order_by(QuizQuestion.version)
+    )).scalars().all()
+    assert [row.version for row in rows] == [1, 2]
+    assert rows[0].superseded_at is not None
+    assert rows[1].superseded_at is None
+    assert rows[1].payload["prompt"] == "edited"
+
+
+@pytest.mark.asyncio
+async def test_delete_question_is_soft_delete(
+    client, db_session, teacher_user, teacher_token,
+):
+    """DELETE marks `superseded_at`; the row stays so older attempts can still
+    resolve their snapshot pointer to it."""
+    from app.models.quiz import QuizQuestion
+
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+    quiz = await make_quiz(db_session, lesson)
+    q = await make_quiz_question(db_session, quiz)
+
+    r = await client.delete(
+        f"/api/v1/lessons/{lesson.id}/quiz/questions/{q.id}",
+        headers=teacher_token,
+    )
+    assert r.status_code == 204
+    row = await db_session.get(QuizQuestion, (q.id, q.version))
+    assert row is not None
+    assert row.superseded_at is not None
+
+
+@pytest.mark.asyncio
+async def test_first_load_does_not_trigger_lazy_relationship(
+    client, db_session, teacher_user, teacher_token,
+):
+    """Regression: the previous `get_or_create_quiz` did
+    `if lesson.quiz is not None:` on a lazy relationship, which in async
+    raised MissingGreenlet. Calling /quiz/generate on a brand-new lesson
+    must not 500 from that path (the route then 409s on empty material,
+    which is fine — we only care that the lazy load is gone).
+    """
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+
+    r = await client.post(
         f"/api/v1/lessons/{lesson.id}/quiz/generate",
         headers=teacher_token,
-        json={},
+        json={"num_questions": 1, "num_options": 2, "types": ["single_choice"]},
     )
-    assert resp.status_code == 409
+    # Lesson has no material → 409, but the important assertion is "not 500".
+    assert r.status_code != 500, r.text
 
 
-async def test_generate_blocks_student(
-    client: AsyncClient,
-    lesson_with_material: Lesson,
-    student_token: dict[str, str],
-) -> None:
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/generate",
-        headers=student_token,
-        json={},
-    )
-    assert resp.status_code == 403
-
-
-async def test_generate_blocks_non_owner_teacher(
-    client: AsyncClient,
-    lesson_with_material: Lesson,
-    foreign_teacher: User,
-) -> None:
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/generate",
-        headers=_bearer(foreign_teacher),
-        json={},
-    )
-    assert resp.status_code == 404
-
-
-async def test_generate_missing_lesson_returns_404(
-    client: AsyncClient, teacher_token: dict[str, str]
-) -> None:
-    resp = await client.post(
-        f"/api/v1/lessons/{uuid.uuid4()}/quiz/generate",
+@pytest.mark.asyncio
+async def test_list_questions_only_returns_current(
+    client, db_session, teacher_user, teacher_token,
+):
+    """After an edit, the listing shows only the current version, not history."""
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+    quiz = await make_quiz(db_session, lesson)
+    q = await make_quiz_question(db_session, quiz, order=1)
+    await client.patch(
+        f"/api/v1/lessons/{lesson.id}/quiz/questions/{q.id}",
         headers=teacher_token,
-        json={},
+        json={"payload": {
+            "type": "single_choice", "prompt": "v2",
+            "options": ["A", "B"], "correct_index": 0,
+        }},
     )
-    assert resp.status_code == 404
 
-
-# ── generation-status ───────────────────────────────────────────────────────
-
-
-async def test_generation_status_returns_state(
-    client: AsyncClient,
-    lesson_with_material: Lesson,
-    teacher_token: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    from app.routers import quiz_teacher as qt_mod
-
-    class _Result:
-        status = "PROGRESS"
-        state = "PROGRESS"
-        info = {"step": "llm", "done": 1, "total": 3}
-
-        def ready(self) -> bool:
-            return False
-
-    monkeypatch.setattr(qt_mod, "AsyncResult", lambda *a, **k: _Result())
-
-    resp = await client.get(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/generation-status/tid",
-        headers=teacher_token,
+    r = await client.get(
+        f"/api/v1/lessons/{lesson.id}/quiz/questions", headers=teacher_token
     )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["step"] == "llm"
-    assert body["done"] == 1
-    assert body["total"] == 3
-
-
-# ── list / patch / delete ───────────────────────────────────────────────────
-
-
-async def test_list_quiz_questions(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    lesson_with_material: Lesson,
-    teacher_token: dict[str, str],
-) -> None:
-    await make_quiz_question(db_session, lesson_with_material, order=1, correct_index=1)
-    await make_quiz_question(db_session, lesson_with_material, order=0, correct_index=0)
-
-    resp = await client.get(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz",
-        headers=teacher_token,
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert len(body) == 2
-    assert [q["order"] for q in body] == [0, 1]
-    assert "correct_index" in body[0]
-
-
-async def test_patch_question(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    lesson_with_material: Lesson,
-    teacher_token: dict[str, str],
-) -> None:
-    q = await make_quiz_question(db_session, lesson_with_material, correct_index=0)
-    resp = await client.patch(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/{q.id}",
-        headers=teacher_token,
-        json={"question": "New question?", "correct_index": 2},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["question"] == "New question?"
-    assert body["correct_index"] == 2
-
-
-async def test_patch_question_oor_returns_422(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    lesson_with_material: Lesson,
-    teacher_token: dict[str, str],
-) -> None:
-    q = await make_quiz_question(db_session, lesson_with_material, correct_index=0)
-    resp = await client.patch(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/{q.id}",
-        headers=teacher_token,
-        json={"correct_index": 99},
-    )
-    assert resp.status_code == 422
-
-
-async def test_delete_question(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    lesson_with_material: Lesson,
-    teacher_token: dict[str, str],
-) -> None:
-    q = await make_quiz_question(db_session, lesson_with_material)
-    qid = q.id
-    resp = await client.delete(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/{qid}",
-        headers=teacher_token,
-    )
-    assert resp.status_code == 204
-
-    db_session.expire_all()
-    assert await db_session.get(QuizQuestion, qid) is None
-
-
-# ── regenerate single question ──────────────────────────────────────────────
-
-
-async def test_regenerate_question_returns_mutated(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    lesson_with_material: Lesson,
-    teacher_token: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    q = await make_quiz_question(
-        db_session, lesson_with_material, correct_index=0
-    )
-    other = await make_quiz_question(
-        db_session,
-        lesson_with_material,
-        question="UNTOUCHED?",
-        correct_index=1,
-        order=1,
-    )
-    other_id = other.id
-
-    from app.services import llm_service as llm_mod
-
-    async def _fake_regen(
-        material: str, question, mode: str, num_options: int
-    ) -> GeneratedQuestion:
-        return GeneratedQuestion(
-            question="Reworded?", options=["A1", "B1", "C1", "D1"], correct_index=2
-        )
-
-    monkeypatch.setattr(llm_mod.llm_service, "regenerate_quiz_question", _fake_regen)
-
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/{q.id}/regenerate",
-        headers=teacher_token,
-        json={"mode": "rephrase"},
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["question"] == "Reworded?"
-    assert body["correct_index"] == 2
-
-    db_session.expire_all()
-    untouched = await db_session.get(QuizQuestion, other_id)
-    assert untouched is not None
-    assert untouched.question == "UNTOUCHED?"
-
-
-# ── qa-review ───────────────────────────────────────────────────────────────
-
-
-async def test_qa_review_returns_flags_without_mutation(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    lesson_with_material: Lesson,
-    teacher_token: dict[str, str],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    q1 = await make_quiz_question(db_session, lesson_with_material, correct_index=0)
-    q2 = await make_quiz_question(db_session, lesson_with_material, correct_index=1, order=1)
-    q1_id, q2_id = q1.id, q2.id
-    q1_text, q2_text = q1.question, q2.question
-
-    from app.services import llm_service as llm_mod
-
-    async def _fake_qa(material: str, questions: list[dict[str, Any]]) -> list[QuestionFlag]:
-        return [
-            QuestionFlag(question_id=questions[0]["id"], kind="ok", note=""),
-            QuestionFlag(
-                question_id=questions[1]["id"], kind="ambiguous", note="check"
-            ),
-        ]
-
-    monkeypatch.setattr(llm_mod.llm_service, "qa_review_quiz", _fake_qa)
-
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/qa-review",
-        headers=teacher_token,
-    )
-    assert resp.status_code == 200
-    body = resp.json()
-    assert len(body) == 2
-    assert body[0]["kind"] == "ok"
-    assert body[1]["kind"] == "ambiguous"
-
-    db_session.expire_all()
-    refreshed_1 = await db_session.get(QuizQuestion, q1_id)
-    refreshed_2 = await db_session.get(QuizQuestion, q2_id)
-    assert refreshed_1 is not None and refreshed_1.question == q1_text
-    assert refreshed_2 is not None and refreshed_2.question == q2_text
-
-
-async def test_qa_review_empty_quiz_returns_empty(
-    client: AsyncClient,
-    lesson_with_material: Lesson,
-    teacher_token: dict[str, str],
-) -> None:
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson_with_material.id}/quiz/qa-review",
-        headers=teacher_token,
-    )
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
-# ── authz blanket coverage ──────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "method,suffix",
-    [
-        ("get", "/quiz"),
-        ("post", "/quiz/qa-review"),
-    ],
-)
-async def test_student_blocked_on_read_endpoints(
-    client: AsyncClient,
-    lesson_with_material: Lesson,
-    student_token: dict[str, str],
-    method: str,
-    suffix: str,
-) -> None:
-    url = f"/api/v1/lessons/{lesson_with_material.id}{suffix}"
-    resp = await getattr(client, method)(url, headers=student_token)
-    assert resp.status_code == 403
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body) == 1
+    assert body[0]["payload"]["prompt"] == "v2"

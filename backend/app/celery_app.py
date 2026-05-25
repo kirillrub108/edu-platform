@@ -32,6 +32,7 @@ celery_app.conf.update(
     task_queues=(
         Queue("video", routing_key="video"),
         Queue("vision", routing_key="vision"),
+        Queue("quiz", routing_key="quiz"),
     ),
     task_default_queue="video",
     task_default_routing_key="video",

@@ -2,16 +2,17 @@ from uuid import UUID
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import and_, select, update
+from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
 from app.database import get_db
 from app.dependencies import get_owned_lesson, require_teacher
 from app.models.course import Course
-from app.models.enrollment import Enrollment, LessonProgress
+from app.models.enrollment import Enrollment
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
+from app.models.quiz import AttemptStatus, Quiz, QuizAttempt
 from app.models.user import User
 from app.schemas.lesson import (
     LessonCreate,
@@ -243,34 +244,63 @@ async def quiz_results(
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
+    """Best-attempt aggregation per enrolled student. A student with no
+    attempts shows up with `attempts_count=0` so the teacher sees who hasn't
+    tried the test yet.
+    """
     course_id = lesson.module.course_id
-    rows = (
+    quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson_id))
+    quiz_id = quiz.id if quiz is not None else None
+    pass_threshold = quiz.pass_threshold if quiz is not None else None
+
+    students = (
         await db.execute(
-            select(User, LessonProgress)
+            select(User)
             .join(Enrollment, Enrollment.student_id == User.id)
-            .outerjoin(
-                LessonProgress,
-                and_(
-                    LessonProgress.enrollment_id == Enrollment.id,
-                    LessonProgress.lesson_id == lesson_id,
-                ),
-            )
             .where(Enrollment.course_id == course_id)
             .order_by(User.full_name)
         )
-    ).all()
+    ).scalars().all()
 
-    return [
-        QuizTeacherResultRow(
-            student_id=user.id,
-            full_name=user.full_name,
-            email=user.email,
-            quiz_score=progress.quiz_score if progress else None,
-            attempted=progress is not None and progress.quiz_score is not None,
-            completed=progress is not None and progress.is_completed,
-        )
-        for user, progress in rows
-    ]
+    out: list[QuizTeacherResultRow] = []
+    for student in students:
+        if quiz_id is None:
+            out.append(QuizTeacherResultRow(
+                student_id=student.id,
+                full_name=student.full_name,
+                email=student.email,
+                best_score=None,
+                attempts_count=0,
+                passed=False,
+                last_submitted_at=None,
+            ))
+            continue
+        # Only count graded attempts toward best_score; submitted-but-pending
+        # attempts shouldn't influence a published number.
+        attempts = (
+            await db.execute(
+                select(QuizAttempt)
+                .where(
+                    QuizAttempt.quiz_id == quiz_id,
+                    QuizAttempt.student_id == student.id,
+                )
+                .order_by(desc(QuizAttempt.submitted_at))
+            )
+        ).scalars().all()
+        graded = [a for a in attempts if a.status == AttemptStatus.graded and a.score is not None]
+        best = max(graded, key=lambda a: a.score) if graded else None
+        last_subm = next((a.submitted_at for a in attempts if a.submitted_at), None)
+        passed = bool(best and pass_threshold is not None and best.score >= pass_threshold)
+        out.append(QuizTeacherResultRow(
+            student_id=student.id,
+            full_name=student.full_name,
+            email=student.email,
+            best_score=best.score if best else None,
+            attempts_count=len(attempts),
+            passed=passed,
+            last_submitted_at=last_subm,
+        ))
+    return out
 
 
 @router.get("/{lesson_id}/videos", response_model=list[LessonVideoOut])

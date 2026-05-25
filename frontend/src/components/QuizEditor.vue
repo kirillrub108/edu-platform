@@ -1,25 +1,47 @@
 <script setup lang="ts">
 import {
-  Sparkles, ShieldCheck, Trash2, Plus, RotateCcw, AlertTriangle, CheckCircle2,
+  Sparkles, ShieldCheck, Trash2, RotateCcw, AlertTriangle, CheckCircle2,
+  Eye, EyeOff,
 } from 'lucide-vue-next'
 import UiButton from './UiButton.vue'
-import type { TeacherQuizQuestion, RegenerateMode } from '../composables/useQuizAuthoring'
+import QuestionForm from './quiz/QuestionForm.vue'
+import type {
+  TeacherQuestion, RegenerateMode, QuestionType,
+} from '../composables/useQuizAuthoring'
 
 interface Props {
   lessonId: string
-  initialTaskId?: string | null
 }
 
 const props = defineProps<Props>()
-
 const lessonIdRef = computed(() => props.lessonId)
+
 const {
-  questions, loading, loadError,
+  settings, questions, loading, loadError,
+  isPublished,
   generating, generationStep, generationDone, generationTotal, generationError,
-  regenIds, savingIds, flags, qaRunning, qaError, flagFor,
-  load, generate, patchQuestion, regenerate, deleteQuestion, runQaReview,
-  resumeIfRunning,
+  regenIds, savingIds,
+  flags, qaRunning, qaError, flagFor,
+  load, updateSettings, publish, unpublish,
+  generate, createQuestion, patchQuestion, deleteQuestion,
+  regenerate, runAiReview,
 } = useQuizAuthoring(lessonIdRef)
+
+const TYPE_LABELS: Record<QuestionType, string> = {
+  single_choice: 'Один из',
+  multiple_choice: 'Несколько из',
+  true_false: 'Верно/Неверно',
+  short_answer: 'Короткий ответ',
+  essay: 'Эссе',
+  matching: 'Сопоставление',
+  ordering: 'Порядок',
+  fill_blank: 'Пропуски',
+}
+
+const ADDABLE_TYPES: QuestionType[] = [
+  'single_choice', 'multiple_choice', 'true_false',
+  'short_answer', 'essay', 'matching', 'ordering', 'fill_blank',
+]
 
 const REGEN_MODES: { value: RegenerateMode; label: string }[] = [
   { value: 'rephrase', label: 'Перефразировать' },
@@ -28,70 +50,62 @@ const REGEN_MODES: { value: RegenerateMode; label: string }[] = [
   { value: 'improve_distractors', label: 'Улучшить дистракторы' },
 ]
 
-const editBuffers = ref<Record<string, { question: string; options: string[] }>>({})
+// Debounced payload PATCH per question.
 const saveTimers = ref<Record<string, ReturnType<typeof setTimeout>>>({})
 
-const syncBuffer = (q: TeacherQuizQuestion) => {
-  editBuffers.value[q.id] = {
-    question: q.question,
-    options: [...q.options],
-  }
-}
-
-watch(questions, (rows) => {
-  for (const q of rows) {
-    if (!editBuffers.value[q.id]) syncBuffer(q)
-  }
-  // Drop buffers for questions that no longer exist.
-  for (const id of Object.keys(editBuffers.value)) {
-    if (!rows.find(r => r.id === id)) delete editBuffers.value[id]
-  }
-}, { deep: false })
-
-const scheduleSave = (q: TeacherQuizQuestion, patch: Partial<TeacherQuizQuestion>) => {
+const schedulePayloadPatch = (q: TeacherQuestion, payload: Record<string, any>) => {
   if (saveTimers.value[q.id]) clearTimeout(saveTimers.value[q.id])
   saveTimers.value[q.id] = setTimeout(async () => {
     try {
-      await patchQuestion(q, patch)
+      await patchQuestion(q, { payload })
     } catch {
-      // Reload to discard local edits on conflict.
       await load()
     }
   }, 500)
 }
 
-const onQuestionInput = (q: TeacherQuizQuestion) => {
-  const buf = editBuffers.value[q.id]
-  if (!buf) return
-  scheduleSave(q, { question: buf.question })
+// Debounced settings PUT.
+let settingsTimer: ReturnType<typeof setTimeout> | null = null
+const scheduleSettingsPatch = (patch: Record<string, any>) => {
+  if (settingsTimer) clearTimeout(settingsTimer)
+  settingsTimer = setTimeout(() => updateSettings(patch), 300)
 }
 
-const onOptionInput = (q: TeacherQuizQuestion, idx: number) => {
-  const buf = editBuffers.value[q.id]
-  if (!buf) return
-  scheduleSave(q, { options: [...buf.options] })
+const onAddQuestion = async (type: QuestionType) => {
+  const payload = defaultPayload(type)
+  await createQuestion(type, payload, 1.0)
 }
 
-const setCorrect = async (q: TeacherQuizQuestion, idx: number) => {
-  if (q.correct_index === idx) return
-  try {
-    await patchQuestion(q, { correct_index: idx })
-  } catch (e: any) {
-    // 422 OOR — extremely unlikely since idx is within current options, but surface anyway.
-    alert(e?.data?.detail ?? 'Не удалось сохранить правильный ответ')
+const defaultPayload = (type: QuestionType): Record<string, any> => {
+  switch (type) {
+    case 'single_choice':
+      return { type, prompt: '', options: ['', ''], correct_index: 0, explanation: '' }
+    case 'multiple_choice':
+      return { type, prompt: '', options: ['', '', ''], correct_indices: [0], explanation: '' }
+    case 'true_false':
+      return { type, prompt: '', correct: true, explanation: '' }
+    case 'short_answer':
+      return { type, prompt: '', reference_answer: '', rubric: '' }
+    case 'essay':
+      return { type, prompt: '', rubric: '' }
+    case 'matching':
+      return { type, prompt: '', left: ['', ''], right: ['', ''], correct_pairs: [[0, 0], [1, 1]], explanation: '' }
+    case 'ordering':
+      return { type, prompt: '', items: ['', ''], correct_order: [0, 1], explanation: '' }
+    case 'fill_blank':
+      return { type, prompt: 'Пример с ___ пропуском.', blanks: [['']], case_insensitive: true, explanation: '' }
   }
 }
 
-const onRegenerate = async (q: TeacherQuizQuestion, mode: RegenerateMode) => {
+const onRegenerate = async (q: TeacherQuestion, mode: RegenerateMode) => {
   try {
     await regenerate(q, mode)
-    syncBuffer(questions.value.find(x => x.id === q.id) ?? q)
   } catch (e: any) {
     alert(e?.data?.detail ?? 'Не удалось перегенерировать вопрос')
   }
 }
 
-const onDelete = async (q: TeacherQuizQuestion) => {
+const onDelete = async (q: TeacherQuestion) => {
   if (!confirm('Удалить вопрос?')) return
   await deleteQuestion(q)
 }
@@ -112,13 +126,15 @@ const flagBadge = (kind: string) => {
   }
 }
 
-onMounted(async () => {
-  await load()
-  if (props.initialTaskId) resumeIfRunning(props.initialTaskId)
-})
+const onTogglePublish = async () => {
+  if (isPublished.value) await unpublish()
+  else await publish()
+}
 
+onMounted(load)
 onUnmounted(() => {
   for (const t of Object.values(saveTimers.value)) clearTimeout(t)
+  if (settingsTimer) clearTimeout(settingsTimer)
 })
 </script>
 
@@ -128,7 +144,7 @@ onUnmounted(() => {
       <div>
         <h2 class="text-lg font-semibold text-gray-900">Тест по уроку</h2>
         <p class="text-sm text-gray-500">
-          Вопросы автоматически генерируются из материалов урока. Их можно редактировать вручную или с помощью ИИ.
+          Создавайте вопросы вручную или сгенерируйте из текста. Опубликованный тест видят студенты.
         </p>
       </div>
       <div class="flex flex-wrap gap-2">
@@ -146,13 +162,87 @@ onUnmounted(() => {
           size="sm"
           :loading="qaRunning"
           :disabled="!questions.length || generating"
-          @click="runQaReview"
+          @click="runAiReview"
         >
           <template #icon><ShieldCheck class="w-4 h-4" /></template>
           AI-проверка
         </UiButton>
+        <UiButton
+          v-if="settings"
+          :variant="isPublished ? 'ghost' : 'primary'"
+          size="sm"
+          :disabled="!questions.length"
+          @click="onTogglePublish"
+        >
+          <template #icon>
+            <EyeOff v-if="isPublished" class="w-4 h-4" />
+            <Eye v-else class="w-4 h-4" />
+          </template>
+          {{ isPublished ? 'Снять с публикации' : 'Опубликовать' }}
+        </UiButton>
       </div>
     </header>
+
+    <!-- Settings -->
+    <div
+      v-if="settings"
+      class="grid grid-cols-2 sm:grid-cols-4 gap-3 rounded-xl bg-gray-50 p-3 text-sm"
+    >
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-gray-500">Попыток</span>
+        <select
+          :value="settings.attempts_allowed ?? ''"
+          class="rounded-lg border border-gray-200 px-2 py-1"
+          @change="(e: any) => scheduleSettingsPatch({
+            attempts_allowed: e.target.value === '' ? null : Number(e.target.value),
+          })"
+        >
+          <option value="">∞</option>
+          <option value="1">1</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+          <option value="5">5</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-gray-500">Порог сдачи</span>
+        <input
+          type="number" min="0" max="1" step="0.05"
+          :value="Number(settings.pass_threshold)"
+          class="rounded-lg border border-gray-200 px-2 py-1"
+          @input="(e: any) => scheduleSettingsPatch({ pass_threshold: e.target.value })"
+        />
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-gray-500">Показывать ответы</span>
+        <select
+          :value="String(settings.show_answers)"
+          :disabled="settings.attempts_allowed !== 1"
+          class="rounded-lg border border-gray-200 px-2 py-1 disabled:bg-gray-100 disabled:text-gray-400"
+          @change="(e: any) => scheduleSettingsPatch({ show_answers: e.target.value === 'true' })"
+        >
+          <option value="true">Да</option>
+          <option value="false">Нет</option>
+        </select>
+      </label>
+      <label class="flex flex-col gap-1">
+        <span class="text-xs text-gray-500">Перемешивать</span>
+        <select
+          :value="String(settings.shuffle)"
+          class="rounded-lg border border-gray-200 px-2 py-1"
+          @change="(e: any) => scheduleSettingsPatch({ shuffle: e.target.value === 'true' })"
+        >
+          <option value="false">Нет</option>
+          <option value="true">Да</option>
+        </select>
+      </label>
+      <p
+        v-if="settings.attempts_allowed !== 1"
+        class="col-span-2 sm:col-span-4 text-xs text-gray-500"
+      >
+        Правильные ответы показываются только при ровно одной разрешённой попытке.
+      </p>
+    </div>
 
     <div
       v-if="generating"
@@ -167,55 +257,41 @@ onUnmounted(() => {
     <div
       v-if="generationError"
       class="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"
-    >
-      {{ generationError }}
-    </div>
+    >{{ generationError }}</div>
 
     <div
       v-if="qaError"
       class="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"
-    >
-      {{ qaError }}
-    </div>
+    >{{ qaError }}</div>
 
     <div v-if="loading" class="text-sm text-gray-500">Загрузка вопросов…</div>
 
     <div
       v-else-if="loadError"
       class="text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl p-3"
-    >
-      {{ loadError }}
-    </div>
+    >{{ loadError }}</div>
 
     <div
       v-else-if="questions.length === 0 && !generating"
       class="text-sm text-gray-500 bg-violet-50/40 border border-violet-100 rounded-2xl p-6 text-center"
     >
-      Тест ещё не создан. Нажмите «Сгенерировать тест», чтобы автоматически собрать вопросы из материалов урока.
+      Тест ещё пуст. Сгенерируйте автоматически или добавьте вопрос вручную ниже.
     </div>
 
     <ol v-else class="space-y-4">
       <li
         v-for="(q, qIdx) in questions"
         :key="q.id"
-        class="rounded-2xl border border-gray-100 p-4 bg-gray-50/60"
+        class="rounded-2xl border border-gray-100 p-4 bg-gray-50/60 space-y-3"
       >
-        <div class="flex items-start justify-between gap-3 mb-3">
-          <div class="flex-1">
-            <label class="block text-xs font-medium text-gray-500 mb-1">
-              Вопрос {{ qIdx + 1 }}
-            </label>
-            <textarea
-              v-if="editBuffers[q.id]"
-              v-model="editBuffers[q.id].question"
-              rows="2"
-              class="w-full resize-none px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg
-                     focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition"
-              @input="onQuestionInput(q)"
-            />
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-2 text-xs">
+            <span class="font-medium text-gray-500">Вопрос {{ qIdx + 1 }}</span>
+            <span class="px-2 py-0.5 rounded-full bg-white border border-gray-200 text-gray-600">
+              {{ TYPE_LABELS[q.type] }}
+            </span>
           </div>
-
-          <div class="flex flex-col items-end gap-1">
+          <div class="flex items-center gap-2">
             <div v-if="flagFor(q.id)" class="text-xs">
               <span
                 :class="[
@@ -238,50 +314,30 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <div
+        <p
           v-if="flagFor(q.id)?.note"
-          class="text-xs text-gray-600 italic mb-3 px-1"
-        >
-          {{ flagFor(q.id)!.note }}
-        </div>
+          class="text-xs text-gray-600 italic"
+        >{{ flagFor(q.id)!.note }}</p>
 
-        <ul class="space-y-2">
-          <li
-            v-for="(opt, oIdx) in editBuffers[q.id]?.options ?? []"
-            :key="oIdx"
-            class="flex items-center gap-2"
+        <QuestionForm
+          :type="q.type"
+          :payload="q.payload"
+          @update="(p) => schedulePayloadPatch(q, p)"
+        />
+
+        <div class="flex flex-wrap gap-2 pt-2">
+          <UiButton
+            v-for="m in REGEN_MODES"
+            :key="m.value"
+            variant="ghost"
+            size="sm"
+            :disabled="regenIds.has(q.id) || q.type !== 'single_choice'"
+            :loading="regenIds.has(q.id)"
+            @click="onRegenerate(q, m.value)"
           >
-            <input
-              type="radio"
-              :name="`correct-${q.id}`"
-              :checked="q.correct_index === oIdx"
-              class="accent-violet-600"
-              @change="setCorrect(q, oIdx)"
-            />
-            <input
-              v-model="editBuffers[q.id].options[oIdx]"
-              class="flex-1 px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg
-                     focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition"
-              @input="onOptionInput(q, oIdx)"
-            />
-          </li>
-        </ul>
-
-        <div class="flex flex-wrap gap-2 mt-3">
-          <div class="flex gap-1 flex-wrap">
-            <UiButton
-              v-for="m in REGEN_MODES"
-              :key="m.value"
-              variant="ghost"
-              size="sm"
-              :loading="regenIds.has(q.id)"
-              :disabled="regenIds.has(q.id)"
-              @click="onRegenerate(q, m.value)"
-            >
-              <template #icon><RotateCcw class="w-3 h-3" /></template>
-              {{ m.label }}
-            </UiButton>
-          </div>
+            <template #icon><RotateCcw class="w-3 h-3" /></template>
+            {{ m.label }}
+          </UiButton>
           <UiButton variant="ghost" size="sm" @click="onDelete(q)">
             <template #icon><Trash2 class="w-3 h-3" /></template>
             Удалить
@@ -289,5 +345,16 @@ onUnmounted(() => {
         </div>
       </li>
     </ol>
+
+    <div class="flex flex-wrap gap-2 pt-2 border-t border-gray-100">
+      <span class="text-xs text-gray-500 mr-1 self-center">Добавить вопрос:</span>
+      <button
+        v-for="t in ADDABLE_TYPES"
+        :key="t"
+        type="button"
+        class="text-xs px-2 py-1 rounded-lg border border-gray-200 text-gray-700 hover:bg-violet-50 transition"
+        @click="onAddQuestion(t)"
+      >+ {{ TYPE_LABELS[t] }}</button>
+    </div>
   </section>
 </template>
