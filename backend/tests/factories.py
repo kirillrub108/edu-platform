@@ -21,6 +21,7 @@ from app.models.lesson import (
     Lesson,
     LessonStatus,
     Module,
+    QuizQuestion,
 )
 from app.models.slide_text import SlideText
 from app.models.user import User
@@ -88,6 +89,24 @@ async def make_enrollment(
     await db.commit()
     await db.refresh(enrollment)
     return enrollment
+
+
+async def make_quiz_question(
+    db: AsyncSession, lesson: Lesson, **overrides: Any
+) -> QuizQuestion:
+    defaults: dict[str, Any] = {
+        "lesson_id": lesson.id,
+        "question": f"Question {uuid.uuid4().hex[:6]}?",
+        "options": ["Option A", "Option B", "Option C", "Option D"],
+        "correct_index": 0,
+        "order": 0,
+    }
+    defaults.update(overrides)
+    q = QuizQuestion(**defaults)
+    db.add(q)
+    await db.commit()
+    await db.refresh(q)
+    return q
 
 
 async def make_slide_text(

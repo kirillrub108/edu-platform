@@ -1,8 +1,6 @@
-"""End-to-end student routes (enroll / my-courses / complete / quiz)."""
+"""End-to-end student routes (enroll / my-courses / complete)."""
 
 from __future__ import annotations
-
-from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -142,34 +140,3 @@ async def test_complete_lesson_marks_progress(
     assert row.is_completed is True
 
 
-@pytest.mark.parametrize(
-    "score, should_complete",
-    [(0.59, False), (0.6, True), (0.95, True)],
-)
-async def test_quiz_result_auto_completes_when_score_high(
-    client: AsyncClient,
-    db_session: AsyncSession,
-    teacher_user: User,
-    student_user: User,
-    student_token: dict[str, str],
-    score: float,
-    should_complete: bool,
-) -> None:
-    course = await make_course(db_session, owner=teacher_user, is_published=True)
-    module = await make_module(db_session, course)
-    lesson = await make_lesson(db_session, module, status=LessonStatus.published)
-    await make_enrollment(db_session, student_user, course)
-
-    resp = await client.post(
-        f"/api/v1/students/lessons/{lesson.id}/quiz-result",
-        json={"score": score},
-        headers=student_token,
-    )
-    assert resp.status_code == 200
-    assert resp.json()["score"] == score
-
-    row = await db_session.scalar(
-        select(LessonProgress).where(LessonProgress.lesson_id == lesson.id)
-    )
-    assert row is not None
-    assert row.is_completed is should_complete

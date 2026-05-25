@@ -7,14 +7,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.constants import QUIZ_PASS_THRESHOLD
 from app.database import get_db
 from app.dependencies import require_student
 from app.models.course import Course
 from app.models.enrollment import Enrollment, LessonProgress
-from app.models.lesson import Lesson, Module
+from app.models.lesson import Lesson, Module, QuizQuestion
 from app.models.user import User
 from app.schemas.course import CourseDetail, CourseOut
 from app.schemas.lesson import LessonOut
+from app.schemas.quiz import (
+    QuizAnswerSubmit,
+    QuizQuestionStudentRead,
+    QuizResultRead,
+)
+from app.services.quiz_service import grade_quiz
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/students", tags=["students"])
@@ -23,10 +30,6 @@ router = APIRouter(prefix="/api/v1/students", tags=["students"])
 class EnrollRequest(BaseModel):
     course_id: UUID | None = None
     access_code: str | None = None
-
-
-class QuizResultRequest(BaseModel):
-    score: float
 
 
 @router.post("/enroll")
@@ -163,17 +166,75 @@ async def complete_lesson(
     return {"lesson_id": str(lesson_id), "completed": True}
 
 
-@router.post("/lessons/{lesson_id}/quiz-result")
-async def save_quiz_result(
+@router.get("/lessons/{lesson_id}/quiz", response_model=list[QuizQuestionStudentRead])
+async def get_quiz_questions(
     lesson_id: UUID,
-    data: QuizResultRequest,
+    user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+):
+    lesson = await db.get(Lesson, lesson_id)
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    module = await db.get(Module, lesson.module_id)
+    enrollment = await db.scalar(
+        select(Enrollment).where(
+            Enrollment.student_id == user.id, Enrollment.course_id == module.course_id
+        )
+    )
+    if not enrollment:
+        raise HTTPException(status_code=403, detail="Not enrolled")
+
+    questions = list(
+        await db.scalars(
+            select(QuizQuestion)
+            .where(QuizQuestion.lesson_id == lesson_id)
+            .order_by(QuizQuestion.order)
+        )
+    )
+    if not questions:
+        raise HTTPException(status_code=404, detail="No quiz questions for this lesson")
+    return questions
+
+
+@router.post("/lessons/{lesson_id}/quiz", response_model=QuizResultRead)
+async def submit_quiz(
+    lesson_id: UUID,
+    data: QuizAnswerSubmit,
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ):
     progress = await _get_progress(user, lesson_id, db)
-    progress.quiz_score = data.score
-    if data.score >= 0.6:
+
+    if not progress.is_completed:
+        raise HTTPException(
+            status_code=409, detail="Complete the lesson before taking the quiz"
+        )
+
+    questions = list(
+        await db.scalars(
+            select(QuizQuestion)
+            .where(QuizQuestion.lesson_id == lesson_id)
+            .order_by(QuizQuestion.order)
+        )
+    )
+    if not questions:
+        raise HTTPException(status_code=404, detail="No quiz questions for this lesson")
+
+    try:
+        score, correct_count, question_results = grade_quiz(questions, data.answers)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    progress.quiz_score = score
+    if score >= QUIZ_PASS_THRESHOLD:
         progress.is_completed = True
-        progress.completed_at = datetime.now(timezone.utc)
+        progress.completed_at = progress.completed_at or datetime.now(timezone.utc)
     await db.commit()
-    return {"lesson_id": str(lesson_id), "score": data.score}
+
+    return QuizResultRead(
+        score=score,
+        correct_count=correct_count,
+        total=len(questions),
+        passed=score >= QUIZ_PASS_THRESHOLD,
+        questions=question_results,
+    )

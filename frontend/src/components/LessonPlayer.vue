@@ -28,8 +28,8 @@ defineProps<{
       <p>{{ lesson.text_content }}</p>
     </div>
 
-    <div v-else class="text-sm text-gray-600">
-      Quiz content not implemented in player yet.
+    <div v-else-if="lesson.content_type === 'quiz'" class="text-sm text-gray-600">
+      Отметьте урок пройденным, чтобы открыть тест.
     </div>
   </div>
 </template>

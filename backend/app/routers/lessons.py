@@ -2,13 +2,14 @@ from uuid import UUID
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import and_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
 from app.database import get_db
 from app.dependencies import get_owned_lesson, require_teacher
 from app.models.course import Course
+from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
 from app.models.user import User
@@ -21,6 +22,7 @@ from app.schemas.lesson import (
     TaskStatusResponse,
     VideoGenerateRequest,
 )
+from app.schemas.quiz import QuizTeacherResultRow
 from app.services.storage_service import storage_service
 from app.tasks.video_pipeline import generate_video_lesson
 
@@ -233,6 +235,42 @@ async def task_status(
         pass
 
     return payload
+
+
+@router.get("/{lesson_id}/quiz-results", response_model=list[QuizTeacherResultRow])
+async def quiz_results(
+    lesson_id: UUID,
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    course_id = lesson.module.course_id
+    rows = (
+        await db.execute(
+            select(User, LessonProgress)
+            .join(Enrollment, Enrollment.student_id == User.id)
+            .outerjoin(
+                LessonProgress,
+                and_(
+                    LessonProgress.enrollment_id == Enrollment.id,
+                    LessonProgress.lesson_id == lesson_id,
+                ),
+            )
+            .where(Enrollment.course_id == course_id)
+            .order_by(User.full_name)
+        )
+    ).all()
+
+    return [
+        QuizTeacherResultRow(
+            student_id=user.id,
+            full_name=user.full_name,
+            email=user.email,
+            quiz_score=progress.quiz_score if progress else None,
+            attempted=progress is not None and progress.quiz_score is not None,
+            completed=progress is not None and progress.is_completed,
+        )
+        for user, progress in rows
+    ]
 
 
 @router.get("/{lesson_id}/videos", response_model=list[LessonVideoOut])

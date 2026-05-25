@@ -101,9 +101,30 @@ watch(generating, async (newVal, oldVal) => {
   if (oldVal && !newVal) await loadVideos()
 })
 
+// ── Quiz results ──────────────────────────────────────────────────────────────
+
+interface QuizResultRow {
+  student_id: string
+  full_name: string | null
+  email: string
+  quiz_score: number | null
+  attempted: boolean
+  completed: boolean
+}
+
+const quizResults = ref<QuizResultRow[]>([])
+
+const loadQuizResults = async () => {
+  try {
+    quizResults.value = await apiFetch<QuizResultRow[]>(
+      `/lessons/${lessonId.value}/quiz-results`,
+    )
+  } catch { /* no quiz questions or not yet attempted — leave empty */ }
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-onMounted(async () => { await load(); await loadVideos(); await restoreScroll() })
+onMounted(async () => { await load(); await loadVideos(); await loadQuizResults(); await restoreScroll() })
 
 onUnmounted(() => { stopVisionPolling(); stopVideoPolling() })
 
@@ -116,8 +137,10 @@ watch(lessonId, (newId, oldId) => {
   warningDismissed.value = false
   videoHistory.value = []
   previewVideoUrl.value = null
+  quizResults.value = []
   void load()
   void loadVideos()
+  void loadQuizResults()
 })
 </script>
 
@@ -264,6 +287,50 @@ watch(lessonId, (newId, oldId) => {
           </div>
         </div>
       </div>
+    </section>
+
+    <!-- Quiz results -->
+    <section
+      v-if="quizResults.length > 0"
+      class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft space-y-4"
+    >
+      <h2 class="text-lg font-semibold text-gray-900">Результаты теста</h2>
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-left text-gray-500 border-b border-gray-100">
+            <th class="pb-2 font-medium">Студент</th>
+            <th class="pb-2 font-medium">Email</th>
+            <th class="pb-2 font-medium text-center">Результат</th>
+            <th class="pb-2 font-medium text-center">Статус</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-50">
+          <tr v-for="row in quizResults" :key="row.student_id" class="py-2">
+            <td class="py-2 text-gray-800">{{ row.full_name ?? '—' }}</td>
+            <td class="py-2 text-gray-500">{{ row.email }}</td>
+            <td class="py-2 text-center">
+              <span v-if="row.attempted">
+                <span
+                  class="font-medium"
+                  :class="row.quiz_score !== null && row.quiz_score >= 0.6 ? 'text-green-600' : 'text-red-600'"
+                >
+                  {{ row.quiz_score !== null ? Math.round(row.quiz_score * 100) + '%' : '—' }}
+                </span>
+              </span>
+              <span v-else class="text-gray-400 italic">не сдавал</span>
+            </td>
+            <td class="py-2 text-center">
+              <span
+                v-if="row.completed"
+                class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full"
+              >пройден</span>
+              <span v-else class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                не завершён
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </section>
   </div>
 </template>

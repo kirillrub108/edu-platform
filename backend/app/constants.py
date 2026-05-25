@@ -10,3 +10,6 @@ MAX_SCRIPT_BYTES: int = 10 * 1024 * 1024  # 10 MB
 # Worker concurrency
 TTS_WORKERS: int = 4     # matches NUMBER_OF_THREADS in silero-tts docker-compose service
 ENCODE_WORKERS: int = 3  # concurrent FFmpeg processes; leaves headroom for LO and TTS threads
+
+# Quiz
+QUIZ_PASS_THRESHOLD: float = 0.6
