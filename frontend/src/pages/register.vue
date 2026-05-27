@@ -44,7 +44,7 @@ onMounted(restoreScroll)
           :class="role === 'student' ? 'bg-brand text-white' : 'bg-white text-gray-600 hover:bg-gray-50'"
           @click="role = 'student'"
         >
-          Студент
+          Ученик
         </button>
       </div>
 

@@ -15,6 +15,13 @@ const props = defineProps<{
   lessonId: string
 }>()
 
+const emit = defineEmits<{
+  // Fires once after fetchInfo resolves; value = whether a quiz exists for this lesson
+  'has-quiz': [value: boolean]
+  // Fires when the graded result comes back with passed === true
+  'quiz-passed': []
+}>()
+
 const lessonIdRef = computed(() => props.lessonId)
 
 const {
@@ -40,7 +47,18 @@ watch(lessonIdRef, async (id, prev) => {
   await fetchInfo()
 })
 
-onMounted(async () => { await fetchInfo() })
+onMounted(async () => {
+  await fetchInfo()
+  emit('has-quiz', hasQuiz.value)
+})
+
+// Emit quiz-passed whenever result transitions to graded + passed.
+// immediate:true covers the case where the student revisits an already-passed lesson.
+watch(result, (r) => {
+  if (r?.status === 'graded' && r.passed === true) {
+    emit('quiz-passed')
+  }
+}, { immediate: true })
 
 const answerFor = (qid: string): AnswerResult | undefined =>
   result.value?.answers.find(a => a.question_id === qid)

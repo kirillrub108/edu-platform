@@ -1,49 +1,25 @@
 <script setup lang="ts">
-definePageMeta({ middleware: ['auth'] })
+import { BookOpen } from 'lucide-vue-next'
 
-const { apiFetch } = useApi()
-const courses = ref<any[]>([])
-const loading = ref(true)
-const code = ref('')
+definePageMeta({ layout: 'student', middleware: ['auth'] })
 
-const load = async () => {
-  loading.value = true
-  try {
-    courses.value = await apiFetch<any[]>('/students/my-courses')
-  } finally {
-    loading.value = false
-  }
-}
-
-const enroll = async () => {
-  if (!code.value.trim()) return
-  await apiFetch('/students/enroll', {
-    method: 'POST',
-    body: { access_code: code.value },
-  })
-  code.value = ''
-  await load()
-}
-
-onMounted(async () => {
-  await load()
-  await restoreScroll()
-})
+const studentStore = useStudentStore()
 </script>
 
 <template>
-  <div>
-    <h1 class="text-2xl font-semibold mb-6">Мои курсы</h1>
-
-    <form class="flex gap-2 mb-6 max-w-md" @submit.prevent="enroll">
-      <input v-model="code" placeholder="Код доступа" class="flex-1 border rounded px-3 py-2" />
-      <button class="px-4 py-2 bg-brand text-white rounded">Записаться</button>
-    </form>
-
-    <p v-if="loading" class="text-gray-500">Загрузка…</p>
-    <p v-else-if="!courses.length" class="text-gray-500">Вы пока не записаны ни на один курс.</p>
-    <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-      <CourseCard v-for="c in courses" :key="c.id" :course="c" :to="`/student/courses/${c.id}`" />
+  <div class="h-full flex items-center justify-center p-6 text-center">
+    <div v-if="studentStore.courses.length">
+      <h1 class="text-2xl font-semibold text-gray-800 mb-2">Добро пожаловать!</h1>
+      <p class="text-gray-500">Выберите курс из списка слева, чтобы начать обучение.</p>
+    </div>
+    <div v-else class="max-w-xs">
+      <div class="w-16 h-16 rounded-2xl bg-violet-100 flex items-center justify-center mx-auto mb-6">
+        <BookOpen class="w-8 h-8 text-violet-600" />
+      </div>
+      <h1 class="text-xl font-semibold text-gray-900 mb-2">Начните обучение</h1>
+      <p class="text-gray-500 text-sm">
+        Введите код доступа от преподавателя в поле слева, чтобы записаться на курс.
+      </p>
     </div>
   </div>
 </template>

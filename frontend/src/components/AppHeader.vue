@@ -49,7 +49,7 @@ const dashboardLink = computed(() =>
           <div class="leading-tight">
             <div class="text-sm font-medium text-gray-900">{{ user?.full_name || user?.email }}</div>
             <div class="text-[11px] text-gray-500">
-              {{ user?.role === 'teacher' ? 'Преподаватель' : 'Студент' }}
+              {{ user?.role === 'teacher' ? 'Преподаватель' : 'Ученик' }}
             </div>
           </div>
         </div>

@@ -465,6 +465,10 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         for attempt in range(2):
             response = await self.client.chat.completions.create(**kwargs)
             raw = self._strip_think(response.choices[0].message.content or "")
+            if not raw.strip():
+                last_error = "empty response after strip_think"
+                logger.warning("grade_open_answer: empty raw (attempt %d/2)", attempt + 1)
+                continue
             try:
                 return _validate(json.loads(raw))
             except (json.JSONDecodeError, ValueError) as exc:
