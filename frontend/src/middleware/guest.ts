@@ -1,8 +1,9 @@
 export default defineNuxtRouteMiddleware(async () => {
   if (!import.meta.client) return
 
-  const token = localStorage.getItem('access_token')
-  if (!token) return
+  // csrf_token is non-httpOnly: its presence means the user has an active session
+  const hasCsrf = document.cookie.includes('csrf_token=')
+  if (!hasCsrf) return
 
   const auth = useAuthStore()
 

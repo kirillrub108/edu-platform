@@ -185,6 +185,22 @@ async def make_slide_text(
     return row
 
 
+async def make_lesson_progress(
+    db: AsyncSession, enrollment: Enrollment, lesson: Lesson, **overrides: Any
+) -> LessonProgress:
+    defaults: dict[str, Any] = {
+        "enrollment_id": enrollment.id,
+        "lesson_id": lesson.id,
+        "is_completed": False,
+    }
+    defaults.update(overrides)
+    progress = LessonProgress(**defaults)
+    db.add(progress)
+    await db.commit()
+    await db.refresh(progress)
+    return progress
+
+
 async def make_published_course_with_lesson(
     db: AsyncSession, owner: User
 ) -> tuple[Course, Module, Lesson]:

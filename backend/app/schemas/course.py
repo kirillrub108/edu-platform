@@ -62,3 +62,13 @@ class CourseOut(BaseModel):
 
 class CourseDetail(CourseOut):
     modules: list[ModuleOut] = []
+
+
+class CoursePreview(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    description: str | None
+    access_mode: AccessMode
+    is_published: bool

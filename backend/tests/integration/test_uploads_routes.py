@@ -31,7 +31,7 @@ async def test_upload_pptx_persists_path_on_lesson(
         "/api/v1/uploads/pptx",
         params={"lesson_id": str(lesson.id)},
         files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -51,7 +51,7 @@ async def test_upload_pptx_rejects_executable_extension(
     resp = await client.post(
         "/api/v1/uploads/pptx",
         files={"file": ("malware.exe", b"MZ\x90\x00", "application/octet-stream")},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     # validate_upload returns 400 for unknown extensions (not 422).
     assert resp.status_code == 400
@@ -73,7 +73,7 @@ async def test_upload_script_txt_writes_to_lesson(
         "/api/v1/uploads/script",
         params={"lesson_id": str(lesson.id)},
         files={"file": ("notes.txt", content, "text/plain")},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -97,7 +97,7 @@ async def test_upload_script_too_large_returns_400(
     resp = await client.post(
         "/api/v1/uploads/script",
         files={"file": ("big.txt", payload, "text/plain")},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     # validate_upload trips the SIZE_LIMITS check first → 400.
     assert resp.status_code == 400
@@ -123,7 +123,7 @@ async def test_upload_pptx_without_lesson_id_returns_file_path(
     resp = await client.post(
         "/api/v1/uploads/pptx",
         files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -143,7 +143,7 @@ async def test_upload_script_pdf_returns_extracted_text(
     resp = await client.post(
         "/api/v1/uploads/script",
         files={"file": ("lecture.pdf", b"%PDF-1.4 fake content", "application/pdf")},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -179,9 +179,10 @@ async def test_upload_pptx_with_refresh_token_returns_401(
     refresh_token, _, _ = create_refresh_token(
         str(teacher_user.id), family, sliding_days=14, absolute_expires_at=absolute
     )
+    from tests.conftest import _TEST_CSRF
     resp = await client.post(
         "/api/v1/uploads/pptx",
         files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
-        headers={"Authorization": f"Bearer {refresh_token}"},
+        cookies={"access_token": refresh_token, "csrf_token": _TEST_CSRF},
     )
     assert resp.status_code == 401

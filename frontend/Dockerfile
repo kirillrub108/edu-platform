@@ -6,8 +6,10 @@ COPY package.json ./
 RUN npm install
 
 # Keep an immutable snapshot of the freshly installed node_modules. The runtime
-# entrypoint copies it into /app/node_modules if the bind mount from the host is empty.
-RUN cp -a /app/node_modules /opt/node_modules_baked
+# entrypoint copies it into /app/node_modules if the bind mount from the host is empty
+# or was built on a different platform (e.g. Windows host, Linux container).
+RUN cp -a /app/node_modules /opt/node_modules_baked && \
+    node -p "process.platform + '-' + process.arch" > /opt/node_modules_baked/.platform
 
 COPY . .
 

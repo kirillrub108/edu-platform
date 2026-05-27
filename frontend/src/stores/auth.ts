@@ -9,37 +9,12 @@ interface UserOut {
   created_at: string
 }
 
-interface TokenResponse {
-  access_token: string
-  refresh_token: string
-  token_type: string
-}
-
 export const useAuthStore = defineStore('auth', () => {
   const { apiFetch } = useApi()
   const user = ref<UserOut | null>(null)
   const isAuthenticated = computed(() => !!user.value)
 
-  const getAccessToken = (): string | null =>
-    import.meta.client ? localStorage.getItem('access_token') : null
-
-  const getRefreshToken = (): string | null =>
-    import.meta.client ? localStorage.getItem('refresh_token') : null
-
-  const persistTokens = (tokens: TokenResponse) => {
-    if (!import.meta.client) return
-    localStorage.setItem('access_token', tokens.access_token)
-    localStorage.setItem('refresh_token', tokens.refresh_token)
-  }
-
-  const clearTokens = () => {
-    if (!import.meta.client) return
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
-  }
-
   const clearSession = () => {
-    clearTokens()
     user.value = null
   }
 
@@ -53,11 +28,10 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const login = async (email: string, password: string, rememberMe: boolean = true) => {
-    const tokens = await apiFetch<TokenResponse>('/auth/login', {
+    await apiFetch('/auth/login', {
       method: 'POST',
       body: { email, password, remember_me: rememberMe },
     })
-    persistTokens(tokens)
     await fetchMe()
   }
 
@@ -75,16 +49,10 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   const logout = async () => {
-    if (import.meta.client) {
-      const refresh_token = getRefreshToken()
-      try {
-        await apiFetch('/auth/logout', {
-          method: 'POST',
-          body: { refresh_token },
-        })
-      } catch {
-        /* noop */
-      }
+    try {
+      await apiFetch('/auth/logout', { method: 'POST' })
+    } catch {
+      /* noop — cookies are cleared server-side regardless */
     }
     clearSession()
     await navigateTo('/login')
@@ -98,8 +66,5 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     fetchMe,
     clearSession,
-    getAccessToken,
-    getRefreshToken,
-    persistTokens,
   }
 })

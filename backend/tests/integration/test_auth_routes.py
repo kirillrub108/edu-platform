@@ -43,7 +43,7 @@ async def test_register_duplicate_email_returns_409(client: AsyncClient) -> None
     assert "already registered" in dup.json()["detail"].lower()
 
 
-async def test_login_returns_token_pair(client: AsyncClient) -> None:
+async def test_login_sets_auth_cookies(client: AsyncClient) -> None:
     email = _email()
     await client.post(
         "/api/v1/auth/register",
@@ -54,10 +54,11 @@ async def test_login_returns_token_pair(client: AsyncClient) -> None:
         json={"email": email, "password": "password123"},
     )
     assert resp.status_code == 200
-    body = resp.json()
-    assert "access_token" in body
-    assert "refresh_token" in body
-    assert body["token_type"] == "bearer"
+    # Tokens must arrive in cookies, not in the response body
+    assert "access_token" not in resp.json()
+    assert "access_token" in resp.cookies
+    assert "refresh_token" in resp.cookies
+    assert "csrf_token" in resp.cookies
 
 
 async def test_login_with_wrong_password_returns_401(client: AsyncClient) -> None:
@@ -74,28 +75,29 @@ async def test_login_with_wrong_password_returns_401(client: AsyncClient) -> Non
     assert "credentials" in resp.json()["detail"].lower()
 
 
-async def test_refresh_returns_new_pair(client: AsyncClient) -> None:
+async def test_refresh_rotates_cookies(client: AsyncClient) -> None:
     email = _email()
     await client.post(
         "/api/v1/auth/register",
         json={"email": email, "password": "password123", "role": "teacher"},
     )
-    login = await client.post(
+    await client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": "password123"},
     )
-    refresh_token = login.json()["refresh_token"]
-
-    resp = await client.post(
-        "/api/v1/auth/refresh", json={"refresh_token": refresh_token}
-    )
+    old_access = client.cookies.get("access_token")
+    resp = await client.post("/api/v1/auth/refresh")
     assert resp.status_code == 200
-    body = resp.json()
-    assert body["access_token"] != login.json()["access_token"]
-    assert body["refresh_token"] != refresh_token
+    assert "access_token" in resp.cookies
+    assert resp.cookies["access_token"] != old_access
 
 
-async def test_refresh_rejects_access_token_in_refresh_field(
+async def test_refresh_without_cookie_returns_401(client: AsyncClient) -> None:
+    resp = await client.post("/api/v1/auth/refresh")
+    assert resp.status_code == 401
+
+
+async def test_refresh_rejects_access_token_as_refresh_cookie(
     client: AsyncClient,
 ) -> None:
     email = _email()
@@ -103,20 +105,23 @@ async def test_refresh_rejects_access_token_in_refresh_field(
         "/api/v1/auth/register",
         json={"email": email, "password": "password123", "role": "teacher"},
     )
-    login = await client.post(
+    login_resp = await client.post(
         "/api/v1/auth/login",
         json={"email": email, "password": "password123"},
     )
-    access = login.json()["access_token"]
+    access = login_resp.cookies["access_token"]
 
-    resp = await client.post("/api/v1/auth/refresh", json={"refresh_token": access})
+    resp = await client.post(
+        "/api/v1/auth/refresh",
+        cookies={"refresh_token": access},
+    )
     assert resp.status_code == 401
 
 
 async def test_me_returns_current_user(
     client: AsyncClient, teacher_user: Any, teacher_token: dict[str, str]
 ) -> None:
-    resp = await client.get("/api/v1/auth/me", headers=teacher_token)
+    resp = await client.get("/api/v1/auth/me", cookies=teacher_token)
     assert resp.status_code == 200
     body = resp.json()
     assert body["id"] == str(teacher_user.id)

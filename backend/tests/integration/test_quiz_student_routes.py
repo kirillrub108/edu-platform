@@ -62,7 +62,7 @@ async def test_draft_quiz_is_404_for_student(
 
     r = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts",
-        headers=student_token,
+        cookies=student_token,
     )
     assert r.status_code == 404
 
@@ -76,7 +76,7 @@ async def test_start_attempt_returns_student_schema_without_answers(
     )
     r = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts",
-        headers=student_token,
+        cookies=student_token,
     )
     assert r.status_code == 201, r.text
     body = r.json()
@@ -106,7 +106,7 @@ async def test_snapshot_invariant_under_teacher_edits(
     # Student starts the attempt → snapshot taken.
     r = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts",
-        headers=student_token,
+        cookies=student_token,
     )
     assert r.status_code == 201
     attempt_id = r.json()["attempt_id"]
@@ -120,7 +120,7 @@ async def test_snapshot_invariant_under_teacher_edits(
     }
     rp = await client.patch(
         f"/api/v1/lessons/{lesson.id}/quiz/questions/{q1.id}",
-        headers=teacher_token,
+        cookies=teacher_token,
         json={"payload": new_payload},
     )
     assert rp.status_code == 200
@@ -128,7 +128,7 @@ async def test_snapshot_invariant_under_teacher_edits(
     # Student submits with the ORIGINAL correct answer (index=1).
     sub = await client.put(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{attempt_id}",
-        headers=student_token,
+        cookies=student_token,
         json={"answers": [
             {"question_id": str(q1.id), "response": {"selected_index": 1}},
             {"question_id": str(qs[1].id), "response": {"selected": True}},
@@ -137,7 +137,7 @@ async def test_snapshot_invariant_under_teacher_edits(
     assert sub.status_code == 200
     submit = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{attempt_id}/submit",
-        headers=student_token,
+        cookies=student_token,
     )
     assert submit.status_code == 200
     # Both answers correct against the SNAPSHOT, not the live edit.
@@ -154,19 +154,19 @@ async def test_attempts_allowed_returns_409_after_limit(
     # First start ok.
     r1 = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts",
-        headers=student_token,
+        cookies=student_token,
     )
     assert r1.status_code == 201
     attempt_id = r1.json()["attempt_id"]
     # Submit to free the slot from "in_progress" state.
     await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{attempt_id}/submit",
-        headers=student_token,
+        cookies=student_token,
     )
     # Second start → 409.
     r2 = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts",
-        headers=student_token,
+        cookies=student_token,
     )
     assert r2.status_code == 409
 
@@ -180,12 +180,12 @@ async def test_passed_marks_lesson_complete_and_best_score(
     )
     r = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts",
-        headers=student_token,
+        cookies=student_token,
     )
     aid = r.json()["attempt_id"]
     await client.put(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}",
-        headers=student_token,
+        cookies=student_token,
         json={"answers": [
             {"question_id": str(qs[0].id), "response": {"selected_index": 1}},
             {"question_id": str(qs[1].id), "response": {"selected": True}},
@@ -193,7 +193,7 @@ async def test_passed_marks_lesson_complete_and_best_score(
     )
     await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}/submit",
-        headers=student_token,
+        cookies=student_token,
     )
 
     from sqlalchemy import select
@@ -220,23 +220,23 @@ async def test_show_answers_revealed_only_when_attempts_eq_1(
     )
     r = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts",
-        headers=student_token,
+        cookies=student_token,
     )
     aid = r.json()["attempt_id"]
     await client.put(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}",
-        headers=student_token,
+        cookies=student_token,
         json={"answers": [
             {"question_id": str(qs[0].id), "response": {"selected_index": 0}},
         ]},
     )
     await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}/submit",
-        headers=student_token,
+        cookies=student_token,
     )
     result = await client.get(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}",
-        headers=student_token,
+        cookies=student_token,
     )
     assert result.status_code == 200
     body = result.json()
@@ -254,23 +254,23 @@ async def test_show_answers_revealed_when_attempts_one(
     )
     r = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts",
-        headers=student_token,
+        cookies=student_token,
     )
     aid = r.json()["attempt_id"]
     await client.put(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}",
-        headers=student_token,
+        cookies=student_token,
         json={"answers": [
             {"question_id": str(qs[0].id), "response": {"selected_index": 0}},
         ]},
     )
     await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}/submit",
-        headers=student_token,
+        cookies=student_token,
     )
     result = await client.get(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}",
-        headers=student_token,
+        cookies=student_token,
     )
     body = result.json()
     # The submitted question should carry the correct payload now.
@@ -299,7 +299,7 @@ async def test_snapshot_pins_exact_version_after_regenerate(
     # Attempt starts → pins version 1.
     r = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts",
-        headers=student_token,
+        cookies=student_token,
     )
     assert r.status_code == 201
     aid = r.json()["attempt_id"]
@@ -307,7 +307,7 @@ async def test_snapshot_pins_exact_version_after_regenerate(
     # Teacher edits → version 2 with a different correct_index.
     pe = await client.patch(
         f"/api/v1/lessons/{lesson.id}/quiz/questions/{q1.id}",
-        headers=teacher_token,
+        cookies=teacher_token,
         json={"payload": {
             "type": "single_choice", "prompt": "v2",
             "options": ["A", "B", "C"], "correct_index": 2,
@@ -325,7 +325,7 @@ async def test_snapshot_pins_exact_version_after_regenerate(
     # Student answers with index=1 (the version-1 correct answer).
     await client.put(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}",
-        headers=student_token,
+        cookies=student_token,
         json={"answers": [
             {"question_id": str(q1.id), "response": {"selected_index": 1}},
             {"question_id": str(qs[1].id), "response": {"selected": True}},
@@ -333,7 +333,7 @@ async def test_snapshot_pins_exact_version_after_regenerate(
     )
     submit = await client.post(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{aid}/submit",
-        headers=student_token,
+        cookies=student_token,
     )
     assert submit.status_code == 200
     # Pinned to v1 → answer is correct → passes.
@@ -367,6 +367,6 @@ async def test_broken_snapshot_returns_500(
     )
     r = await client.get(
         f"/api/v1/students/lessons/{lesson.id}/quiz/attempts/{attempt.id}",
-        headers=student_token,
+        cookies=student_token,
     )
     assert r.status_code == 500

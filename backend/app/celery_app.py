@@ -41,4 +41,10 @@ celery_app.conf.update(
     # untouched.
     task_always_eager=_env_bool("CELERY_TASK_ALWAYS_EAGER"),
     task_eager_propagates=_env_bool("CELERY_TASK_EAGER_PROPAGATES"),
+    # With Redis as broker the unacked message is held in-memory by the worker
+    # until the task finishes (or the worker dies). On worker loss the broker
+    # re-queues the message automatically, so the task is retried rather than
+    # silently dropped.
+    task_acks_late=True,
+    task_reject_on_worker_lost=True,
 )

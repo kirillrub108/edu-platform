@@ -1,4 +1,5 @@
 <script setup lang="ts">
+const route = useRoute()
 const auth = useAuthStore()
 const email = ref('')
 const password = ref('')
@@ -11,7 +12,8 @@ const submit = async () => {
   loading.value = true
   try {
     await auth.login(email.value, password.value, rememberMe.value)
-    const dest = auth.user?.role === 'student' ? '/student/dashboard' : '/dashboard'
+    const redirect = route.query.redirect as string | undefined
+    const dest = redirect || (auth.user?.role === 'student' ? '/student/dashboard' : '/dashboard')
     await navigateTo(dest)
   } catch (e: any) {
     error.value = e?.data?.detail ?? 'Неверный email или пароль'

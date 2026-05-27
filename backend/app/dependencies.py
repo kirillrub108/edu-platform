@@ -1,8 +1,7 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi import Cookie, Depends, HTTPException, Request, status
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,14 +14,21 @@ from app.models.user import User, UserRole
 from app.redis_client import get_redis
 from app.services.auth_service import decode_token
 
-security = HTTPBearer()
+_STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
 
 
 async def get_current_token_payload(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    request: Request,
+    access_token: str | None = Cookie(default=None),
+    csrf_token: str | None = Cookie(default=None),
     redis: Redis = Depends(get_redis),
 ) -> dict[str, Any]:
-    payload = decode_token(credentials.credentials)
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+        )
+    payload = decode_token(access_token)
     if payload.get("type") != "access":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -35,6 +41,18 @@ async def get_current_token_payload(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token has been revoked",
         )
+
+    # Double-submit CSRF check for state-changing requests.
+    # The csrf_token cookie is non-httpOnly so JS can read and forward it;
+    # an attacker's cross-site request cannot access it.
+    if request.method in _STATE_CHANGING:
+        csrf_header = request.headers.get("X-CSRF-Token")
+        if not csrf_token or not csrf_header or csrf_header != csrf_token:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CSRF token invalid",
+            )
+
     return payload
 
 
@@ -56,6 +74,21 @@ async def get_current_user(
             detail="User not found or inactive",
         )
     return user
+
+
+async def check_csrf(
+    request: Request,
+    csrf_token: str | None = Cookie(default=None),
+) -> None:
+    """Standalone CSRF dependency — attach explicitly to endpoints that need
+    CSRF protection without full auth (e.g. unauthenticated state changes)."""
+    if request.method in _STATE_CHANGING:
+        csrf_header = request.headers.get("X-CSRF-Token")
+        if not csrf_token or not csrf_header or csrf_header != csrf_token:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="CSRF token invalid",
+            )
 
 
 async def require_teacher(user: User = Depends(get_current_user)) -> User:

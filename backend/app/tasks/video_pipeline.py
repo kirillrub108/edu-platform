@@ -76,7 +76,7 @@ def _split_and_annotate(
     return llm_service._fallback_ssml(script, slides_count), None
 
 
-@celery_app.task(bind=True, name="generate_video_lesson", queue="video")
+@celery_app.task(bind=True, name="generate_video_lesson", queue="video", acks_late=True, reject_on_worker_lost=True)
 def generate_video_lesson(
     self, lesson_id: str, pptx_relative_path: str, voice: str | None = None
 ) -> dict:

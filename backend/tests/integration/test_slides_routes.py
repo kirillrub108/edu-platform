@@ -43,7 +43,7 @@ async def test_analyze_enqueues_vision_task_and_persists_id(
     )
 
     resp = await client.post(
-        f"/api/v1/lessons/{lesson.id}/analyze", headers=teacher_token
+        f"/api/v1/lessons/{lesson.id}/analyze", cookies=teacher_token
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -67,7 +67,7 @@ async def test_analyze_without_pptx_returns_400(
     lesson = await make_lesson(db_session, module)  # no pptx_path
 
     resp = await client.post(
-        f"/api/v1/lessons/{lesson.id}/analyze", headers=teacher_token
+        f"/api/v1/lessons/{lesson.id}/analyze", cookies=teacher_token
     )
     assert resp.status_code == 400
 
@@ -83,7 +83,7 @@ async def test_list_slides_empty(
     lesson = await make_lesson(db_session, module)
 
     resp = await client.get(
-        f"/api/v1/lessons/{lesson.id}/slides", headers=teacher_token
+        f"/api/v1/lessons/{lesson.id}/slides", cookies=teacher_token
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -104,7 +104,7 @@ async def test_list_slides_returns_image_url(
     await make_slide_text(db_session, lesson, slide_number=2)
 
     resp = await client.get(
-        f"/api/v1/lessons/{lesson.id}/slides", headers=teacher_token
+        f"/api/v1/lessons/{lesson.id}/slides", cookies=teacher_token
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -128,7 +128,7 @@ async def test_patch_slide_updates_edited_text(
     resp = await client.patch(
         f"/api/v1/lessons/{lesson.id}/slides/{row.id}",
         json={"edited_text": "Manually edited"},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 200
     assert resp.json()["edited_text"] == "Manually edited"
@@ -155,7 +155,7 @@ async def test_regenerate_uses_vision_mock(
 
     resp = await client.post(
         f"/api/v1/lessons/{lesson.id}/slides/{row.id}/regenerate",
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -184,9 +184,10 @@ async def test_other_teacher_cannot_list_slides(
     lesson = await make_lesson(db_session, module)
 
     from app.services.auth_service import create_access_token
+    from tests.conftest import _TEST_CSRF
     token, _, _ = create_access_token(teacher_user)
     resp = await client.get(
         f"/api/v1/lessons/{lesson.id}/slides",
-        headers={"Authorization": f"Bearer {token}"},
+        cookies={"access_token": token, "csrf_token": _TEST_CSRF},
     )
     assert resp.status_code == 404

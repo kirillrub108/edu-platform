@@ -21,7 +21,7 @@ async def test_get_quiz_creates_lazily_for_teacher(client, db_session, teacher_u
     module = await make_module(db_session, course)
     lesson = await make_lesson(db_session, module)
 
-    r = await client.get(f"/api/v1/lessons/{lesson.id}/quiz", headers=teacher_token)
+    r = await client.get(f"/api/v1/lessons/{lesson.id}/quiz", cookies=teacher_token)
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "draft"
@@ -37,7 +37,7 @@ async def test_update_quiz_settings(client, db_session, teacher_user, teacher_to
 
     r = await client.put(
         f"/api/v1/lessons/{lesson.id}/quiz",
-        headers=teacher_token,
+        cookies=teacher_token,
         json={"pass_threshold": "0.75", "attempts_allowed": 3, "shuffle": True},
     )
     assert r.status_code == 200, r.text
@@ -54,7 +54,7 @@ async def test_publish_requires_questions(client, db_session, teacher_user, teac
     lesson = await make_lesson(db_session, module)
     await make_quiz(db_session, lesson)
 
-    r = await client.post(f"/api/v1/lessons/{lesson.id}/quiz/publish", headers=teacher_token)
+    r = await client.post(f"/api/v1/lessons/{lesson.id}/quiz/publish", cookies=teacher_token)
     assert r.status_code == 409
 
 
@@ -66,11 +66,11 @@ async def test_publish_unpublish_cycle(client, db_session, teacher_user, teacher
     quiz = await make_quiz(db_session, lesson)
     await make_quiz_question(db_session, quiz)
 
-    r = await client.post(f"/api/v1/lessons/{lesson.id}/quiz/publish", headers=teacher_token)
+    r = await client.post(f"/api/v1/lessons/{lesson.id}/quiz/publish", cookies=teacher_token)
     assert r.status_code == 200
     assert r.json()["status"] == "published"
 
-    r = await client.post(f"/api/v1/lessons/{lesson.id}/quiz/unpublish", headers=teacher_token)
+    r = await client.post(f"/api/v1/lessons/{lesson.id}/quiz/unpublish", cookies=teacher_token)
     assert r.status_code == 200
     assert r.json()["status"] == "draft"
 
@@ -84,7 +84,7 @@ async def test_create_question_typed_payload(client, db_session, teacher_user, t
 
     r = await client.post(
         f"/api/v1/lessons/{lesson.id}/quiz/questions",
-        headers=teacher_token,
+        cookies=teacher_token,
         json={
             "type": "multiple_choice",
             "payload": {
@@ -116,7 +116,7 @@ async def test_reorder_questions(client, db_session, teacher_user, teacher_token
 
     r = await client.post(
         f"/api/v1/lessons/{lesson.id}/quiz/questions/reorder",
-        headers=teacher_token,
+        cookies=teacher_token,
         json={"order": [str(q2.id), str(q1.id)]},
     )
     assert r.status_code == 200, r.text
@@ -142,7 +142,7 @@ async def test_other_teachers_cannot_touch(client, db_session, teacher_user, tea
     module = await make_module(db_session, course)
     lesson = await make_lesson(db_session, module)
 
-    r = await client.get(f"/api/v1/lessons/{lesson.id}/quiz", headers=teacher_token)
+    r = await client.get(f"/api/v1/lessons/{lesson.id}/quiz", cookies=teacher_token)
     assert r.status_code == 404
 
 
@@ -187,7 +187,7 @@ async def test_manual_override_recomputes_score(
 
     r = await client.patch(
         f"/api/v1/lessons/{lesson.id}/quiz/attempts/{attempt.id}/answers/{answer.id}",
-        headers=teacher_token,
+        cookies=teacher_token,
         json={"awarded_score": "1.0", "feedback": "ok"},
     )
     assert r.status_code == 200, r.text
@@ -221,7 +221,7 @@ async def test_edit_payload_bumps_version_and_supersedes_old(
 
     r = await client.patch(
         f"/api/v1/lessons/{lesson.id}/quiz/questions/{q.id}",
-        headers=teacher_token,
+        cookies=teacher_token,
         json={"payload": {
             "type": "single_choice", "prompt": "edited",
             "options": ["A", "B"], "correct_index": 1,
@@ -253,7 +253,7 @@ async def test_delete_question_is_soft_delete(
 
     r = await client.delete(
         f"/api/v1/lessons/{lesson.id}/quiz/questions/{q.id}",
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert r.status_code == 204
     row = await db_session.get(QuizQuestion, (q.id, q.version))
@@ -277,7 +277,7 @@ async def test_first_load_does_not_trigger_lazy_relationship(
 
     r = await client.post(
         f"/api/v1/lessons/{lesson.id}/quiz/generate",
-        headers=teacher_token,
+        cookies=teacher_token,
         json={"num_questions": 1, "num_options": 2, "types": ["single_choice"]},
     )
     # Lesson has no material → 409, but the important assertion is "not 500".
@@ -296,7 +296,7 @@ async def test_list_questions_only_returns_current(
     q = await make_quiz_question(db_session, quiz, order=1)
     await client.patch(
         f"/api/v1/lessons/{lesson.id}/quiz/questions/{q.id}",
-        headers=teacher_token,
+        cookies=teacher_token,
         json={"payload": {
             "type": "single_choice", "prompt": "v2",
             "options": ["A", "B"], "correct_index": 0,
@@ -304,7 +304,7 @@ async def test_list_questions_only_returns_current(
     )
 
     r = await client.get(
-        f"/api/v1/lessons/{lesson.id}/quiz/questions", headers=teacher_token
+        f"/api/v1/lessons/{lesson.id}/quiz/questions", cookies=teacher_token
     )
     assert r.status_code == 200
     body = r.json()

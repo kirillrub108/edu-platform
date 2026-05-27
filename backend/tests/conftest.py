@@ -267,8 +267,30 @@ async def app(db_session: Any) -> AsyncIterator[Any]:
 async def client(app: Any) -> AsyncIterator[Any]:
     from httpx import ASGITransport, AsyncClient
 
+    async def _auto_csrf(request: Any) -> None:
+        """For state-changing methods, read csrf_token from the outgoing Cookie
+        header and inject it as X-CSRF-Token so tests don't need to do this
+        manually on every POST/PUT/PATCH/DELETE call."""
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return
+        cookie_str = request.headers.get("cookie", "")
+        for part in cookie_str.split(";"):
+            key, _, val = part.strip().partition("=")
+            if key == "csrf_token" and val:
+                # httpx Headers._list stores 3-tuples (raw_key, normalized_key, value).
+                # Append in-place so the same Headers object is mutated — replacing
+                # the attribute would target the wrong reference.
+                request.headers._list.append(
+                    (b"x-csrf-token", b"x-csrf-token", val.encode("latin-1"))
+                )
+                break
+
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+    async with AsyncClient(
+        transport=transport,
+        base_url="http://testserver",
+        event_hooks={"request": [_auto_csrf]},
+    ) as ac:
         yield ac
 
 
@@ -310,11 +332,16 @@ async def student_user(db_session: Any) -> Any:
     return user
 
 
+_TEST_CSRF = "test-csrf-fixed-value"
+
+
 def _bearer(user: Any) -> dict[str, str]:
+    """Return a cookie dict with access_token + csrf_token for test requests.
+    The client fixture's event hook auto-adds X-CSRF-Token for POST/PUT/PATCH/DELETE."""
     from app.services.auth_service import create_access_token
 
     token, _jti, _exp = create_access_token(user)
-    return {"Authorization": f"Bearer {token}"}
+    return {"access_token": token, "csrf_token": _TEST_CSRF}
 
 
 @pytest.fixture()

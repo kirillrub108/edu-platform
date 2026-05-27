@@ -14,6 +14,12 @@ const publishing = ref(false)
 const newLessonTitle = ref<Record<string, string>>({})
 const addingLesson = ref<Record<string, boolean>>({})
 
+const activeTab = ref<'content' | 'access'>('content')
+const accessLoading = ref(false)
+const accessError = ref('')
+const copied = ref(false)
+let copyTimeout: ReturnType<typeof setTimeout> | null = null
+
 const load = async () => {
   loading.value = true
   pageError.value = ''
@@ -42,8 +48,6 @@ const togglePublish = async () => {
 const addModule = async () => {
   const title = newModuleTitle.value.trim()
   if (!title) {
-    // Don't silently swallow the click — without this the user sees "ничего
-    // не проходит" with no console output and no clue why.
     actionError.value = 'Введите название модуля'
     return
   }
@@ -77,14 +81,55 @@ const addLesson = async (moduleId: string) => {
       body: { title, module_id: moduleId, content_type: 'video', order: 0 },
     })
     newLessonTitle.value[moduleId] = ''
-    // Navigate directly to lesson editor after creation
     await navigateTo(`/lessons/${lesson.id}`)
   } catch (e: any) {
     actionError.value = e?.data?.detail ?? 'Ошибка при добавлении урока'
   } finally {
-    // Reset on every exit (success or failure) so the button never stays
-    // stuck in '…' if navigation throws or the user comes back to this page.
     addingLesson.value[moduleId] = false
+  }
+}
+
+const joinLinkUrl = computed(() =>
+  import.meta.client ? `${window.location.origin}/join?courseId=${course.value?.id}` : ''
+)
+const joinCodeUrl = computed(() =>
+  import.meta.client ? `${window.location.origin}/join?code=${course.value?.access_code}` : ''
+)
+
+const copyText = async (text: string) => {
+  await navigator.clipboard.writeText(text)
+  copied.value = true
+  if (copyTimeout) clearTimeout(copyTimeout)
+  copyTimeout = setTimeout(() => { copied.value = false }, 2000)
+}
+
+const setMode = async (mode: 'link' | 'code') => {
+  if (!course.value || course.value.access_mode === mode || accessLoading.value) return
+  accessLoading.value = true
+  accessError.value = ''
+  try {
+    if (mode === 'link') {
+      course.value = await apiFetch(`/courses/${route.params.id}/access-code`, { method: 'DELETE' })
+    } else {
+      course.value = await apiFetch(`/courses/${route.params.id}/access-code/generate`, { method: 'POST' })
+    }
+  } catch (e: any) {
+    accessError.value = e?.data?.detail ?? 'Ошибка при изменении режима доступа'
+  } finally {
+    accessLoading.value = false
+  }
+}
+
+const regenerateCode = async () => {
+  if (!course.value || accessLoading.value) return
+  accessLoading.value = true
+  accessError.value = ''
+  try {
+    course.value = await apiFetch(`/courses/${route.params.id}/access-code/generate`, { method: 'POST' })
+  } catch (e: any) {
+    accessError.value = e?.data?.detail ?? 'Ошибка при обновлении кода'
+  } finally {
+    accessLoading.value = false
   }
 }
 
@@ -129,13 +174,21 @@ onMounted(async () => {
         <p v-if="course.description" class="text-gray-500 mt-1 text-sm">{{ course.description }}</p>
       </div>
       <div class="flex flex-col items-end gap-2">
-        <button
-          class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 min-w-36 text-center"
-          :disabled="publishing"
-          @click="togglePublish"
-        >
-          {{ publishing ? '…' : course.is_published ? 'Снять с публикации' : 'Опубликовать' }}
-        </button>
+        <div class="flex gap-2">
+          <NuxtLink
+            :to="`/courses/${route.params.id}/gradebook`"
+            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center"
+          >
+            Журнал оценок
+          </NuxtLink>
+          <button
+            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 min-w-36 text-center"
+            :disabled="publishing"
+            @click="togglePublish"
+          >
+            {{ publishing ? '…' : course.is_published ? 'Снять с публикации' : 'Опубликовать' }}
+          </button>
+        </div>
         <span
           v-if="course.is_published"
           class="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full"
@@ -149,10 +202,30 @@ onMounted(async () => {
       {{ actionError }}
     </p>
 
-    <!-- Modules -->
-    <section>
-      <h2 class="text-base font-semibold mb-3 text-gray-700">Модули и уроки</h2>
+    <!-- Tabs -->
+    <div class="flex gap-1 mb-6 border-b">
+      <button
+        class="px-4 py-2 text-sm font-medium transition border-b-2 -mb-px"
+        :class="activeTab === 'content'
+          ? 'border-brand text-brand'
+          : 'border-transparent text-gray-500 hover:text-gray-700'"
+        @click="activeTab = 'content'"
+      >
+        Содержание
+      </button>
+      <button
+        class="px-4 py-2 text-sm font-medium transition border-b-2 -mb-px"
+        :class="activeTab === 'access'
+          ? 'border-brand text-brand'
+          : 'border-transparent text-gray-500 hover:text-gray-700'"
+        @click="activeTab = 'access'"
+      >
+        Доступ
+      </button>
+    </div>
 
+    <!-- Tab: Содержание -->
+    <section v-if="activeTab === 'content'">
       <div v-if="!course.modules?.length" class="text-sm text-gray-400 italic mb-4 px-1">
         Добавьте первый модуль чтобы начать создавать уроки
       </div>
@@ -221,5 +294,103 @@ onMounted(async () => {
         </button>
       </form>
     </section>
+
+    <!-- Tab: Доступ -->
+    <section v-else-if="activeTab === 'access'">
+      <p v-if="!course.is_published" class="mb-5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+        Курс не опубликован — ученики не смогут записаться, пока вы его не опубликуете.
+      </p>
+
+      <!-- Mode toggle -->
+      <div class="mb-6">
+        <p class="text-sm font-medium text-gray-700 mb-3">Способ записи</p>
+        <div class="flex gap-2">
+          <button
+            class="px-4 py-2 rounded-lg border text-sm font-medium transition"
+            :class="course.access_mode === 'link'
+              ? 'bg-brand text-white border-brand'
+              : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'"
+            :disabled="accessLoading"
+            @click="setMode('link')"
+          >
+            По ссылке
+          </button>
+          <button
+            class="px-4 py-2 rounded-lg border text-sm font-medium transition"
+            :class="course.access_mode === 'code'
+              ? 'bg-brand text-white border-brand'
+              : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'"
+            :disabled="accessLoading"
+            @click="setMode('code')"
+          >
+            По коду
+          </button>
+        </div>
+      </div>
+
+      <p v-if="accessError" class="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+        {{ accessError }}
+      </p>
+
+      <!-- Link mode -->
+      <div v-if="course.access_mode === 'link'" class="space-y-2">
+        <p class="text-sm text-gray-600">Ссылка для записи — поделитесь ей с учениками:</p>
+        <div class="flex gap-2">
+          <code class="flex-1 bg-gray-50 border rounded-lg px-3 py-2 text-sm font-mono text-gray-700 truncate">
+            {{ joinLinkUrl }}
+          </code>
+          <button
+            class="px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition whitespace-nowrap"
+            @click="copyText(joinLinkUrl)"
+          >
+            {{ copied ? '✓ Скопировано' : 'Копировать' }}
+          </button>
+        </div>
+      </div>
+
+      <!-- Code mode -->
+      <div v-else-if="course.access_mode === 'code'" class="space-y-5">
+        <div>
+          <p class="text-sm text-gray-600 mb-2">Код доступа — продиктуйте или отправьте ученикам:</p>
+          <div class="flex gap-2 items-center">
+            <div class="flex-1 bg-gray-50 border rounded-xl px-6 py-4 text-3xl font-mono tracking-widest text-center text-gray-800 select-all">
+              {{ course.access_code }}
+            </div>
+            <button
+              class="px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition whitespace-nowrap"
+              @click="copyText(course.access_code)"
+            >
+              {{ copied ? '✓ Скопировано' : 'Копировать' }}
+            </button>
+          </div>
+          <div class="flex items-center justify-end gap-2 mt-2">
+            <p class="text-xs text-gray-400 flex-1">После обновления старые ссылки перестанут работать.</p>
+            <button
+              class="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2 transition disabled:opacity-50"
+              :disabled="accessLoading"
+              @click="regenerateCode"
+            >
+              {{ accessLoading ? '…' : 'Обновить код' }}
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <p class="text-sm text-gray-600 mb-2">Или поделитесь ссылкой:</p>
+          <div class="flex gap-2">
+            <code class="flex-1 bg-gray-50 border rounded-lg px-3 py-2 text-sm font-mono text-gray-700 truncate">
+              {{ joinCodeUrl }}
+            </code>
+            <button
+              class="px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition whitespace-nowrap"
+              @click="copyText(joinCodeUrl)"
+            >
+              {{ copied ? '✓ Скопировано' : 'Копировать' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+
   </div>
 </template>

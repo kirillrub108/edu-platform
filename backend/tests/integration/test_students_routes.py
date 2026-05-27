@@ -31,7 +31,7 @@ async def test_enroll_by_course_id_succeeds(
     resp = await client.post(
         "/api/v1/students/enroll",
         json={"course_id": str(course.id)},
-        headers=student_token,
+        cookies=student_token,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -51,12 +51,12 @@ async def test_enroll_repeat_returns_existing_id(
     first = await client.post(
         "/api/v1/students/enroll",
         json={"course_id": str(course.id)},
-        headers=student_token,
+        cookies=student_token,
     )
     second = await client.post(
         "/api/v1/students/enroll",
         json={"course_id": str(course.id)},
-        headers=student_token,
+        cookies=student_token,
     )
     assert first.status_code == 200
     assert second.status_code == 200
@@ -73,7 +73,7 @@ async def test_enroll_unpublished_returns_404(
     resp = await client.post(
         "/api/v1/students/enroll",
         json={"course_id": str(course.id)},
-        headers=student_token,
+        cookies=student_token,
     )
     assert resp.status_code == 404
 
@@ -90,7 +90,7 @@ async def test_enroll_by_access_code(
     resp = await client.post(
         "/api/v1/students/enroll",
         json={"access_code": "JOINME"},
-        headers=student_token,
+        cookies=student_token,
     )
     assert resp.status_code == 200
     assert resp.json()["course_id"] == str(course.id)
@@ -107,11 +107,58 @@ async def test_my_courses_filters_by_student(
     other = await make_course(db_session, owner=teacher_user, is_published=True, title="Other")
     await make_enrollment(db_session, student_user, enrolled)
 
-    resp = await client.get("/api/v1/students/my-courses", headers=student_token)
+    resp = await client.get("/api/v1/students/my-courses", cookies=student_token)
     assert resp.status_code == 200
     titles = [c["title"] for c in resp.json()]
     assert "Enrolled" in titles
     assert "Other" not in titles
+
+
+async def test_preview_by_code_returns_slim_schema(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+) -> None:
+    course = await make_course(
+        db_session, owner=teacher_user, is_published=True, access_code="PREV01"
+    )
+
+    resp = await client.get("/api/v1/students/courses/preview?code=PREV01")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"] == str(course.id)
+    assert body["title"] == course.title
+    assert "access_code" not in body
+
+
+async def test_preview_by_course_id(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+) -> None:
+    course = await make_course(db_session, owner=teacher_user, is_published=True)
+
+    resp = await client.get(f"/api/v1/students/courses/preview?course_id={course.id}")
+    assert resp.status_code == 200
+    assert resp.json()["id"] == str(course.id)
+
+
+async def test_preview_unpublished_returns_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+) -> None:
+    await make_course(
+        db_session, owner=teacher_user, is_published=False, access_code="DRAFT1"
+    )
+
+    resp = await client.get("/api/v1/students/courses/preview?code=DRAFT1")
+    assert resp.status_code == 404
+
+
+async def test_preview_invalid_code_returns_404(client: AsyncClient) -> None:
+    resp = await client.get("/api/v1/students/courses/preview?code=BADCODE")
+    assert resp.status_code == 404
 
 
 async def test_complete_lesson_marks_progress(
@@ -127,7 +174,7 @@ async def test_complete_lesson_marks_progress(
     await make_enrollment(db_session, student_user, course)
 
     resp = await client.post(
-        f"/api/v1/students/lessons/{lesson.id}/complete", headers=student_token
+        f"/api/v1/students/lessons/{lesson.id}/complete", cookies=student_token
     )
     assert resp.status_code == 200
     body = resp.json()

@@ -1,3 +1,5 @@
+import random
+import string
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -8,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import require_teacher
-from app.models.course import Course
+from app.models.course import AccessMode, Course
 from app.models.lesson import Module
 from app.models.user import User
 from app.schemas.course import (
@@ -137,6 +139,42 @@ async def toggle_publish(
 ):
     course = await _get_owned_course(course_id, user, db)
     course.is_published = not course.is_published
+    await db.commit()
+    await db.refresh(course, attribute_names=["owner"])
+    return course
+
+
+@router.post("/{course_id}/access-code/generate", response_model=CourseOut)
+async def generate_access_code(
+    course_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    course = await _get_owned_course(course_id, user, db)
+    # Retry loop handles the rare UniqueConstraint collision on access_code.
+    for _ in range(5):
+        code = "".join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        course.access_code = code
+        course.access_mode = AccessMode.code
+        try:
+            await db.commit()
+            await db.refresh(course, attribute_names=["owner"])
+            return course
+        except IntegrityError:
+            await db.rollback()
+            course = await db.get(Course, course_id)
+    raise HTTPException(status_code=500, detail="Failed to generate unique access code")
+
+
+@router.delete("/{course_id}/access-code", response_model=CourseOut)
+async def delete_access_code(
+    course_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    course = await _get_owned_course(course_id, user, db)
+    course.access_code = None
+    course.access_mode = AccessMode.link
     await db.commit()
     await db.refresh(course, attribute_names=["owner"])
     return course

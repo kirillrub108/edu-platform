@@ -103,6 +103,12 @@ export function useQuizAttempt(lessonId: Readonly<Ref<string>>) {
               {},
             ]),
           )
+          // For an in-progress attempt we want QuizTaker to render the Active
+          // view (with inputs + submit), not the Result view. The template
+          // checks `v-else-if="result"` first, so we have to drop result here.
+          if (result.value.status === 'in_progress') {
+            result.value = null
+          }
         }
       }
       return true

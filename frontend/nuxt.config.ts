@@ -9,7 +9,21 @@ export default defineNuxtConfig({
   },
   runtimeConfig: {
     public: {
-      apiBase: 'http://localhost:8000/api/v1',
+      // Relative path so the Nitro devProxy below handles routing and cookies
+      // are same-origin in development. Override via NUXT_PUBLIC_API_BASE in
+      // production (e.g. http://backend:8000/api/v1 behind an nginx proxy).
+      apiBase: '/api/v1',
+    },
+  },
+  nitro: {
+    devProxy: {
+      // Proxy /api/* to the backend so frontend and backend share the same
+      // origin in dev — required for SameSite=Lax httpOnly cookies to work
+      // without COOKIE_SECURE=true.
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
     },
   },
   app: {

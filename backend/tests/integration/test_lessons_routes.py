@@ -28,7 +28,7 @@ async def test_create_lesson_returns_201(
     resp = await client.post(
         "/api/v1/lessons/",
         json={"title": "Lesson A", "module_id": str(module.id)},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -49,7 +49,7 @@ async def test_update_lesson_script(
     resp = await client.put(
         f"/api/v1/lessons/{lesson.id}/script",
         json={"script": "Hello narration."},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 200
     assert resp.json()["script"] == "Hello narration."
@@ -68,7 +68,7 @@ async def test_generate_video_without_pptx_returns_400(
     resp = await client.post(
         f"/api/v1/lessons/{lesson.id}/generate-video",
         json={},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 400
     assert "pptx_path" in resp.json()["detail"].lower()
@@ -101,7 +101,7 @@ async def test_generate_video_with_pptx_enqueues_task(
     resp = await client.post(
         f"/api/v1/lessons/{lesson.id}/generate-video",
         json={"pptx_path": "pptx/x.pptx", "voice": "xenia"},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -139,7 +139,7 @@ async def test_task_status_maps_lesson_status(
 
     resp = await client.get(
         f"/api/v1/lessons/{lesson.id}/task-status/some-task-id",
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 200
     body = resp.json()

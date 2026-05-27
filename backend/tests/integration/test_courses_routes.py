@@ -25,7 +25,7 @@ async def test_teacher_can_create_course(
     resp = await client.post(
         "/api/v1/courses/",
         json={"title": "Python 101", "description": "Intro"},
-        headers=teacher_token,
+        cookies=teacher_token,
     )
     assert resp.status_code == 201
     body = resp.json()
@@ -39,7 +39,7 @@ async def test_student_cannot_create_course(
     resp = await client.post(
         "/api/v1/courses/",
         json={"title": "Forbidden"},
-        headers=student_token,
+        cookies=student_token,
     )
     assert resp.status_code == 403
 
@@ -64,7 +64,7 @@ async def test_teacher_lists_only_own_courses(
     await make_course(db_session, owner=teacher_user, title="Mine")
     await make_course(db_session, owner=other, title="Theirs")
 
-    resp = await client.get("/api/v1/courses/", headers=teacher_token)
+    resp = await client.get("/api/v1/courses/", cookies=teacher_token)
     assert resp.status_code == 200
     titles = [c["title"] for c in resp.json()]
     assert "Mine" in titles
@@ -82,13 +82,13 @@ async def test_delete_course_cascades_to_modules_and_lessons(
     lesson = await make_lesson(db_session, module)
 
     resp = await client.delete(
-        f"/api/v1/courses/{course.id}", headers=teacher_token
+        f"/api/v1/courses/{course.id}", cookies=teacher_token
     )
     assert resp.status_code == 204
 
     # Direct DB checks — cascade must have removed the children.
     refetch = await client.get(
-        f"/api/v1/courses/{course.id}", headers=teacher_token
+        f"/api/v1/courses/{course.id}", cookies=teacher_token
     )
     assert refetch.status_code == 404
 
@@ -113,13 +113,13 @@ async def test_publish_toggle_flips_is_published(
     course = await make_course(db_session, owner=teacher_user, is_published=False)
 
     r1 = await client.put(
-        f"/api/v1/courses/{course.id}/publish", headers=teacher_token
+        f"/api/v1/courses/{course.id}/publish", cookies=teacher_token
     )
     assert r1.status_code == 200
     assert r1.json()["is_published"] is True
 
     r2 = await client.put(
-        f"/api/v1/courses/{course.id}/publish", headers=teacher_token
+        f"/api/v1/courses/{course.id}/publish", cookies=teacher_token
     )
     assert r2.json()["is_published"] is False
 
@@ -141,6 +141,83 @@ async def test_teacher_cannot_access_another_teachers_course(
     other_course = await make_course(db_session, owner=other)
 
     resp = await client.get(
-        f"/api/v1/courses/{other_course.id}", headers=teacher_token
+        f"/api/v1/courses/{other_course.id}", cookies=teacher_token
     )
     assert resp.status_code == 403
+
+
+async def test_generate_access_code_sets_code_and_mode(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    course = await make_course(db_session, owner=teacher_user)
+
+    resp = await client.post(
+        f"/api/v1/courses/{course.id}/access-code/generate",
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["access_mode"] == "code"
+    assert body["access_code"] is not None
+    assert len(body["access_code"]) == 6
+    assert body["access_code"].isalnum()
+
+
+async def test_generate_access_code_regenerates_on_repeat_call(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    course = await make_course(db_session, owner=teacher_user, access_code="OLD123")
+
+    resp = await client.post(
+        f"/api/v1/courses/{course.id}/access-code/generate",
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["access_code"] != "OLD123"
+
+
+async def test_generate_access_code_requires_ownership(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_token: dict[str, str],
+) -> None:
+    other = User(
+        email="other-gen@example.com",
+        hashed_password=hash_password("pwd-12345678"),
+        role=UserRole.teacher,
+        is_active=True,
+    )
+    db_session.add(other)
+    await db_session.commit()
+    await db_session.refresh(other)
+    other_course = await make_course(db_session, owner=other)
+
+    resp = await client.post(
+        f"/api/v1/courses/{other_course.id}/access-code/generate",
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 403
+
+
+async def test_delete_access_code_resets_to_link_mode(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    course = await make_course(db_session, owner=teacher_user, access_code="DEL999")
+
+    resp = await client.delete(
+        f"/api/v1/courses/{course.id}/access-code",
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["access_code"] is None
+    assert body["access_mode"] == "link"

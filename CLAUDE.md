@@ -11,6 +11,10 @@ SaaS that turns a PPTX + lecture script into a narrated video lesson, then expos
 
 Read `docs/ARCHITECTURE.md` first for the big picture, then `docs/DATA_FLOW.md` for end-to-end scenarios. `docs/KNOWN_PROBLEMS.md` is the canonical list of tech debt — check it before "fixing" something that looks weird.
 
+## npm — запрещено
+
+**Никогда не запускай `npm install`, `npm ci` или любые другие `npm` команды** — ни на хосте, ни внутри контейнера. Установка пакетов на Windows-хосте создаёт `node_modules` с Windows-бинарниками, которые ломают Linux-контейнер. Все зависимости управляются через Docker-образ.
+
 ## Commands
 
 Everything is intended to run via Docker Compose. The `.env` at repo root is shared by all containers; `.env.example` is the template.

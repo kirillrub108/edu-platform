@@ -18,24 +18,15 @@ class UserLogin(BaseModel):
 
 
 class TokenResponse(BaseModel):
+    """Internal DTO returned by AuthService. Not exposed in API responses."""
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
-
-
-class RefreshRequest(BaseModel):
-    refresh_token: str
-
-
-class LogoutRequest(BaseModel):
-    refresh_token: str | None = None
 
 
 __all__ = [
     "UserRegister",
     "UserLogin",
     "TokenResponse",
-    "RefreshRequest",
-    "LogoutRequest",
     "UserOut",
 ]

@@ -13,8 +13,10 @@ from app.models.course import Course
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import Lesson, Module
 from app.models.user import User
-from app.schemas.course import CourseDetail, CourseOut
+from app.schemas.course import CourseOut, CoursePreview
+from app.schemas.gradebook import StudentCourseDetailRead, StudentLessonProgressRead
 from app.schemas.lesson import LessonOut
+from app.services import gradebook_service
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/students", tags=["students"])
@@ -69,12 +71,30 @@ async def my_courses(
     return list(result.all())
 
 
-@router.get("/courses/{course_id}", response_model=CourseDetail)
+@router.get("/courses/preview", response_model=CoursePreview)
+async def preview_course(
+    code: str | None = None,
+    course_id: UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    course: Course | None = None
+    if code:
+        course = await db.scalar(select(Course).where(Course.access_code == code))
+    elif course_id:
+        course = await db.get(Course, course_id)
+
+    if not course or not course.is_published:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    return course
+
+
+@router.get("/courses/{course_id}", response_model=StudentCourseDetailRead)
 async def course_details(
     course_id: UUID,
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
-):
+) -> StudentCourseDetailRead:
     enrollment = await db.scalar(
         select(Enrollment).where(
             Enrollment.student_id == user.id, Enrollment.course_id == course_id
@@ -93,7 +113,24 @@ async def course_details(
     )
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
-    return course
+
+    progress_rows = await db.scalars(
+        select(LessonProgress).where(LessonProgress.enrollment_id == enrollment.id)
+    )
+    lesson_progress = {
+        str(p.lesson_id): StudentLessonProgressRead(
+            effective_score=gradebook_service.compute_effective_score(
+                p.quiz_score, p.manual_score
+            ),
+            teacher_comment=p.teacher_comment,
+            is_completed=p.is_completed,
+        )
+        for p in progress_rows.all()
+    }
+
+    resp = StudentCourseDetailRead.model_validate(course)
+    resp.lesson_progress = lesson_progress
+    return resp
 
 
 @router.get("/lessons/{lesson_id}", response_model=LessonOut)
