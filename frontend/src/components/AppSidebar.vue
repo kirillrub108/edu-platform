@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { LayoutDashboard, BookOpen, Sparkles } from 'lucide-vue-next'
+import { LayoutDashboard, BarChart3, Sparkles } from 'lucide-vue-next'
 
 const items = [
-  { to: '/dashboard', label: 'Дашборд', icon: LayoutDashboard },
-  { to: '/courses',   label: 'Мои курсы', icon: BookOpen },
+  { to: '/dashboard',                label: 'Мои курсы',         icon: LayoutDashboard },
+  { to: '/analytics/quiz-results',   label: 'Результаты тестов', icon: BarChart3 },
 ]
 </script>
 

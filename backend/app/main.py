@@ -16,6 +16,7 @@ from app.database import engine
 from app.limiter import limiter
 from app.redis_client import close_redis
 from app.routers import (
+    analytics,
     auth,
     courses,
     files,
@@ -183,6 +184,7 @@ app.include_router(quiz_student.router)
 app.include_router(uploads.router)
 app.include_router(students.router)
 app.include_router(files.router)
+app.include_router(analytics.router)
 
 
 @app.get("/", tags=["meta"])
