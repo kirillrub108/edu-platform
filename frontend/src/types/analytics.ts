@@ -78,3 +78,38 @@ export interface QuizResultsResponse {
   lesson_title: string
   items: QuizResultOut[]
 }
+
+export type AttemptStatus = 'in_progress' | 'submitted' | 'graded'
+
+// GET /lessons/{lessonId}/quiz/attempts — Decimal fields arrive as JSON strings.
+export interface TeacherQuizAttempt {
+  id: string
+  quiz_id: string
+  student_id: string
+  student_email: string
+  student_full_name: string | null
+  attempt_number: number
+  status: AttemptStatus
+  score: string | null
+  passed: boolean | null
+  submitted_at: string | null
+  graded_at: string | null
+  has_pending_review: boolean
+}
+
+export interface TeacherQuizAnswer {
+  id: string
+  question_id: string
+  question_payload: Record<string, any>
+  response: Record<string, any>
+  awarded_score: string | null
+  max_score: string
+  is_correct: boolean | null
+  needs_review: boolean
+  llm_feedback: string | null
+  manually_overridden: boolean
+}
+
+export interface TeacherQuizAttemptDetail extends TeacherQuizAttempt {
+  answers: TeacherQuizAnswer[]
+}

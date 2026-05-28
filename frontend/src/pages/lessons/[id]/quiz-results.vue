@@ -25,6 +25,16 @@ const saving = ref(false)
 const saveErr = ref('')
 const scoreErr = ref('')
 
+const panelStudent = ref<{ id: string; name: string; email: string } | null>(null)
+
+const openPanel = (item: QuizResultOut) => {
+  panelStudent.value = {
+    id: item.student_id,
+    name: item.student_full_name || item.student_email,
+    email: item.student_email,
+  }
+}
+
 const filteredItems = computed<QuizResultOut[]>(() => {
   if (!data.value) return []
   const q = search.value.trim().toLowerCase()
@@ -209,7 +219,11 @@ onMounted(load)
           <tbody class="divide-y divide-gray-50">
             <template v-for="item in filteredItems" :key="item.student_id">
               <!-- Normal row -->
-              <tr v-if="editingStudentId !== item.student_id" class="hover:bg-violet-50/30 transition">
+              <tr
+                v-if="editingStudentId !== item.student_id"
+                class="hover:bg-violet-50/30 transition cursor-pointer"
+                @click="openPanel(item)"
+              >
                 <td class="px-4 py-3">
                   <div class="text-gray-900 font-medium">
                     {{ item.student_full_name || item.student_email }}
@@ -240,7 +254,7 @@ onMounted(load)
                 <td class="px-4 py-3 text-right">
                   <button
                     class="text-xs text-violet-700 hover:text-violet-900 hover:underline transition"
-                    @click="startEdit(item)"
+                    @click.stop="startEdit(item)"
                   >
                     Изменить балл
                   </button>
@@ -293,5 +307,12 @@ onMounted(load)
         </table>
       </section>
     </main>
+
+    <AttemptListPanel
+      v-if="panelStudent"
+      :lesson-id="lessonId"
+      :student="panelStudent"
+      @close="panelStudent = null"
+    />
   </div>
 </template>
