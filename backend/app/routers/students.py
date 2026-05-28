@@ -11,9 +11,9 @@ from app.database import get_db
 from app.dependencies import require_student
 from app.models.course import Course
 from app.models.enrollment import Enrollment, LessonProgress
-from app.models.lesson import Lesson, Module
+from app.models.lesson import ContentType, Lesson, Module
 from app.models.user import User
-from app.schemas.course import CourseOut, CoursePreview
+from app.schemas.course import CourseOut, CoursePreview, StudentCourseOut
 from app.schemas.gradebook import StudentCourseDetailRead, StudentLessonProgressRead
 from app.schemas.lesson import LessonOut
 from app.services import gradebook_service
@@ -57,18 +57,28 @@ async def enroll(
     return {"enrollment_id": str(enrollment.id), "course_id": str(course.id)}
 
 
-@router.get("/my-courses", response_model=list[CourseOut])
+@router.get("/my-courses", response_model=list[StudentCourseOut])
 async def my_courses(
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.scalars(
-        select(Course)
-        .join(Enrollment, Enrollment.course_id == Course.id)
+    enrollments = await db.scalars(
+        select(Enrollment)
         .where(Enrollment.student_id == user.id)
-        .options(selectinload(Course.owner))
+        .options(
+            selectinload(Enrollment.course).selectinload(Course.owner),
+            selectinload(Enrollment.course).selectinload(Course.modules).selectinload(Module.lessons),
+            selectinload(Enrollment.progress),
+        )
     )
-    return list(result.all())
+    result = []
+    for enrollment in enrollments.all():
+        course = enrollment.course
+        course.lessons_count = sum(len(m.lessons) for m in course.modules)
+        out = StudentCourseOut.model_validate(course)
+        out.completed_lessons = sum(1 for p in enrollment.progress if p.is_completed)
+        result.append(out)
+    return result
 
 
 @router.get("/courses/preview", response_model=CoursePreview)
@@ -189,6 +199,14 @@ async def complete_lesson(
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ):
+    lesson = await db.get(Lesson, lesson_id)
+    if lesson is None:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    if lesson.content_type == ContentType.quiz:
+        raise HTTPException(
+            status_code=400,
+            detail="Quiz lessons are completed automatically upon passing the quiz",
+        )
     progress = await _get_progress(user, lesson_id, db)
     progress.is_completed = True
     progress.completed_at = datetime.now(timezone.utc)

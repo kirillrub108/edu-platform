@@ -23,6 +23,7 @@ from app.constants import (
     QUIZ_DEFAULT_WEIGHT,
     QUIZ_NUM_OPTIONS,
     QUIZ_NUM_QUESTIONS,
+    QUIZ_PASS_THRESHOLD,
     QUIZ_TYPE_DISTRIBUTION,
 )
 from app.database import get_db
@@ -694,7 +695,7 @@ async def set_student_grade(
         raise HTTPException(status_code=404, detail="Student not enrolled in this course")
 
     quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson_id))
-    threshold = float(quiz.pass_threshold) if quiz else 0.6
+    threshold = float(quiz.pass_threshold) if quiz else QUIZ_PASS_THRESHOLD
 
     progress = await db.scalar(
         select(LessonProgress).where(
@@ -706,10 +707,14 @@ async def set_student_grade(
         progress = LessonProgress(enrollment_id=enrollment.id, lesson_id=lesson_id)
         db.add(progress)
 
+    passed = body.score >= threshold
     progress.manual_override_score = body.score
-    if body.score >= threshold and not progress.is_completed:
-        progress.is_completed = True
-        progress.completed_at = datetime.now(timezone.utc)
+    # Teacher override is authoritative: always recalculate completion by threshold.
+    progress.is_completed = passed
+    if passed:
+        progress.completed_at = progress.completed_at or datetime.now(timezone.utc)
+    else:
+        progress.completed_at = None
 
     await db.commit()
     await db.refresh(progress)

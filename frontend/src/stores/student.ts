@@ -5,8 +5,8 @@ interface CourseOut {
   title: string
   description?: string | null
   is_published: boolean
-  lessons_count?: number
-  completed_lessons?: number
+  lessons_count: number
+  completed_lessons: number
   gradient_idx?: number
 }
 
@@ -49,6 +49,11 @@ export const useStudentStore = defineStore('student', () => {
 
   const fetchCourses = async () => {
     courses.value = await apiFetch<CourseOut[]>('/students/my-courses')
+    const stats: Record<string, { total: number; completed: number }> = {}
+    for (const c of courses.value) {
+      stats[c.id] = { total: c.lessons_count, completed: c.completed_lessons }
+    }
+    courseStats.value = { ...courseStats.value, ...stats }
   }
 
   const fetchCourse = async (id: string) => {

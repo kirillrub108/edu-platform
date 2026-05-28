@@ -528,10 +528,12 @@ async def patch_quiz_result(
         progress.quiz_score = score
         progress.edited_by_teacher = True
         progress.edit_reason = reason
-        if passed and not progress.is_completed:
-            progress.is_completed = True
-            if progress.completed_at is None:
-                progress.completed_at = datetime.now(timezone.utc)
+        # Teacher override is authoritative: always recalculate completion by threshold.
+        progress.is_completed = passed
+        if passed:
+            progress.completed_at = progress.completed_at or datetime.now(timezone.utc)
+        else:
+            progress.completed_at = None
 
     try:
         await db.commit()

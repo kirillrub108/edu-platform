@@ -61,6 +61,10 @@ class CourseOut(BaseModel):
     lessons_count: int = 0
 
 
+class StudentCourseOut(CourseOut):
+    completed_lessons: int = 0
+
+
 class CourseDetail(CourseOut):
     modules: list[ModuleOut] = []
 
