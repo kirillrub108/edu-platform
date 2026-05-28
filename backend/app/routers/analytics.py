@@ -12,13 +12,17 @@ from app.schemas.analytics import (
     QuizAnalyticsSummary,
     QuizLessonSort,
     QuizLessonStatsPage,
+    QuizResultOut,
+    QuizResultPatch,
+    QuizResultsResponse,
     QuizSubmissionPage,
     SortOrder,
 )
 from app.services import analytics_service
-from app.services.analytics_service import LessonNotOwnedOrNoQuiz
+from app.services.analytics_service import LessonNotOwnedByTeacher, LessonNotOwnedOrNoQuiz
 
 router = APIRouter(prefix="/api/v1/teacher/analytics", tags=["analytics"])
+lesson_results_router = APIRouter(prefix="/api/v1/teacher/lessons", tags=["analytics"])
 
 
 @router.get("/summary", response_model=QuizAnalyticsSummary)
@@ -69,3 +73,37 @@ async def lesson_submissions(
         )
     except LessonNotOwnedOrNoQuiz:
         raise HTTPException(status_code=404, detail="Quiz lesson not found")
+
+
+@lesson_results_router.get(
+    "/{lesson_id}/quiz-results",
+    response_model=QuizResultsResponse,
+)
+async def get_lesson_quiz_results(
+    lesson_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> QuizResultsResponse:
+    try:
+        return await analytics_service.get_quiz_results(db, user.id, lesson_id)
+    except LessonNotOwnedByTeacher:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+
+
+@lesson_results_router.patch(
+    "/{lesson_id}/quiz-results/{student_id}",
+    response_model=QuizResultOut,
+)
+async def patch_lesson_quiz_result(
+    lesson_id: UUID,
+    student_id: UUID,
+    body: QuizResultPatch,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> QuizResultOut:
+    try:
+        return await analytics_service.patch_quiz_result(
+            db, user.id, lesson_id, student_id, body.quiz_score, body.reason
+        )
+    except LessonNotOwnedByTeacher:
+        raise HTTPException(status_code=404, detail="Lesson or student not found")

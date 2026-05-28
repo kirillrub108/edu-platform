@@ -186,6 +186,7 @@ app.include_router(uploads.router)
 app.include_router(students.router)
 app.include_router(files.router)
 app.include_router(analytics.router)
+app.include_router(analytics.lesson_results_router)
 app.include_router(comments.router)
 
 

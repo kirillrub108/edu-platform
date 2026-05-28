@@ -11,6 +11,23 @@
  */
 import type { StudentQuestion, AnswerResult } from '~/composables/useQuizAttempt'
 
+interface AttemptRow {
+  id: string
+  attempt_number: number
+  score: number | null
+  passed: boolean | null
+  attempted_at: string
+  status: string
+}
+
+interface AttemptsData {
+  attempts: AttemptRow[]
+  best_score: number | null
+  final_score: number | null
+  is_manual: boolean
+  is_passed: boolean
+}
+
 const props = defineProps<{
   lessonId: string
 }>()
@@ -30,6 +47,28 @@ const {
   fetchInfo, start, setResponse, submit, reset,
 } = useQuizAttempt(lessonIdRef)
 
+const { apiFetch } = useApi()
+const attemptsData = ref<AttemptsData | null>(null)
+const attemptsLoading = ref(false)
+
+const loadAttempts = async () => {
+  if (!hasQuiz.value) return
+  attemptsLoading.value = true
+  try {
+    attemptsData.value = await apiFetch<AttemptsData>(
+      `/students/lessons/${props.lessonId}/quiz-attempts`,
+    )
+  } catch { /* ignore — no attempts or quiz not available */ } finally {
+    attemptsLoading.value = false
+  }
+}
+
+const fmtDate = (iso: string) =>
+  new Date(iso).toLocaleString('ru-RU', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  })
+
 const allAnswered = computed(() => {
   if (!questions.value.length) return false
   return questions.value.every(q => q.id in responses.value)
@@ -43,14 +82,25 @@ const remaining = computed(() => {
 
 watch(lessonIdRef, async (id, prev) => {
   if (id === prev) return
+  attemptsData.value = null
   reset()
   await fetchInfo()
+  await loadAttempts()
 })
 
 onMounted(async () => {
   await fetchInfo()
   emit('has-quiz', hasQuiz.value)
+  await loadAttempts()
 })
+
+// Reload attempts whenever a graded result becomes available.
+watch(
+  () => result.value?.status,
+  async (status) => {
+    if (status === 'graded') await loadAttempts()
+  },
+)
 
 // Emit quiz-passed whenever result transitions to graded + passed.
 // immediate:true covers the case where the student revisits an already-passed lesson.
@@ -365,5 +415,71 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
         @click="start"
       >Начать тест</button>
     </template>
+  </section>
+
+  <!-- Мои попытки -->
+  <section
+    v-if="attemptsData && attemptsData.attempts.length > 0"
+    class="bg-white rounded-2xl border border-gray-100 shadow-soft p-5 space-y-4"
+  >
+    <div class="flex items-center justify-between gap-3 flex-wrap">
+      <h3 class="text-base font-semibold text-gray-900">Мои попытки</h3>
+      <div class="flex items-center gap-2">
+        <span class="text-sm text-gray-500">Итоговая оценка:</span>
+        <span
+          v-if="attemptsData.final_score !== null"
+          class="text-sm font-semibold"
+          :class="attemptsData.is_passed ? 'text-green-600' : 'text-red-600'"
+        >
+          {{ Math.round(attemptsData.final_score * 100) }}%
+        </span>
+        <span v-else class="text-sm text-gray-400">—</span>
+        <span
+          v-if="attemptsData.is_manual"
+          class="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full"
+          title="Выставлен преподавателем"
+        >вручную</span>
+        <span
+          v-if="attemptsData.is_passed"
+          class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full"
+        >Сдан</span>
+        <span
+          v-else
+          class="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full"
+        >Не сдан</span>
+      </div>
+    </div>
+
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-left text-gray-500 border-b border-gray-100">
+          <th class="pb-2 font-medium w-10">№</th>
+          <th class="pb-2 font-medium">Дата</th>
+          <th class="pb-2 font-medium text-center">Балл</th>
+          <th class="pb-2 font-medium text-center">Результат</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-50">
+        <tr
+          v-for="a in attemptsData.attempts"
+          :key="a.id"
+          class="text-gray-700"
+        >
+          <td class="py-2 tabular-nums">{{ a.attempt_number }}</td>
+          <td class="py-2 tabular-nums text-gray-500 text-xs">{{ fmtDate(a.attempted_at) }}</td>
+          <td class="py-2 text-center tabular-nums font-medium"
+            :class="a.passed ? 'text-green-600' : 'text-red-600'"
+          >
+            <span v-if="a.score !== null">{{ Math.round(a.score * 100) }}%</span>
+            <span v-else class="text-gray-400 font-normal">—</span>
+          </td>
+          <td class="py-2 text-center">
+            <span v-if="a.passed === true" title="Сдан">✓</span>
+            <span v-else-if="a.passed === false" class="text-red-500" title="Не сдан">✗</span>
+            <span v-else class="text-gray-400 text-xs">проверка…</span>
+          </td>
+        </tr>
+      </tbody>
+    </table>
   </section>
 </template>

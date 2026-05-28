@@ -16,8 +16,8 @@ const items = [
         v-for="it in items"
         :key="it.to"
         :to="it.to"
-        class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:text-violet-700 hover:bg-violet-50 transition border-l-2 border-transparent"
-        active-class="!text-violet-700 !bg-violet-50 !border-violet-600"
+        class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium text-gray-600 hover:text-violet-700 hover:bg-violet-50 transition"
+        active-class="!text-violet-700 !bg-violet-50"
       >
         <component :is="it.icon" class="w-4 h-4" />
         {{ it.label }}

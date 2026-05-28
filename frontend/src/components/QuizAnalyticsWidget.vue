@@ -34,7 +34,8 @@ const hasData = computed(() => !!data.value && data.value.total_attempts > 0)
 </script>
 
 <template>
-  <section class="bg-white border border-gray-100 rounded-2xl p-5 shadow-soft">
+  <div class="cursor-pointer" @click="navigateTo('/analytics/quiz-results')">
+  <section class="bg-white border border-gray-100 rounded-2xl p-5 shadow-soft hover:border-violet-200 transition">
     <div class="flex items-center justify-between mb-4">
       <h2 class="text-base font-semibold text-gray-900">Тесты студентов</h2>
       <NuxtLink
@@ -105,4 +106,5 @@ const hasData = computed(() => !!data.value && data.value.total_attempts > 0)
       </ul>
     </template>
   </section>
+  </div>
 </template>

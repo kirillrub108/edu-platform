@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    String,
     Text,
     UniqueConstraint,
 )
@@ -46,6 +47,7 @@ class Enrollment(Base):
 
 class LessonProgress(Base):
     __tablename__ = "lesson_progress"
+    __mapper_args__ = {"eager_defaults": True}
     __table_args__ = (
         UniqueConstraint("enrollment_id", "lesson_id", name="uq_lesson_progress_enrollment_lesson"),
     )
@@ -59,9 +61,12 @@ class LessonProgress(Base):
     )
     is_completed = Column(Boolean, default=False, nullable=False)
     quiz_score = Column(Float, nullable=True)
+    manual_override_score = Column(Float, nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     manual_score = Column(Float, nullable=True)
     teacher_comment = Column(Text, nullable=True)
+    edited_by_teacher = Column(Boolean, nullable=False, server_default="false", default=False)
+    edit_reason = Column(String(500), nullable=True)
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),

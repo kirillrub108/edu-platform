@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import Float, and_, case, cast, desc, exists, func, select
@@ -7,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import QUIZ_PASS_THRESHOLD
 from app.models.course import Course
+from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import Lesson, Module
 from app.models.quiz import AttemptStatus, Quiz, QuizAttempt
 from app.models.user import User
@@ -15,6 +17,9 @@ from app.schemas.analytics import (
     QuizLessonSort,
     QuizLessonStats,
     QuizLessonStatsPage,
+    QuizResultOut,
+    QuizResultPatch,
+    QuizResultsResponse,
     QuizSubmission,
     QuizSubmissionPage,
     SortOrder,
@@ -352,4 +357,211 @@ async def get_lesson_submissions(
     ]
     return QuizSubmissionPage(
         items=items, total=int(total), page=page, page_size=page_size
+    )
+
+
+class LessonNotOwnedByTeacher(Exception):
+    """Lesson does not exist or belongs to another teacher."""
+
+
+async def _lesson_owner_context(
+    db: AsyncSession, owner_id: UUID, lesson_id: UUID
+) -> tuple[str, UUID, UUID | None]:
+    """Return (lesson_title, course_id, quiz_id) if the teacher owns the lesson.
+
+    quiz_id is None when the lesson has no quiz attached. Raises
+    LessonNotOwnedByTeacher if the lesson is missing or owned by someone else.
+    """
+    row = (
+        await db.execute(
+            select(Lesson.title, Course.id.label("course_id"), Quiz.id.label("quiz_id"))
+            .select_from(Lesson)
+            .join(Module, Lesson.module_id == Module.id)
+            .join(Course, Module.course_id == Course.id)
+            .outerjoin(Quiz, Quiz.lesson_id == Lesson.id)
+            .where(Lesson.id == lesson_id)
+            .where(Course.owner_id == owner_id)
+        )
+    ).first()
+    if row is None:
+        raise LessonNotOwnedByTeacher()
+    return row.title, row.course_id, row.quiz_id
+
+
+async def get_quiz_results(
+    db: AsyncSession,
+    owner_id: UUID,
+    lesson_id: UUID,
+) -> QuizResultsResponse:
+    lesson_title, course_id, quiz_id = await _lesson_owner_context(db, owner_id, lesson_id)
+
+    # Real quiz scores live in QuizAttempt; LessonProgress.quiz_score only holds
+    # a teacher's manual override (edited_by_teacher=True). The displayed score
+    # is the override when present, otherwise the best graded attempt.
+    best = _best_attempts_cte()
+    attempts_sq = (
+        select(
+            QuizAttempt.student_id.label("student_id"),
+            func.count(QuizAttempt.id).label("cnt"),
+        )
+        .where(QuizAttempt.quiz_id == quiz_id)
+        .where(QuizAttempt.status == AttemptStatus.graded)
+        .where(QuizAttempt.score.is_not(None))
+        .group_by(QuizAttempt.student_id)
+        .subquery()
+    )
+
+    stmt = (
+        select(
+            User.id.label("student_id"),
+            User.email.label("student_email"),
+            User.full_name.label("student_full_name"),
+            LessonProgress.id.label("progress_id"),
+            LessonProgress.quiz_score.label("manual_score"),
+            LessonProgress.edited_by_teacher.label("edited_by_teacher"),
+            LessonProgress.edit_reason.label("edit_reason"),
+            LessonProgress.completed_at.label("lp_completed_at"),
+            best.c.score.label("auto_score"),
+            best.c.submitted_at.label("auto_submitted_at"),
+            func.coalesce(attempts_sq.c.cnt, 0).label("attempts"),
+        )
+        .select_from(Enrollment)
+        .join(User, User.id == Enrollment.student_id)
+        .outerjoin(
+            LessonProgress,
+            and_(
+                LessonProgress.enrollment_id == Enrollment.id,
+                LessonProgress.lesson_id == lesson_id,
+            ),
+        )
+        .outerjoin(
+            best,
+            and_(
+                best.c.student_id == User.id,
+                best.c.quiz_id == quiz_id,
+                best.c.rn == 1,
+            ),
+        )
+        .outerjoin(attempts_sq, attempts_sq.c.student_id == User.id)
+        .where(Enrollment.course_id == course_id)
+        .order_by(User.full_name.asc().nullslast(), User.email.asc())
+    )
+    rows = (await db.execute(stmt)).all()
+
+    items: list[QuizResultOut] = []
+    for r in rows:
+        edited = bool(r.edited_by_teacher) if r.edited_by_teacher is not None else False
+        manual = float(r.manual_score) if r.manual_score is not None else None
+        auto = float(r.auto_score) if r.auto_score is not None else None
+        effective = manual if (edited and manual is not None) else auto
+        passed = effective is not None and effective >= QUIZ_PASS_THRESHOLD
+        completed_at = r.lp_completed_at if edited else r.auto_submitted_at
+        items.append(
+            QuizResultOut(
+                student_id=r.student_id,
+                student_email=r.student_email,
+                student_full_name=r.student_full_name,
+                progress_id=r.progress_id,
+                quiz_score=effective,
+                is_completed=passed,
+                completed_at=completed_at,
+                edited_by_teacher=edited,
+                edit_reason=r.edit_reason,
+                attempts=int(r.attempts or 0),
+            )
+        )
+
+    return QuizResultsResponse(
+        lesson_id=lesson_id,
+        lesson_title=lesson_title,
+        items=items,
+    )
+
+
+async def patch_quiz_result(
+    db: AsyncSession,
+    owner_id: UUID,
+    lesson_id: UUID,
+    student_id: UUID,
+    score: float,
+    reason: str | None,
+) -> QuizResultOut:
+    # Verify teacher owns the lesson and resolve course + quiz.
+    _title, course_id, quiz_id = await _lesson_owner_context(db, owner_id, lesson_id)
+
+    # Verify the student is enrolled in this course.
+    enrollment_row = (
+        await db.execute(
+            select(Enrollment.id, User.email, User.full_name)
+            .join(User, User.id == Enrollment.student_id)
+            .where(Enrollment.student_id == student_id)
+            .where(Enrollment.course_id == course_id)
+        )
+    ).first()
+    if enrollment_row is None:
+        raise LessonNotOwnedByTeacher()
+
+    enrollment_id: UUID = enrollment_row.id
+    passed = score >= QUIZ_PASS_THRESHOLD
+
+    # Upsert LessonProgress — this row is the teacher's manual override.
+    progress = (
+        await db.execute(
+            select(LessonProgress)
+            .where(LessonProgress.enrollment_id == enrollment_id)
+            .where(LessonProgress.lesson_id == lesson_id)
+        )
+    ).scalar_one_or_none()
+
+    if progress is None:
+        progress = LessonProgress(
+            enrollment_id=enrollment_id,
+            lesson_id=lesson_id,
+            quiz_score=score,
+            is_completed=passed,
+            completed_at=datetime.now(timezone.utc) if passed else None,
+            edited_by_teacher=True,
+            edit_reason=reason,
+        )
+        db.add(progress)
+    else:
+        progress.quiz_score = score
+        progress.edited_by_teacher = True
+        progress.edit_reason = reason
+        if passed and not progress.is_completed:
+            progress.is_completed = True
+            if progress.completed_at is None:
+                progress.completed_at = datetime.now(timezone.utc)
+
+    try:
+        await db.commit()
+        await db.refresh(progress)
+    except Exception:
+        await db.rollback()
+        raise
+
+    attempts = 0
+    if quiz_id is not None:
+        attempts = (
+            await db.scalar(
+                select(func.count(QuizAttempt.id))
+                .where(QuizAttempt.quiz_id == quiz_id)
+                .where(QuizAttempt.student_id == student_id)
+                .where(QuizAttempt.status == AttemptStatus.graded)
+                .where(QuizAttempt.score.is_not(None))
+            )
+            or 0
+        )
+
+    return QuizResultOut(
+        student_id=student_id,
+        student_email=enrollment_row.email,
+        student_full_name=enrollment_row.full_name,
+        progress_id=progress.id,
+        quiz_score=float(progress.quiz_score) if progress.quiz_score is not None else None,
+        is_completed=passed,
+        completed_at=progress.completed_at,
+        edited_by_teacher=progress.edited_by_teacher,
+        edit_reason=progress.edit_reason,
+        attempts=int(attempts),
     )

@@ -59,3 +59,22 @@ export interface CourseOption {
   id: string
   title: string
 }
+
+export interface QuizResultOut {
+  student_id: string
+  student_email: string
+  student_full_name: string | null
+  progress_id: string | null
+  quiz_score: number | null
+  is_completed: boolean
+  completed_at: string | null
+  edited_by_teacher: boolean
+  edit_reason: string | null
+  attempts: number
+}
+
+export interface QuizResultsResponse {
+  lesson_id: string
+  lesson_title: string
+  items: QuizResultOut[]
+}

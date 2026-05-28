@@ -28,7 +28,8 @@ from app.constants import (
 from app.database import get_db
 from app.dependencies import get_owned_lesson
 from app.limiter import limiter
-from app.models.lesson import Lesson
+from app.models.enrollment import Enrollment, LessonProgress
+from app.models.lesson import Lesson, Module
 from app.models.quiz import (
     AttemptStatus,
     Quiz,
@@ -40,6 +41,8 @@ from app.models.quiz import (
 from app.models.user import User
 from app.schemas.quiz import (
     AnswerOverride,
+    GradeOverride,
+    GradeOverrideResponse,
     QuestionFlag,
     QuizAttemptTeacherDetail,
     QuizAttemptTeacherRead,
@@ -661,3 +664,58 @@ async def override_answer_score(
 
     await db.commit()
     return await get_attempt_detail(lesson_id, attempt_id, lesson, db)
+
+
+# ── Manual student grade override ────────────────────────────────────────────
+
+
+@router.patch(
+    "/{lesson_id}/student/{student_id}/grade",
+    response_model=GradeOverrideResponse,
+)
+async def set_student_grade(
+    lesson_id: UUID,
+    student_id: UUID,
+    body: GradeOverride,
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+) -> GradeOverrideResponse:
+    module = await db.get(Module, lesson.module_id)
+    if module is None:
+        raise HTTPException(status_code=404, detail="Module not found")
+
+    enrollment = await db.scalar(
+        select(Enrollment).where(
+            Enrollment.student_id == student_id,
+            Enrollment.course_id == module.course_id,
+        )
+    )
+    if enrollment is None:
+        raise HTTPException(status_code=404, detail="Student not enrolled in this course")
+
+    quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson_id))
+    threshold = float(quiz.pass_threshold) if quiz else 0.6
+
+    progress = await db.scalar(
+        select(LessonProgress).where(
+            LessonProgress.enrollment_id == enrollment.id,
+            LessonProgress.lesson_id == lesson_id,
+        )
+    )
+    if progress is None:
+        progress = LessonProgress(enrollment_id=enrollment.id, lesson_id=lesson_id)
+        db.add(progress)
+
+    progress.manual_override_score = body.score
+    if body.score >= threshold and not progress.is_completed:
+        progress.is_completed = True
+        progress.completed_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(progress)
+    return GradeOverrideResponse(
+        lesson_id=lesson_id,
+        student_id=student_id,
+        manual_override_score=progress.manual_override_score,
+        is_completed=progress.is_completed,
+    )

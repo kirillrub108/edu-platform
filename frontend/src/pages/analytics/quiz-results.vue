@@ -137,7 +137,7 @@ const refresh = async () => {
 }
 
 const openLesson = (lessonId: string) => {
-  navigateTo(`/analytics/quiz-results/${lessonId}`)
+  navigateTo(`/lessons/${lessonId}/quiz-results`)
 }
 
 onMounted(async () => {
@@ -226,7 +226,8 @@ onMounted(async () => {
           <li
             v-for="(r, idx) in summary.recent_submissions.slice(0, 5)"
             :key="`${r.student_id}-${r.lesson_id}-${idx}`"
-            class="flex items-center gap-3 py-2.5 text-sm"
+            class="flex items-center gap-3 py-2.5 text-sm cursor-pointer hover:bg-violet-50/40 -mx-2 px-2 rounded-lg transition"
+            @click="openLesson(r.lesson_id)"
           >
             <div class="flex-1 min-w-0">
               <div class="text-gray-800 truncate">{{ studentLabel(r.student_full_name, r.student_email) }}</div>

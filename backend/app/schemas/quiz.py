@@ -449,6 +449,40 @@ class AnswerOverride(BaseModel):
     feedback: str | None = None
 
 
+# ── Student attempts history ─────────────────────────────────────────────────
+
+
+class QuizAttemptSummary(BaseModel):
+    id: UUID
+    attempt_number: int
+    score: float | None
+    passed: bool | None
+    attempted_at: datetime
+    status: AttemptStatus
+
+
+class MyQuizAttemptsResponse(BaseModel):
+    attempts: list[QuizAttemptSummary]
+    best_score: float | None
+    final_score: float | None
+    is_manual: bool
+    is_passed: bool
+
+
+# ── Teacher grade override ────────────────────────────────────────────────────
+
+
+class GradeOverride(BaseModel):
+    score: float = Field(ge=0.0, le=1.0)
+
+
+class GradeOverrideResponse(BaseModel):
+    lesson_id: UUID
+    student_id: UUID
+    manual_override_score: float
+    is_completed: bool
+
+
 # ── Legacy aggregate (teacher /quiz-results) ────────────────────────────────
 
 

@@ -70,3 +70,29 @@ class QuizAnalyticsSummary(BaseModel):
     avg_score: float | None
     pass_rate: float | None
     recent_submissions: list[QuizSubmission]
+
+
+class QuizResultOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    student_id: UUID
+    student_email: str
+    student_full_name: str | None
+    progress_id: UUID | None
+    quiz_score: float | None
+    is_completed: bool
+    completed_at: datetime | None
+    edited_by_teacher: bool
+    edit_reason: str | None
+    attempts: int
+
+
+class QuizResultPatch(BaseModel):
+    quiz_score: float = Field(ge=0.0, le=1.0)
+    reason: str | None = None
+
+
+class QuizResultsResponse(BaseModel):
+    lesson_id: UUID
+    lesson_title: str
+    items: list[QuizResultOut]

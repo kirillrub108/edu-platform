@@ -34,10 +34,12 @@ from app.models.quiz import (
 )
 from app.models.user import User
 from app.schemas.quiz import (
+    MyQuizAttemptsResponse,
     QuizAnswerStudentResult,
     QuizAttemptResult,
     QuizAttemptSave,
     QuizAttemptStartResponse,
+    QuizAttemptSummary,
     QuizQuestionStudentRead,
     QuizSubmitResponse,
     to_student_payload,
@@ -182,6 +184,68 @@ async def _build_result(
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/{lesson_id}/quiz-attempts",
+    response_model=MyQuizAttemptsResponse,
+)
+async def get_my_quiz_attempts(
+    lesson_id: UUID,
+    user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
+) -> MyQuizAttemptsResponse:
+    lesson, enrollment = await _ensure_enrolled(db, user, lesson_id)
+
+    quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson.id))
+    if quiz is None:
+        return MyQuizAttemptsResponse(
+            attempts=[], best_score=None, final_score=None,
+            is_manual=False, is_passed=False,
+        )
+
+    rows = await db.scalars(
+        select(QuizAttempt)
+        .where(
+            QuizAttempt.quiz_id == quiz.id,
+            QuizAttempt.student_id == user.id,
+            QuizAttempt.status.in_([AttemptStatus.submitted, AttemptStatus.graded]),
+        )
+        .order_by(QuizAttempt.started_at)
+    )
+    attempts = list(rows.all())
+
+    progress = await db.scalar(
+        select(LessonProgress).where(
+            LessonProgress.enrollment_id == enrollment.id,
+            LessonProgress.lesson_id == lesson_id,
+        )
+    )
+
+    best_score = float(progress.quiz_score) if progress and progress.quiz_score is not None else None
+    manual = float(progress.manual_override_score) if progress and progress.manual_override_score is not None else None
+    final_score = manual if manual is not None else best_score
+    is_passed = bool(progress.is_completed) if progress else False
+
+    summaries = [
+        QuizAttemptSummary(
+            id=a.id,
+            attempt_number=a.attempt_number,
+            score=float(a.score) if a.score is not None else None,
+            passed=a.passed,
+            attempted_at=a.submitted_at or a.started_at,
+            status=a.status,
+        )
+        for a in attempts
+    ]
+
+    return MyQuizAttemptsResponse(
+        attempts=summaries,
+        best_score=best_score,
+        final_score=final_score,
+        is_manual=manual is not None,
+        is_passed=is_passed,
+    )
 
 
 @router.get("/{lesson_id}/quiz")
