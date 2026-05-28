@@ -42,10 +42,16 @@ async def list_courses(
     result = await db.scalars(
         select(Course)
         .where(Course.owner_id == user.id)
-        .options(selectinload(Course.owner))
+        .options(
+            selectinload(Course.owner),
+            selectinload(Course.modules).selectinload(Module.lessons),
+        )
         .order_by(Course.created_at.desc())
     )
-    return list(result.all())
+    courses = list(result.all())
+    for course in courses:
+        course.lessons_count = sum(len(m.lessons) for m in course.modules)
+    return courses
 
 
 @router.post("/", response_model=CourseOut, status_code=status.HTTP_201_CREATED)

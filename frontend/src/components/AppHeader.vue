@@ -31,17 +31,7 @@ const dashboardLink = computed(() =>
         </span>
       </NuxtLink>
 
-      <nav v-if="isAuthenticated" class="hidden md:flex items-center gap-1">
-        <NuxtLink
-          :to="dashboardLink"
-          class="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-700 hover:text-violet-700 hover:bg-violet-50 transition"
-          active-class="text-violet-700 bg-violet-50"
-        >
-          Мои курсы
-        </NuxtLink>
-      </nav>
-
-      <div v-if="isAuthenticated" class="hidden md:flex items-center gap-3">
+<div v-if="isAuthenticated" class="hidden md:flex items-center gap-3">
         <div class="flex items-center gap-2.5">
           <div class="w-8 h-8 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-xs font-semibold">
             {{ initials }}
