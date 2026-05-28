@@ -12,24 +12,35 @@ defineProps<{
 </script>
 
 <template>
-  <div class="bg-white rounded-lg border border-gray-200 p-4">
-    <h2 class="font-semibold text-lg mb-3">{{ lesson.title }}</h2>
-
-    <div v-if="lesson.content_type === 'video'">
-      <div v-if="lesson.video_url">
-        <video :src="lesson.video_url" controls class="w-full rounded" />
-      </div>
-      <div v-else class="text-sm text-gray-500">
-        Video status: {{ lesson.status }}
-      </div>
+  <div
+    v-if="lesson.content_type === 'video'"
+    class="bg-black rounded-2xl overflow-hidden aspect-video relative"
+  >
+    <video
+      v-if="lesson.video_url"
+      :src="lesson.video_url"
+      controls
+      class="w-full h-full object-contain"
+    />
+    <div
+      v-else
+      class="absolute inset-0 grid place-items-center text-sm text-gray-300"
+    >
+      Видео: {{ lesson.status }}
     </div>
+  </div>
 
-    <div v-else-if="lesson.content_type === 'text'" class="prose max-w-none">
-      <p>{{ lesson.text_content }}</p>
-    </div>
+  <div
+    v-else-if="lesson.content_type === 'text'"
+    class="bg-white border border-gray-100 rounded-2xl p-6 prose max-w-none"
+  >
+    <p>{{ lesson.text_content }}</p>
+  </div>
 
-    <div v-else-if="lesson.content_type === 'quiz'" class="text-sm text-gray-600">
-      Отметьте урок пройденным, чтобы открыть тест.
-    </div>
+  <div
+    v-else-if="lesson.content_type === 'quiz'"
+    class="bg-white border border-gray-100 rounded-2xl p-6 text-sm text-gray-600"
+  >
+    Отметьте урок пройденным, чтобы открыть тест.
   </div>
 </template>

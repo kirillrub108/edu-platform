@@ -9,6 +9,7 @@ from sqlalchemy.orm import joinedload
 
 from app.database import get_db
 from app.models.course import Course
+from app.models.enrollment import Enrollment
 from app.models.lesson import Lesson, Module
 from app.models.user import User, UserRole
 from app.redis_client import get_redis
@@ -107,6 +108,42 @@ async def require_student(user: User = Depends(get_current_user)) -> User:
             detail="Student role required",
         )
     return user
+
+
+async def require_lesson_access(
+    lesson_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> tuple[User, Lesson, bool]:
+    """Lesson-scoped access guard: teacher-owner OR enrolled student.
+
+    Returns `(user, lesson, is_owner)`. Raises 404 if the lesson does not exist
+    and 403 otherwise — matching the access semantics already used by
+    `routers/students.py` (which 404s missing lessons and 403s non-enrolled).
+    """
+    lesson = await db.scalar(
+        select(Lesson)
+        .where(Lesson.id == lesson_id)
+        .options(joinedload(Lesson.module).joinedload(Module.course))
+    )
+    if lesson is None:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+
+    course = lesson.module.course
+    if user.role == UserRole.teacher and course.owner_id == user.id:
+        return user, lesson, True
+
+    if user.role == UserRole.student:
+        enrolled = await db.scalar(
+            select(Enrollment.id).where(
+                Enrollment.student_id == user.id,
+                Enrollment.course_id == course.id,
+            )
+        )
+        if enrolled is not None:
+            return user, lesson, False
+
+    raise HTTPException(status_code=403, detail="No access to this lesson")
 
 
 async def get_owned_lesson(

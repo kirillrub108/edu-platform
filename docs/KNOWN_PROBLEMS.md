@@ -429,7 +429,13 @@
   - подсчёт `score = correct / total`;
   - `POST /quiz-result` с этим score.
 
-### 6.4 `silero/config.py` использует устаревший Pydantic v1 API
+### 6.4 Дублирование логики доступа к уроку
+
+- **Где:** [routers/students.py](../backend/app/routers/students.py) (`get_lesson_for_student`, `_get_progress`), [dependencies.py](../backend/app/dependencies.py) (`get_owned_lesson`, `require_lesson_access`).
+- **Что не так:** проверка enrollment/ownership продублирована в трёх местах. `require_lesson_access` объединяет обе ветки, но старые helper'ы не отрефакторены, чтобы не задеть существующее поведение.
+- **Фикс:** унифицировать в `services/lesson_access.py` отдельной задачей, заменить inline-проверки в `routers/students.py` на новый dep.
+
+### 6.5 `silero/config.py` использует устаревший Pydantic v1 API
 
 - **Где:** [silero/config.py](../silero/config.py).
 - **Что не так:** в файле `from pydantic import BaseSettings` и `class Config: env_file = ".env"`. Это Pydantic v1. Внутри проекта (backend) уже Pydantic v2.
