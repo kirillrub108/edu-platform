@@ -11,7 +11,7 @@ def _env_bool(name: str, default: str = "0") -> bool:
 
 
 celery_app = Celery(
-    "edu_platform",
+    "edllm",
     broker=settings.REDIS_URL,
     backend=settings.REDIS_URL,
     include=[

@@ -1,4 +1,4 @@
-# Edu Platform — AI для учебного контента
+# Edllm — AI для учебного контента
 
 SaaS-платформа: преподаватель загружает PPTX/PDF и текст доклада → система генерирует видеолекцию с озвучкой → курс публикуется студентам.
 
@@ -27,7 +27,7 @@ SaaS-платформа: преподаватель загружает PPTX/PDF 
 ## 3. Быстрый старт
 
 ```bash
-git clone <repo> && cd edu-platform
+git clone <repo> && cd edllm
 cp .env.example .env
 
 # 1. Поднять Ollama локально (https://ollama.com/download) и скачать модель
@@ -51,8 +51,8 @@ docker-compose exec backend alembic upgrade head
 
 | Переменная                     | Описание                                  | Пример                                                   |
 |-------------------------------|-------------------------------------------|----------------------------------------------------------|
-| `POSTGRES_USER/PASSWORD/DB`   | креды БД                                  | `edu_user / edu_password / edu_platform`                |
-| `DATABASE_URL`                | async-строка подключения                  | `postgresql+asyncpg://edu_user:...@postgres:5432/edu_platform` |
+| `POSTGRES_USER/PASSWORD/DB`   | креды БД                                  | `edu_user / edu_password / edllm`                |
+| `DATABASE_URL`                | async-строка подключения                  | `postgresql+asyncpg://edu_user:...@postgres:5432/edllm` |
 | `REDIS_URL`                   | брокер Celery                             | `redis://redis:6379/0`                                  |
 | `SECRET_KEY`                  | ключ подписи JWT                          | `change-me-in-prod`                                     |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | срок жизни access-токена                  | `30`                                                    |
@@ -105,7 +105,7 @@ PPTX (загрузка) ──► LibreOffice (PDF) ──► pdftoppm (PNG)
 cd backend
 python -m venv .venv && source .venv/bin/activate  # или .venv\Scripts\activate
 pip install -r requirements.txt
-export DATABASE_URL=postgresql+asyncpg://edu_user:edu_password@localhost:5432/edu_platform
+export DATABASE_URL=postgresql+asyncpg://edu_user:edu_password@localhost:5432/edllm
 uvicorn app.main:app --reload
 ```
 

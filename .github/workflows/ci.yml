@@ -111,8 +111,8 @@ jobs:
       # produced by `yc container registry get-id` after provisioning the
       # YCR registry. Until then this job will fail at the docker push.
       YC_REGISTRY: cr.yandex/REPLACE_WITH_REGISTRY_ID
-      IMAGE_BACKEND: edu-platform-backend
-      IMAGE_CELERY: edu-platform-celery
+      IMAGE_BACKEND: edllm-backend
+      IMAGE_CELERY: edllm-celery
 
     steps:
       - uses: actions/checkout@v4
@@ -188,7 +188,7 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=accept-new "${YC_VM_USER}@${YC_VM_HOST}" <<'EOF'
             set -euo pipefail
-            cd /opt/edu-platform
+            cd /opt/edllm
             docker-compose pull
             docker-compose up -d
           EOF

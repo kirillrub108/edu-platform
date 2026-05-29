@@ -4,9 +4,9 @@ import { Upload, Sparkles, Video, ArrowRight, Play, Zap, Brain, Monitor } from '
 definePageMeta({ layout: 'bare', middleware: ['guest'] })
 
 useSeoMeta({
-  title: 'EduAI — Создавайте видеокурсы с ИИ за минуты',
+  title: 'Edllm — Создавайте видеокурсы с ИИ за минуты',
   description: 'Загрузите PPTX, получите готовый видеокурс с автоматическим скриптом и озвучкой. Без съёмок, без монтажа — за пару минут.',
-  ogTitle: 'EduAI — Видеокурсы с ИИ',
+  ogTitle: 'Edllm — Видеокурсы с ИИ',
   ogDescription: 'Загрузите PPTX, получите готовый видеокурс с автоматическим скриптом и озвучкой. Без съёмок, без монтажа.',
   twitterCard: 'summary',
 })

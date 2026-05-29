@@ -1,4 +1,4 @@
-# Edu Platform — Onboarding Guide для нового разработчика
+# Edllm — Onboarding Guide для нового разработчика
 
 > Документ, который проведёт тебя от полного нуля до уверенного понимания всей системы. Читать сверху вниз. Если хочется — параллельно открывай файлы, на которые ссылается гайд.
 
@@ -23,7 +23,7 @@
 
 ## 1.1 Что это за проект
 
-**Edu Platform** — это SaaS для **автоматического создания видеолекций с помощью AI**.
+**Edllm** — это SaaS для **автоматического создания видеолекций с помощью AI**.
 
 Целевая аудитория — **преподаватели и онлайн-школы**, которым нужно превратить готовые слайды в полноценные видеоуроки без записи камеры, монтажа, актёров озвучки и видеоредакторов.
 
@@ -132,7 +132,7 @@
 ## 2.1 Корень репозитория
 
 ```
-edu-platform/
+edllm/
 ├── backend/              # FastAPI + Celery
 ├── frontend/             # Nuxt 3 SPA
 ├── silero/               # конфиг для контейнера silero-tts (внешний образ)
@@ -869,8 +869,8 @@ Dockerfile делает много нетривиальных вещей:
 
 | Переменная | Дефолт | Зачем |
 |---|---|---|
-| `POSTGRES_USER/PASSWORD/DB` | edu_user/edu_password/edu_platform | креды БД |
-| `DATABASE_URL` | `postgresql+asyncpg://edu_user:...@postgres:5432/edu_platform` | async строка для FastAPI; в Celery конвертится в psycopg2 |
+| `POSTGRES_USER/PASSWORD/DB` | edu_user/edu_password/edllm | креды БД |
+| `DATABASE_URL` | `postgresql+asyncpg://edu_user:...@postgres:5432/edllm` | async строка для FastAPI; в Celery конвертится в psycopg2 |
 | `REDIS_PASSWORD` | change-me | пароль Redis |
 | `REDIS_URL` | `redis://:change-me@redis:6379/0` | broker+backend Celery |
 | `SECRET_KEY` | change-me | подпись JWT |
@@ -908,7 +908,7 @@ Dockerfile делает много нетривиальных вещей:
 
 ```bash
 # 1. Клонировать
-git clone <repo> && cd edu-platform
+git clone <repo> && cd edllm
 
 # 2. Скопировать и заполнить .env
 cp .env.example .env

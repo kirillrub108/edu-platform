@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-SaaS that turns a PPTX + lecture script into a narrated video lesson, then exposes it to students. Two halves of the codebase:
+**Edllm** — SaaS that turns a PPTX + lecture script into a narrated video lesson, then exposes it to students. (The repo folder is still `edu-platform/` and the DB credentials remain `edu_user`/`edu_password`; only the product name and DB name `edllm` were rebranded.) Two halves of the codebase:
 
 - `backend/` — FastAPI + Celery (Python 3.13). Routers are thin, services are fat (LLM, TTS, video, storage, vision, auth). Long jobs (PPTX→MP4 pipeline, vision analysis) run in Celery.
 - `frontend/` — Nuxt 3 in mostly-SPA mode (`/` is prerendered SSG, `/**` is `ssr: false`). Auto-imports, file-based routing.

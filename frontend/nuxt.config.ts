@@ -28,7 +28,7 @@ export default defineNuxtConfig({
   },
   app: {
     head: {
-      title: 'EduAI',
+      title: 'Edllm',
       meta: [{ charset: 'utf-8' }, { name: 'viewport', content: 'width=device-width, initial-scale=1' }],
       link: [
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },

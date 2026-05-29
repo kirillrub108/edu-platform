@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     # PostgreSQL
     POSTGRES_USER: str = "edu_user"
     POSTGRES_PASSWORD: str = "edu_password"
-    POSTGRES_DB: str = "edu_platform"
+    POSTGRES_DB: str = "edllm"
     DATABASE_URL: str
 
     # Redis

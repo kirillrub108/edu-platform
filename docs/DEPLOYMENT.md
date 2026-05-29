@@ -24,7 +24,7 @@ GPU не обязателен (Ollama работает на CPU), но с GPU vi
 
 ```bash
 git clone <repo-url>
-cd edu-platform
+cd edllm
 ```
 
 ### Шаг 2. Создать `.env` из шаблона
@@ -155,13 +155,13 @@ docker-compose exec backend alembic history
 
 ```bash
 # psql shell внутри postgres-контейнера
-docker-compose exec postgres psql -U edu_user -d edu_platform
+docker-compose exec postgres psql -U edu_user -d edllm
 
 # Дамп
-docker-compose exec postgres pg_dump -U edu_user edu_platform > dump.sql
+docker-compose exec postgres pg_dump -U edu_user edllm > dump.sql
 
 # Восстановление
-cat dump.sql | docker-compose exec -T postgres psql -U edu_user -d edu_platform
+cat dump.sql | docker-compose exec -T postgres psql -U edu_user -d edllm
 ```
 
 ### Работа с Celery
@@ -226,7 +226,7 @@ sudo apt install libreoffice ffmpeg poppler-utils
 brew install libreoffice ffmpeg poppler
 
 # 4. Поправить URLs в env (хост вместо контейнерных DNS)
-export DATABASE_URL="postgresql+asyncpg://edu_user:edu_password@localhost:5432/edu_platform"
+export DATABASE_URL="postgresql+asyncpg://edu_user:edu_password@localhost:5432/edllm"
 export REDIS_URL="redis://:change-me@localhost:6379/0"
 export SILERO_TTS_URL="http://localhost:9898"
 export LLM_BASE_URL="http://localhost:11434/v1"
@@ -251,8 +251,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 |---|---|---|
 | `POSTGRES_USER` | edu_user | для compose: создаёт пользователя БД |
 | `POSTGRES_PASSWORD` | edu_password | пароль |
-| `POSTGRES_DB` | edu_platform | имя БД |
-| `DATABASE_URL` | `postgresql+asyncpg://edu_user:edu_password@postgres:5432/edu_platform` | async строка для FastAPI; в Celery конвертится в `+psycopg2` |
+| `POSTGRES_DB` | edllm | имя БД |
+| `DATABASE_URL` | `postgresql+asyncpg://edu_user:edu_password@postgres:5432/edllm` | async строка для FastAPI; в Celery конвертится в `+psycopg2` |
 
 ### Redis
 

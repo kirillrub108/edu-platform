@@ -1,5 +1,5 @@
 {
-  "name": "edu-platform-frontend",
+  "name": "edllm-frontend",
   "private": true,
   "type": "module",
   "scripts": {

@@ -27,7 +27,7 @@ const dashboardLink = computed(() =>
           <GraduationCap class="w-5 h-5 text-white" />
         </div>
         <span class="font-semibold text-lg bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent">
-          EduAI
+          Edllm
         </span>
       </NuxtLink>
 

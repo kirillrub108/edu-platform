@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Edu Platform API",
+    title="Edllm API",
     description="AI-platform for creating and delivering educational content",
     version="0.1.0",
     lifespan=lifespan,
@@ -192,7 +192,7 @@ app.include_router(comments.router)
 
 @app.get("/", tags=["meta"])
 async def root():
-    return {"name": "Edu Platform API", "version": "0.1.0", "docs": "/docs"}
+    return {"name": "Edllm API", "version": "0.1.0", "docs": "/docs"}
 
 
 @app.get("/health", tags=["meta"])
