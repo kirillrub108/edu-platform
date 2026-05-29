@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { GraduationCap, AlertCircle } from 'lucide-vue-next'
+
 const route = useRoute()
 const auth = useAuthStore()
 const email = ref('')
@@ -26,53 +28,55 @@ onMounted(restoreScroll)
 </script>
 
 <template>
-  <div class="max-w-sm mx-auto">
-    <div class="bg-white p-8 rounded-xl border border-gray-200 shadow-sm">
-      <h1 class="text-xl font-semibold mb-6 text-center">Вход</h1>
+  <div class="px-6 py-12 sm:py-16 flex justify-center">
+    <div class="w-full max-w-sm">
+      <div class="mb-6 text-center">
+        <div class="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-600 to-purple-500 shadow-sm">
+          <GraduationCap class="h-6 w-6 text-white" />
+        </div>
+        <h1 class="text-xl font-semibold text-gray-900">С возвращением</h1>
+        <p class="mt-1 text-sm text-gray-500">Войдите, чтобы продолжить в Edllm</p>
+      </div>
 
-      <form class="space-y-3" @submit.prevent="submit">
-        <input
-          v-model="email"
-          type="email"
-          placeholder="Email"
-          required
-          autocomplete="email"
-          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
-        />
-        <input
-          v-model="password"
-          type="password"
-          placeholder="Пароль"
-          required
-          autocomplete="current-password"
-          class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
-        />
-
-        <label class="flex items-center gap-2 text-sm text-gray-600 select-none cursor-pointer ml-1">
-          <input
-            v-model="rememberMe"
-            type="checkbox"
-            class="h-4 w-4 rounded accent-brand cursor-pointer"
+      <div class="rounded-2xl border border-gray-100 bg-white p-8 shadow-soft">
+        <form class="space-y-4" @submit.prevent="submit">
+          <UiInput
+            v-model="email"
+            label="Email"
+            type="email"
+            placeholder="you@example.com"
+            autocomplete="email"
           />
-          Запомнить меня
-        </label>
+          <UiInput
+            v-model="password"
+            label="Пароль"
+            type="password"
+            placeholder="••••••••"
+            autocomplete="current-password"
+          />
 
-        <p v-if="error" class="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-          {{ error }}
-        </p>
+          <label class="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-600">
+            <input v-model="rememberMe" type="checkbox" class="h-4 w-4 rounded accent-violet-600 cursor-pointer" />
+            Запомнить меня
+          </label>
 
-        <button
-          type="submit"
-          :disabled="loading"
-          class="w-full bg-brand text-white rounded-lg py-2 font-medium disabled:opacity-50 transition"
-        >
-          {{ loading ? 'Вход…' : 'Войти' }}
-        </button>
-      </form>
+          <p
+            v-if="error"
+            class="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
+          >
+            <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{{ error }}</span>
+          </p>
 
-      <p class="text-center text-sm text-gray-500 mt-4">
+          <UiButton type="submit" variant="primary" size="lg" block :loading="loading">
+            {{ loading ? 'Вход…' : 'Войти' }}
+          </UiButton>
+        </form>
+      </div>
+
+      <p class="mt-5 text-center text-sm text-gray-500">
         Нет аккаунта?
-        <NuxtLink to="/register" class="text-brand hover:underline">Зарегистрироваться</NuxtLink>
+        <NuxtLink to="/register" class="font-medium text-violet-700 hover:underline">Зарегистрироваться</NuxtLink>
       </p>
     </div>
   </div>

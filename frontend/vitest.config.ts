@@ -5,13 +5,18 @@ import type { Plugin } from 'vite'
 // Nuxt provides `import.meta.client` via build-time replacement. Vite's
 // `define` option does NOT cover `import.meta.*` properties (only literal
 // identifiers), so we replace it at transform time for any module under
-// src/composables. useApi.ts gates browser-only paths behind this flag and
-// we need those paths exercised in tests.
+// src/composables or src/middleware. useApi.ts and the route middleware gate
+// browser-only paths behind this flag and we need those paths exercised in tests.
 const importMetaClientPlugin: Plugin = {
   name: 'replace-import-meta-client',
   enforce: 'pre',
   transform(code, id) {
-    if (!id.includes('src/composables/') && !id.includes('src\\composables\\')) return null
+    const inScope =
+      id.includes('src/composables/') ||
+      id.includes('src\\composables\\') ||
+      id.includes('src/middleware/') ||
+      id.includes('src\\middleware\\')
+    if (!inScope) return null
     if (!code.includes('import.meta.client')) return null
     return code.replace(/import\.meta\.client/g, 'true')
   },

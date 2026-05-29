@@ -9,6 +9,11 @@ const isAuthEndpoint = (path: string): boolean =>
   path.startsWith('/auth/login') ||
   path.startsWith('/auth/register')
 
+// /auth/me is a session probe: a 401 just means "anonymous", not "session died".
+// Public pages (landing/login/register) probe it via AppHeader, so it must never
+// trigger the auto-logout redirect — only genuine in-session calls should.
+const isSessionProbe = (path: string): boolean => path.startsWith('/auth/me')
+
 const getCsrfToken = (): string | null => {
   if (!import.meta.client) return null
   // csrf_token is non-httpOnly so JS can read it for the double-submit pattern.
@@ -87,7 +92,7 @@ export const useApi = () => {
         }
       }
 
-      if (is401 && import.meta.client && !isAuthEndpoint(path)) {
+      if (is401 && import.meta.client && !isAuthEndpoint(path) && !isSessionProbe(path)) {
         store.clearSession()
         await navigateTo('/login')
       }
