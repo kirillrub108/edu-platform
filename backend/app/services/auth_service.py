@@ -14,8 +14,10 @@ is stored at `refresh:{user_id}:{family_id}`. Every refresh:
   * mints a new pair, overwriting the family record with the new jti and
     resetting the sliding TTL.
 
-Logout blacklists the access jti until its natural exp and (if the client
-sends it back) deletes the refresh family. Logout-all wipes every
+Logout blacklists the access jti until its natural exp and deletes the
+refresh family identified by the `family_id` claim carried in the access
+token (the refresh cookie is path-scoped and never reaches /auth/logout).
+Logout-all wipes every
 `refresh:{user_id}:*` key — already-issued access tokens stay valid until
 they expire on their own (≤ ACCESS_TOKEN_EXPIRE_MINUTES) which is the
 trade-off we accept to keep the access path stateless.
@@ -66,8 +68,10 @@ def _encode(payload: dict[str, Any]) -> str:
     return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_access_token(user: User) -> tuple[str, str, datetime]:
-    """Returns (token, jti, expires_at)."""
+def create_access_token(user: User, family_id: str | None = None) -> tuple[str, str, datetime]:
+    """Returns (token, jti, expires_at). `family_id` ties the access token to
+    its refresh family so logout can revoke that family from the access cookie
+    alone (the refresh cookie is path-scoped and never reaches /auth/logout)."""
     now = datetime.now(timezone.utc)
     exp = now + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     jti = str(uuid.uuid4())
@@ -80,6 +84,8 @@ def create_access_token(user: User) -> tuple[str, str, datetime]:
         "exp": int(exp.timestamp()),
         "type": "access",
     }
+    if family_id is not None:
+        payload["family_id"] = family_id
     return _encode(payload), jti, exp
 
 
@@ -243,7 +249,7 @@ class AuthService:
         absolute_expires_at: datetime,
         sliding_days: int,
     ) -> TokenResponse:
-        access_token, _access_jti, _access_exp = create_access_token(user)
+        access_token, _access_jti, _access_exp = create_access_token(user, family_id)
         refresh_token, refresh_jti, refresh_exp = create_refresh_token(
             str(user.id),
             family_id,
@@ -270,22 +276,17 @@ class AuthService:
         self,
         access_jti: str,
         access_exp: datetime,
-        refresh_token: str | None,
+        user_id: str | None = None,
+        family_id: str | None = None,
     ) -> None:
         ttl = max(int((access_exp - datetime.now(timezone.utc)).total_seconds()), 1)
         await self.redis.set(self._blacklist_key(access_jti), "1", ex=ttl)
 
-        if not refresh_token:
-            return
-        # The client may pass a slightly-stale or even malformed refresh —
-        # we still want logout to succeed for the access side, so swallow
-        # decode errors here.
-        try:
-            payload = decode_token(refresh_token, verify_exp=False)
-        except HTTPException:
-            return
-        user_id = payload.get("sub")
-        family_id = payload.get("family_id")
+        # Revoke this session's refresh family so the refresh token can't be
+        # replayed even if it was exfiltrated. family_id rides in the access
+        # token (available here); the refresh cookie is path-scoped and never
+        # reaches /auth/logout. Tokens minted before this claim existed simply
+        # skip family revocation — the cookie clear still ends the session.
         if user_id and family_id:
             await self.redis.delete(self._family_key(user_id, family_id))
 

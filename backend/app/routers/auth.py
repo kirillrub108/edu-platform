@@ -91,34 +91,43 @@ async def refresh(
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     request: Request,
-    response: Response,
     service: AuthService = Depends(get_auth_service),
 ) -> Response:
-    _clear_auth_cookies(response)
-    # Best-effort: blacklist the access token and delete the refresh family
-    # from Redis. Must not fail — clearing cookies is the primary action.
+    # Best-effort: blacklist the access token and revoke its refresh family in
+    # Redis. Must not fail — clearing cookies is the primary action.
     access_cookie = request.cookies.get("access_token")
-    refresh_cookie = request.cookies.get("refresh_token")
     if access_cookie:
         try:
             payload = decode_token(access_cookie, verify_exp=False)
             if payload.get("type") == "access" and payload.get("jti"):
                 exp = datetime.fromtimestamp(int(payload["exp"]), tz=timezone.utc)
-                await service.logout(payload["jti"], exp, refresh_cookie)
+                await service.logout(
+                    payload["jti"],
+                    exp,
+                    user_id=payload.get("sub"),
+                    family_id=payload.get("family_id"),
+                )
         except Exception:
             pass
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    # Clear cookies on the response we actually return: FastAPI sends the
+    # returned Response, so headers set on an injected `response` param would be
+    # discarded. delete_cookie must therefore target this object.
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_auth_cookies(response)
+    return response
 
 
 @router.post("/logout-all", status_code=status.HTTP_204_NO_CONTENT)
 async def logout_all(
-    response: Response,
     user: User = Depends(get_current_user),
     service: AuthService = Depends(get_auth_service),
 ) -> Response:
-    _clear_auth_cookies(response)
     await service.logout_all_sessions(str(user.id))
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
+    # Same gotcha as /logout: clear cookies on the returned Response, not an
+    # injected `response` param (which FastAPI would discard here).
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_auth_cookies(response)
+    return response
 
 
 @router.get("/me", response_model=UserOut)

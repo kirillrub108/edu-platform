@@ -128,6 +128,60 @@ async def test_me_returns_current_user(
     assert body["email"] == teacher_user.email
 
 
+async def test_logout_clears_auth_cookies(client: AsyncClient) -> None:
+    email = _email()
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "password123", "role": "teacher"},
+    )
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": "password123"},
+    )
+    # Session is live before logout.
+    assert (await client.get("/api/v1/auth/me")).status_code == 200
+
+    resp = await client.post("/api/v1/auth/logout")
+    assert resp.status_code == 204
+
+    # The logout response MUST explicitly expire all three cookies. Otherwise the
+    # browser keeps the httpOnly access/refresh tokens and the session silently
+    # survives (a 401 on /auth/me would just be refreshed back into a session).
+    set_cookie = "\n".join(resp.headers.get_list("set-cookie")).lower()
+    for name in ("access_token", "refresh_token", "csrf_token"):
+        assert name in set_cookie, f"logout did not clear {name}"
+    assert "max-age=0" in set_cookie
+
+    # Cookie jar cleared client-side → subsequent probe is anonymous.
+    assert (await client.get("/api/v1/auth/me")).status_code in (401, 403)
+
+
+async def test_logout_revokes_refresh_family(client: AsyncClient) -> None:
+    email = _email()
+    await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "password123", "role": "teacher"},
+    )
+    await client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": "password123"},
+    )
+    # Capture the refresh token as an attacker who exfiltrated it would.
+    stolen_refresh = client.cookies.get("refresh_token")
+    assert stolen_refresh
+
+    assert (await client.post("/api/v1/auth/logout")).status_code == 204
+
+    # Replaying the stolen refresh token must fail: logout revoked the family
+    # server-side, so it is dead even though the cookie clear alone wouldn't
+    # stop an exfiltrated copy.
+    resp = await client.post(
+        "/api/v1/auth/refresh",
+        cookies={"refresh_token": stolen_refresh},
+    )
+    assert resp.status_code == 401
+
+
 async def test_me_without_token_rejects_unauthorized(client: AsyncClient) -> None:
     # No token → endpoint rejects with an auth-error status. We accept both
     # 401 (Unauthorized) and 403 (Forbidden) so the test does not pin the

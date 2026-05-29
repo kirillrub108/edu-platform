@@ -10,7 +10,7 @@ const features = [
 </script>
 
 <template>
-  <section class="px-6 py-20 max-w-6xl mx-auto">
+  <section id="features" class="px-6 py-20 max-w-6xl mx-auto scroll-mt-20">
     <div class="text-center max-w-2xl mx-auto">
       <h2 class="text-2xl md:text-3xl font-semibold tracking-tight">Почему это работает быстрее</h2>
       <p class="mt-3 text-gray-600">Рутину создания видеолекции берут на себя ИИ-модели и синтез речи Yandex.</p>

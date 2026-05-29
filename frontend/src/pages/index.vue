@@ -30,6 +30,7 @@ onMounted(restoreScroll)
     </div>
 
     <LandingHero />
+    <LandingScene />
     <LandingSteps />
     <LandingFeatures />
     <LandingMetrics />
