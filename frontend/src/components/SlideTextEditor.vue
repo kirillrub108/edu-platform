@@ -2,6 +2,7 @@
 import { ChevronLeft, ChevronRight, Sparkles, Save, FileText, RotateCcw } from 'lucide-vue-next'
 import ProgressBar from './ProgressBar.vue'
 import UiButton from './UiButton.vue'
+import { friendlyTaskError } from '~/composables/useBillingMeta'
 
 interface SlideText {
   id: string
@@ -20,8 +21,10 @@ const props = defineProps<Props>()
 const emit = defineEmits<{ (e: 'ready'): void; (e: 'back'): void }>()
 
 const { apiFetch } = useApi()
+const billing = useBillingStore()
 
 const slides = ref<SlideText[]>([])
+const regenError = ref('')
 const loading = ref(true)
 const loadError = ref('')
 const currentIdx = ref(0)
@@ -126,6 +129,7 @@ const regenerate = async () => {
   const controller = new AbortController()
   regenController.value = controller
   regenIds.value.add(slide.id)
+  regenError.value = ''
   try {
     const updated = await apiFetch<SlideText>(
       `/lessons/${props.lessonId}/slides/${slide.id}/regenerate`,
@@ -137,9 +141,13 @@ const regenerate = async () => {
       buffer.value = updated.edited_text ?? updated.generated_text ?? ''
       canRevert.value = true
     }
+    void billing.refresh()
   } catch (err: any) {
     if (err?.name === 'AbortError' || err?.cause?.name === 'AbortError') return
-    throw err
+    // 402 = недостаточно кредитов; surface a friendly message instead of crashing.
+    regenError.value =
+      friendlyTaskError(err?.data?.detail) ?? err?.data?.detail ?? 'Не удалось регенерировать слайд'
+    if (err?.response?.status === 402) void billing.fetchBalance()
   } finally {
     regenIds.value.delete(slide.id)
     if (regenController.value === controller) regenController.value = null
@@ -360,6 +368,18 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
               :total="slides.length"
               label="Прогресс редактирования"
             />
+          </div>
+          <div
+            v-if="regenError"
+            class="mx-5 mt-3 flex items-center justify-between gap-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"
+          >
+            <span>{{ regenError }}</span>
+            <NuxtLink
+              to="/billing"
+              class="shrink-0 text-xs font-medium text-violet-700 hover:text-violet-800 whitespace-nowrap"
+            >
+              Пополнить →
+            </NuxtLink>
           </div>
           <div class="px-5 py-3 flex flex-wrap gap-2 justify-between items-center">
             <div class="flex gap-2 items-center">

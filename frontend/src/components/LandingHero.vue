@@ -30,7 +30,7 @@ import { ArrowRight, Play } from 'lucide-vue-next'
     <div class="mt-9 flex flex-col sm:flex-row gap-3 justify-center">
       <NuxtLink to="/register">
         <UiButton variant="primary" size="lg">
-          Начать бесплатно
+          Создать аккаунт
           <template #icon><ArrowRight class="w-4 h-4 order-last" /></template>
         </UiButton>
       </NuxtLink>

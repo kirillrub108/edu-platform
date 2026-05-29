@@ -63,7 +63,7 @@ const dashboardLink = computed(() =>
           to="/register"
           class="px-5 py-2.5 rounded-xl text-sm font-medium bg-violet-700 hover:bg-violet-600 text-white shadow-sm transition"
         >
-          Начать бесплатно
+          Создать аккаунт
         </NuxtLink>
       </div>
 

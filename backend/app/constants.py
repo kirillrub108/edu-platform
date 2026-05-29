@@ -24,6 +24,31 @@ QUIZ_MAX_MATERIAL_CHARS: int = 12000
 # Parallel LLM-IO grading of open answers — bounded by upstream LLM throughput.
 QUIZ_GRADING_WORKERS: int = 4
 
+# Billing / credits
+# Per-operation credit cost. Keys are matched by callers via CREDIT_WEIGHTS["..."].
+CREDIT_WEIGHTS: dict[str, int] = {
+    "lesson_generate": 10,  # PPTX→видео полный цикл (vision+LLM+TTS+FFmpeg)
+    "lesson_regen": 8,      # повторная генерация (кеш слайдов есть, но LLM+TTS+FFmpeg)
+    "vision_analyze": 5,    # vision-анализ PPTX → SlideText (без видео)
+    "slide_regen": 1,       # регенерация одного слайда через vision LLM
+    "quiz_grade": 0,        # AI-проверка квиза — бесплатно (маркетинговый аргумент)
+}
+
+# Tariff plans. Keys match CreditPlan enum values.
+PLAN_CONFIGS: dict[str, dict[str, int]] = {
+    "free":    {"monthly_allowance": 0,   "onetime_credits": 50, "price_rub": 0},
+    "starter": {"monthly_allowance": 30,  "onetime_credits": 0,  "price_rub": 490},
+    "pro":     {"monthly_allowance": 120, "onetime_credits": 0,  "price_rub": 1490},
+    "school":  {"monthly_allowance": 500, "onetime_credits": 0,  "price_rub": 4990},
+}
+
+TOPUP_PACKS: list[dict[str, int]] = [
+    {"credits": 50,  "price_rub": 750},
+    {"credits": 200, "price_rub": 2600},
+]
+
+CREDIT_CARRYOVER_RATIO: float = 0.5  # до 50% месячного объёма переносится на след. месяц
+
 # Default question-type distribution for quiz generation.
 # Keys match the type strings used in generate_quiz_v2 / _parse_payload_v2.
 # Fractions must sum to 1.0; short_answer absorbs rounding remainders.

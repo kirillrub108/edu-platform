@@ -8,8 +8,15 @@ from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.models.lesson import Lesson, LessonStatus
+from app.constants import CREDIT_WEIGHTS
+from app.models.course import Course
+from app.models.lesson import Lesson, LessonStatus, Module
 from app.models.slide_text import SlideText
+from app.services.billing_service import (
+    sync_charge_credits,
+    sync_release_credits,
+    sync_reserve_credits,
+)
 from app.services.storage_service import storage_service
 from app.services.video_service import video_service
 from app.services.vision_analysis import vision_analysis_service
@@ -47,6 +54,10 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
     work_dir = os.path.join(settings.STORAGE_PATH, "video_jobs", lesson_id)
     slides_cache_dir = os.path.join(settings.STORAGE_PATH, "slides_cache")
     os.makedirs(work_dir, exist_ok=True)
+    _success = False
+    _reserved = False
+    _owner_id: UUID | None = None
+    _credit_amount = CREDIT_WEIGHTS["vision_analyze"]
 
     def _progress(step: str, done: int, total: int) -> None:
         self.update_state(
@@ -63,6 +74,20 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             if not lesson:
                 raise RuntimeError(f"Lesson {lesson_id} not found")
             course_title = lesson.title or ""
+
+            # Reserve credits before any expensive vision work.
+            module = session.get(Module, lesson.module_id)
+            course = session.get(Course, module.course_id) if module else None
+            if course is None:
+                raise RuntimeError(f"Lesson {lesson_id} has no owning course")
+            _owner_id = course.owner_id
+
+            if not sync_reserve_credits(
+                session, _owner_id, _credit_amount, lesson_id, "VISION_ANALYZE"
+            ):
+                _set_status(session, lesson_uuid, LessonStatus.error)
+                return {"status": "error", "error": "insufficient_credits"}
+            _reserved = True
 
             pptx_full = storage_service.get_full_path(pptx_relative_path)
 
@@ -126,6 +151,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
 
             _set_status(session, lesson_uuid, LessonStatus.ready_for_edit)
             _progress("vision", total, total)
+            _success = True
             return {"status": "ok", "total_slides": total, "empty_slides": empty_count}
 
         except Exception as exc:
@@ -134,5 +160,16 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             return {"status": "error", "error": str(exc)}
 
         finally:
+            if _reserved and _owner_id is not None:
+                try:
+                    if _success:
+                        sync_charge_credits(
+                            session, _owner_id, _credit_amount, lesson_id, "VISION_ANALYZE"
+                        )
+                    else:
+                        sync_release_credits(session, _owner_id, _credit_amount, lesson_id)
+                except Exception:
+                    logger.exception("Credit finalize failed for lesson %s", lesson_id)
+
             if os.path.exists(work_dir):
                 shutil.rmtree(work_dir, ignore_errors=True)

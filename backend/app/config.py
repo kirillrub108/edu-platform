@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     SILERO_TTS_URL: str = "http://silero-tts:9898"
     SILERO_TTS_VOICE: str = "xenia"
 
+    # Billing admin — shared secret for /api/v1/billing/admin/* endpoints,
+    # checked against the X-Admin-Token header. Empty disables admin access.
+    ADMIN_API_TOKEN: str = ""
+
     # Storage
     STORAGE_PATH: str = "/app/storage"
     BASE_URL: str = "http://localhost:8000"

@@ -7,11 +7,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
+from app.constants import CREDIT_WEIGHTS
 from app.database import get_db
 from app.dependencies import get_owned_lesson, require_teacher
+from app.models.credit import CreditOperation
 from app.models.lesson import CreationMode, Lesson, LessonStatus
 from app.models.slide_text import SlideText
 from app.models.user import User
+from app.services import billing_service
 from app.schemas.slide import (
     AnalyzeStatusResponse,
     SlideListResponse,
@@ -85,6 +88,12 @@ async def cancel_analysis(
     lesson.status = LessonStatus.draft
     lesson.analyze_task_id = None
     await db.commit()
+
+    # A terminated task's `finally` block may not run, so its reserved credit
+    # hold would leak. Release it idempotently (no-op if the task already
+    # finalized before the revoke landed).
+    owner_id = lesson.module.course.owner_id
+    await billing_service.release_reservation_if_held(db, owner_id, str(lesson_id))
     return {"ok": True}
 
 
@@ -197,6 +206,13 @@ async def regenerate_slide_text(
     total_q = await db.execute(select(SlideText).where(SlideText.lesson_id == lesson_id))
     total = len(list(total_q.scalars()))
 
+    amount = CREDIT_WEIGHTS["slide_regen"]
+    ok = await billing_service.reserve_credits(
+        db, user.id, amount, str(slide_id), CreditOperation.SLIDE_REGEN
+    )
+    if not ok:
+        raise HTTPException(status_code=402, detail="Недостаточно кредитов")
+
     image_full_path = storage_service.get_full_path(row.image_path)
     try:
         # Phase 1: vision model (VISION_MODEL) extracts narration from the slide image.
@@ -214,6 +230,7 @@ async def regenerate_slide_text(
             vision_text, model=settings.REGEN_LLM_MODEL
         )
     except Exception as exc:
+        await billing_service.release_credits(db, user.id, amount, str(slide_id))
         logger.exception("regenerate failed for slide %s", slide_id)
         raise HTTPException(status_code=500, detail=f"Ошибка LLM: {exc}")
 
@@ -221,4 +238,7 @@ async def regenerate_slide_text(
     row.edited_text = None
     await db.commit()
     await db.refresh(row)
+    await billing_service.charge_credits(
+        db, user.id, amount, str(slide_id), CreditOperation.SLIDE_REGEN
+    )
     return _row_to_out(row, str(user.id))

@@ -11,11 +11,16 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.constants import ENCODE_WORKERS, TTS_WORKERS
+from app.constants import CREDIT_WEIGHTS, ENCODE_WORKERS, TTS_WORKERS
 from app.models.course import Course
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
 from app.models.slide_text import SlideText
+from app.services.billing_service import (
+    sync_charge_credits,
+    sync_release_credits,
+    sync_reserve_credits,
+)
 from app.services.llm_service import llm_service
 from app.services.storage_service import storage_service
 from app.services.tts_service import tts_service
@@ -78,7 +83,11 @@ def _split_and_annotate(
 
 @celery_app.task(bind=True, name="generate_video_lesson", queue="video", acks_late=True, reject_on_worker_lost=True)
 def generate_video_lesson(
-    self, lesson_id: str, pptx_relative_path: str, voice: str | None = None
+    self,
+    lesson_id: str,
+    pptx_relative_path: str,
+    voice: str | None = None,
+    is_regen: bool = False,
 ) -> dict:
     lesson_uuid = UUID(lesson_id)
     effective_voice = voice or settings.SILERO_TTS_VOICE
@@ -86,6 +95,10 @@ def generate_video_lesson(
     slides_cache_dir = os.path.join(settings.STORAGE_PATH, "slides_cache")
     os.makedirs(work_dir, exist_ok=True)
     _success = False
+    _reserved = False
+    _owner_id: UUID | None = None
+    _credit_op = "LESSON_REGEN" if is_regen else "LESSON_GENERATE"
+    _credit_amount = CREDIT_WEIGHTS["lesson_regen" if is_regen else "lesson_generate"]
 
     def _progress(step: str, done: int, total: int) -> None:
         self.update_state(
@@ -103,6 +116,24 @@ def generate_video_lesson(
 
             _set_status(session, lesson_uuid, LessonStatus.processing)
             _progress("slides", 0, 1)
+
+            # ── 0. Reserve credits before any expensive work ─────────────────
+            owner_lesson = session.get(Lesson, lesson_uuid)
+            owner_module = session.get(Module, owner_lesson.module_id) if owner_lesson else None
+            owner_course = session.get(Course, owner_module.course_id) if owner_module else None
+            if owner_course is None:
+                raise RuntimeError(f"Lesson {lesson_id} has no owning course")
+            _owner_id = owner_course.owner_id
+
+            if not sync_reserve_credits(
+                session, _owner_id, _credit_amount, lesson_id, _credit_op
+            ):
+                shortfall = session.get(Lesson, lesson_uuid)
+                if shortfall:
+                    shortfall.last_warning = "Недостаточно кредитов для генерации видео"
+                _set_status(session, lesson_uuid, LessonStatus.error)
+                return {"status": "error", "error": "insufficient_credits"}
+            _reserved = True
 
             pptx_full = storage_service.get_full_path(pptx_relative_path)
 
@@ -296,6 +327,19 @@ def generate_video_lesson(
             return {"status": "error", "error": str(exc)}
 
         finally:
+            # Finalize billing before cleanup: charge on success, release the
+            # reserved hold on failure.
+            if _reserved and _owner_id is not None:
+                try:
+                    if _success:
+                        sync_charge_credits(
+                            session, _owner_id, _credit_amount, lesson_id, _credit_op
+                        )
+                    else:
+                        sync_release_credits(session, _owner_id, _credit_amount, lesson_id)
+                except Exception:
+                    logger.exception("Credit finalize failed for lesson %s", lesson_id)
+
             if work_dir and os.path.exists(work_dir):
                 if _success:
                     shutil.rmtree(work_dir, ignore_errors=True)

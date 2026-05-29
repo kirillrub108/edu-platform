@@ -1,12 +1,13 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import Cookie, Depends, HTTPException, Request, status
+from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
+from app.config import settings
 from app.database import get_db
 from app.models.course import Course
 from app.models.enrollment import Enrollment
@@ -99,6 +100,17 @@ async def require_teacher(user: User = Depends(get_current_user)) -> User:
             detail="Teacher role required",
         )
     return user
+
+
+async def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
+    """Gate for billing admin endpoints. There is no admin UserRole; access is
+    granted by a shared secret (`ADMIN_API_TOKEN`) sent in the X-Admin-Token
+    header. An empty configured token disables admin access entirely."""
+    if not settings.ADMIN_API_TOKEN or x_admin_token != settings.ADMIN_API_TOKEN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
 
 
 async def require_student(user: User = Depends(get_current_user)) -> User:

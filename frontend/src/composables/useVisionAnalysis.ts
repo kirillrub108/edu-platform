@@ -1,3 +1,5 @@
+import { friendlyTaskError } from '~/composables/useBillingMeta'
+
 interface SnapshotPanel {
   takeSnapshot(): void
   clearSnapshot(): void
@@ -11,6 +13,7 @@ export function useVisionAnalysis(
   showSlideEditor: Ref<boolean>,
 ) {
   const { apiFetch } = useApi()
+  const billing = useBillingStore()
 
   const analyzeTaskId = ref<string | null>(null)
   const analyzeStatus = ref('')
@@ -41,8 +44,10 @@ export function useVisionAnalysis(
         if (data.status === 'ready_for_edit') {
           showSlideEditor.value = true
         } else if (data.status === 'error') {
-          analyzeError.value = 'Ошибка анализа. Попробуйте запустить снова.'
+          analyzeError.value =
+            friendlyTaskError(data.last_warning) ?? 'Ошибка анализа. Попробуйте запустить снова.'
         }
+        void billing.refresh()
       }
     } catch { /* network glitch — keep polling */ }
   }
@@ -65,11 +70,13 @@ export function useVisionAnalysis(
         const data = await apiFetch<any>(`/lessons/${lessonId.value}`)
         lesson.value = data
         showSlideEditor.value = true
+        void billing.refresh()
       } else if (res.status === 'FAILURE' || res.error) {
         stopPolling()
         analyzing.value = false
-        analyzeError.value = res.error ?? 'Ошибка анализа'
+        analyzeError.value = friendlyTaskError(res.error) ?? 'Ошибка анализа'
         panelRef.value?.restoreFromSnapshot()
+        void billing.refresh()
       }
     } catch { /* network glitch — keep polling */ }
   }

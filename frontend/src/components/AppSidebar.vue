@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { LayoutDashboard, BarChart3, Sparkles, ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { LayoutDashboard, BarChart3, Wallet, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 
 const STORAGE_KEY = 'sidebar:collapsed'
 const isCollapsed = ref(
@@ -13,6 +13,7 @@ watch(isCollapsed, (val) => localStorage.setItem(STORAGE_KEY, String(val)))
 const items = [
   { to: '/dashboard',              label: 'Мои курсы',         icon: LayoutDashboard },
   { to: '/analytics/quiz-results', label: 'Результаты тестов', icon: BarChart3 },
+  { to: '/billing',                label: 'Баланс',            icon: Wallet },
 ]
 </script>
 
@@ -49,27 +50,14 @@ const items = [
       </NuxtLink>
     </nav>
 
-    <!-- CTA — expanded -->
-    <div
-      v-if="!isCollapsed"
-      class="m-4 p-4 rounded-2xl bg-gradient-to-br from-violet-600 to-purple-500 text-white"
-    >
-      <Sparkles class="w-5 h-5 mb-2" />
-      <div class="text-sm font-semibold">Pro-режим</div>
-      <div class="text-xs opacity-80 mt-1">HD-видео, GPT-4o vision и неограниченные курсы.</div>
-      <button class="mt-3 w-full bg-white/15 hover:bg-white/25 rounded-lg py-1.5 text-xs font-medium transition">
-        Подключить
-      </button>
+    <!-- Credit balance — expanded -->
+    <div v-if="!isCollapsed" class="m-4">
+      <CreditBalanceWidget />
     </div>
 
-    <!-- CTA — collapsed -->
+    <!-- Credit balance — collapsed -->
     <div v-else class="flex justify-center pb-4">
-      <button
-        title="Pro-режим"
-        class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-purple-500 flex items-center justify-center hover:opacity-90 transition"
-      >
-        <Sparkles class="w-5 h-5 text-white" />
-      </button>
+      <CreditBalanceWidget collapsed />
     </div>
   </aside>
 </template>

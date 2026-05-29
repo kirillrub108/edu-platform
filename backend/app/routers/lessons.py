@@ -24,6 +24,7 @@ from app.schemas.lesson import (
     VideoGenerateRequest,
 )
 from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
+from app.services import billing_service
 from app.services.storage_service import storage_service
 from app.tasks.video_pipeline import generate_video_lesson
 
@@ -173,6 +174,12 @@ async def cancel_video(
     else:
         lesson.status = LessonStatus.draft
     await db.commit()
+
+    # A terminated task's `finally` block may not run, so its reserved credit
+    # hold would leak. Release it idempotently (no-op if the task already
+    # finalized before the revoke landed).
+    owner_id = lesson.module.course.owner_id
+    await billing_service.release_reservation_if_held(db, owner_id, str(lesson_id))
     return {"cancelled": True, "lesson_id": str(lesson_id)}
 
 

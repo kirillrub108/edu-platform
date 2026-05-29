@@ -1,5 +1,11 @@
 from app.models.comment import Comment
 from app.models.course import AccessMode, Course
+from app.models.credit import (
+    CreditAccount,
+    CreditOperation,
+    CreditPlan,
+    CreditTransaction,
+)
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import ContentType, CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
@@ -37,4 +43,8 @@ __all__ = [
     "LessonProgress",
     "SlideText",
     "Comment",
+    "CreditAccount",
+    "CreditTransaction",
+    "CreditPlan",
+    "CreditOperation",
 ]

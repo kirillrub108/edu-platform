@@ -1,4 +1,5 @@
 import { CreationMode, type CreationModeValue } from '~/composables/useCreationMode'
+import { friendlyTaskError } from '~/composables/useBillingMeta'
 
 export function useVideoGeneration(
   lessonId: Readonly<Ref<string>>,
@@ -10,6 +11,7 @@ export function useVideoGeneration(
   showSlideEditor: Ref<boolean>,
 ) {
   const { apiFetch } = useApi()
+  const billing = useBillingStore()
 
   const voices: Array<{ value: string; label: string }> = [
     { value: 'xenia',   label: 'Ксения (жен.)' },
@@ -47,8 +49,9 @@ export function useVideoGeneration(
         generating.value = false
         lesson.value = data
         if (data.status === 'error') {
-          taskError.value = 'Ошибка генерации видео.'
+          taskError.value = friendlyTaskError(data.last_warning) ?? 'Ошибка генерации видео.'
         }
+        void billing.refresh()
       }
     } catch { /* network glitch — keep polling */ }
   }
@@ -67,10 +70,17 @@ export function useVideoGeneration(
         generating.value = false
         const data = await apiFetch<any>(`/lessons/${lessonId.value}`)
         lesson.value = data
+        // The task returns normally even when it bails on insufficient credits
+        // (lesson.status=error + last_warning), so surface that here.
+        if (data.status === 'error') {
+          taskError.value = friendlyTaskError(data.last_warning) ?? 'Ошибка генерации видео.'
+        }
+        void billing.refresh()
       } else if (res.status === 'FAILURE') {
         stopPollTimer()
         generating.value = false
-        taskError.value = res.result?.error ?? 'Неизвестная ошибка'
+        taskError.value = friendlyTaskError(res.result?.error) ?? 'Неизвестная ошибка'
+        void billing.refresh()
       }
     } catch { /* network glitch — keep polling */ }
   }

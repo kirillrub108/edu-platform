@@ -18,6 +18,7 @@ from app.redis_client import close_redis
 from app.routers import (
     analytics,
     auth,
+    billing,
     comments,
     courses,
     files,
@@ -188,6 +189,7 @@ app.include_router(files.router)
 app.include_router(analytics.router)
 app.include_router(analytics.lesson_results_router)
 app.include_router(comments.router)
+app.include_router(billing.router)
 
 
 @app.get("/", tags=["meta"])

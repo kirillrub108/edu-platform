@@ -191,3 +191,50 @@ async def test_other_teacher_cannot_list_slides(
         cookies={"access_token": token, "csrf_token": _TEST_CSRF},
     )
     assert resp.status_code == 404
+
+
+async def test_cancel_analysis_releases_reserved_credits(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A terminated vision task may skip its finally-block release, so the
+    analysis-cancel endpoint must release the reserved hold itself."""
+    from app.celery_app import celery_app
+    from app.constants import CREDIT_WEIGHTS
+    from app.models.credit import CreditOperation
+    from app.models.lesson import LessonStatus
+    from app.services import billing_service
+
+    monkeypatch.setattr(celery_app.control, "revoke", lambda *a, **k: None)
+
+    course = await make_course(db_session, owner=teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(
+        db_session, module, status=LessonStatus.analyzing, analyze_task_id="vis-task-1"
+    )
+
+    amount = CREDIT_WEIGHTS["vision_analyze"]
+    ok = await billing_service.reserve_credits(
+        db_session, teacher_user.id, amount, str(lesson.id), CreditOperation.VISION_ANALYZE
+    )
+    assert ok
+    before = await billing_service.get_balance(db_session, teacher_user.id)
+    assert before["reserved"] == amount
+
+    resp = await client.post(
+        f"/api/v1/lessons/{lesson.id}/analysis-cancel", cookies=teacher_token
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    after = await billing_service.get_balance(db_session, teacher_user.id)
+    assert after["reserved"] == 0
+    assert after["available"] == before["available"] + amount
+
+    history = await billing_service.get_transaction_history(db_session, teacher_user.id)
+    releases = [t for t in history if t.operation == CreditOperation.RELEASE]
+    assert len(releases) == 1
+    assert releases[0].ref_id == str(lesson.id)
