@@ -17,13 +17,13 @@ worker threads to call the async LLM client.
 from __future__ import annotations
 
 import asyncio
-import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import structlog
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
@@ -52,7 +52,7 @@ from app.services.quiz_service import (
 )
 from app.tasks.video_pipeline import SyncSession
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 def _clear_generation_task(session: Session, quiz_id: UUID) -> None:
@@ -70,6 +70,8 @@ def generate_quiz_task(
     num_options: int,
     types: list[str] | None = None,
 ) -> dict:
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(task_id=self.request.id, task_name=self.name)
     lesson_uuid = UUID(lesson_id)
     allowed_types = list(types) if types else list(QUIZ_TYPE_DISTRIBUTION.keys())
 
@@ -105,21 +107,21 @@ def generate_quiz_task(
             quiz_row = session.query(Quiz).filter(Quiz.lesson_id == lesson_uuid).first()
             if quiz_row:
                 _clear_generation_task(session, quiz_row.id)
-            logger.warning("quiz generation: empty material for lesson %s", lesson_id)
+            logger.warning("quiz_gen_empty_material", lesson_id=lesson_id)
             return {"status": "error", "error": str(exc)}
         except LLMOutputError as exc:
             session.rollback()
             quiz_row = session.query(Quiz).filter(Quiz.lesson_id == lesson_uuid).first()
             if quiz_row:
                 _clear_generation_task(session, quiz_row.id)
-            logger.error("quiz generation: LLM output invalid: %s", exc)
+            logger.error("quiz_gen_llm_invalid", error=str(exc))
             return {"status": "error", "error": str(exc)}
         except Exception as exc:
             session.rollback()
             quiz_row = session.query(Quiz).filter(Quiz.lesson_id == lesson_uuid).first()
             if quiz_row:
                 _clear_generation_task(session, quiz_row.id)
-            logger.exception("quiz generation failed for lesson %s", lesson_id)
+            logger.exception("quiz_gen_failed", lesson_id=lesson_id)
             return {"status": "error", "error": str(exc)}
 
 
@@ -138,7 +140,7 @@ def _grade_one_open(
         score, feedback = asyncio.run(llm_service.grade_open_answer(payload, response_text))
         return answer_id, score, feedback, True
     except Exception as exc:
-        logger.warning("grade_attempt: open-answer LLM failed for %s: %s", answer_id, exc)
+        logger.warning("grade_attempt_llm_failed", answer_id=str(answer_id), error=str(exc))
         return answer_id, 0.0, f"Автоматическая проверка не удалась: {exc}", False
 
 
@@ -211,6 +213,8 @@ def _mark_lesson_progress_if_passed(session: Session, attempt: QuizAttempt) -> N
 
 @celery_app.task(bind=True, name="grade_attempt", queue="quiz")
 def grade_attempt_task(self, attempt_id: str) -> dict:
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(task_id=self.request.id, task_name=self.name)
     attempt_uuid = UUID(attempt_id)
 
     def _progress(step: str, done: int, total: int) -> None:
@@ -225,7 +229,7 @@ def grade_attempt_task(self, attempt_id: str) -> dict:
             try:
                 resolved = resolve_snapshot_sync(session, attempt.questions_snapshot)
             except BrokenSnapshotError as exc:
-                logger.error("grade_attempt: broken snapshot for %s: %s", attempt_id, exc)
+                logger.error("grade_attempt_broken_snapshot", attempt_id=attempt_id, error=str(exc))
                 return {"status": "error", "error": str(exc)}
             snap_idx = resolved_index(resolved)
             open_jobs: list[tuple[UUID, dict[str, Any], str]] = []
@@ -287,7 +291,7 @@ def grade_attempt_task(self, attempt_id: str) -> dict:
 
         except Exception as exc:
             session.rollback()
-            logger.exception("grade_attempt failed for %s", attempt_id)
+            logger.exception("grade_attempt_failed", attempt_id=attempt_id)
             # Best-effort: clear grading_task_id so the student isn't stuck.
             try:
                 a = session.get(QuizAttempt, attempt_uuid)

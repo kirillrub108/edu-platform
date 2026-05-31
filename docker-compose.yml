@@ -176,6 +176,23 @@ services:
     networks:
       - edu-network
 
+  flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: celery -A app.celery_app flower --port=5555
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    environment:
+      FLOWER_BASIC_AUTH: "${CELERY_FLOWER_USER:-admin}:${CELERY_FLOWER_PASSWORD:-change-me}"
+    depends_on:
+      - redis
+      - backend
+    networks:
+      - edu-network
+
   frontend:
     build:
       context: ./frontend

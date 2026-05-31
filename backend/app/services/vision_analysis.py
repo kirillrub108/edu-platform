@@ -1,7 +1,7 @@
 import asyncio
 import base64
 import hashlib
-import logging
+import structlog
 import os
 from typing import Any
 
@@ -10,7 +10,7 @@ from openai import AsyncOpenAI
 
 from app.config import settings
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 SUMMARY_CACHE_DIR = os.path.join(settings.STORAGE_PATH, "summaries_cache")
@@ -203,7 +203,7 @@ class VisionAnalysisService:
                     previous_context=previous_context,
                 )
             except Exception:
-                logger.exception("Vision analysis failed for slide %d", slide_number)
+                logger.exception("vision_analysis_failed", slide=slide_number)
                 text = ""
 
             results.append(text)
@@ -214,7 +214,7 @@ class VisionAnalysisService:
                 try:
                     progress_cb(slide_number, total)
                 except Exception:
-                    logger.exception("progress_cb raised")
+                    logger.exception("progress_cb_error")
 
         return results
 
@@ -293,7 +293,7 @@ class VisionAnalysisService:
                         total_slides=total,
                     )
                 except Exception:
-                    logger.exception("Slide summary failed for slide %d", idx + 1)
+                    logger.exception("slide_summary_failed", slide=idx + 1)
                     text = ""
             results[idx] = text
             if text:
@@ -304,7 +304,7 @@ class VisionAnalysisService:
                     try:
                         progress_cb(done, total)
                     except Exception:
-                        logger.exception("progress_cb raised")
+                        logger.exception("progress_cb_error")
 
         await asyncio.gather(*(_one(i) for i in pending))
         return results
@@ -329,7 +329,7 @@ class VisionAnalysisService:
         except FileNotFoundError:
             return None
         except Exception:
-            logger.exception("Failed to read summary cache %s", path)
+            logger.exception("summary_cache_read_failed", path=str(path))
             return None
 
     def _write_cache(self, key: str, text: str) -> None:
@@ -340,7 +340,7 @@ class VisionAnalysisService:
                 f.write(text)
             os.replace(tmp, path)
         except Exception:
-            logger.exception("Failed to write summary cache %s", path)
+            logger.exception("summary_cache_write_failed", path=str(path))
             try:
                 os.unlink(tmp)
             except OSError:
@@ -402,7 +402,7 @@ class VisionAnalysisService:
         try:
             return (data["choices"][0]["message"]["content"] or "").strip()
         except (KeyError, IndexError, TypeError):
-            logger.error("Unexpected YandexGPT response: %s", data)
+            logger.error("yandex_gpt_unexpected_response", data=data)
             return ""
 
 

@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     APP_VERSION: str = "dev"
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
 
+    # Flower — Celery monitoring UI
+    CELERY_FLOWER_USER: str = "admin"
+    CELERY_FLOWER_PASSWORD: str = "change-me"
+
+    # Metrics
+    METRICS_ENABLED: bool = True
+
     # CORS — accepts a comma-separated string from env (CORS_ORIGINS=a,b,c) or
     # a JSON array. Use "*" to allow any origin in dev.
     CORS_ORIGINS: List[str] = [

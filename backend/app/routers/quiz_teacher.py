@@ -6,7 +6,7 @@ that re-aggregates the student's attempt score atomically.
 """
 from __future__ import annotations
 
-import logging
+import structlog
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -71,7 +71,7 @@ from app.services.quiz_service import (
 )
 from app.tasks.quiz_pipeline import generate_quiz_task
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/v1/lessons", tags=["quiz-teacher"])
 
@@ -432,7 +432,7 @@ async def regenerate_question(
             material, row.payload, payload.mode, num_options=num_options
         )
     except LLMOutputError as exc:
-        logger.warning("regenerate_quiz_question LLM error: %s", exc)
+        logger.warning("quiz_question_regen_llm_error", error=str(exc))
         raise HTTPException(status_code=502, detail=f"LLM returned invalid output: {exc}")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -489,7 +489,7 @@ async def ai_review(
         try:
             llm_flags = await llm_service.qa_review_quiz(material, payload)
         except LLMOutputError as exc:
-            logger.warning("qa_review_quiz LLM error: %s", exc)
+            logger.warning("quiz_qa_review_llm_error", error=str(exc))
             raise HTTPException(status_code=502, detail=f"LLM returned invalid output: {exc}")
         open_ended_by_id = {f.question_id: f for f in llm_flags}
 

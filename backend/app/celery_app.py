@@ -1,7 +1,9 @@
 import logging
 import os
+import time
 
 import sentry_sdk
+import structlog
 from celery import Celery
 from kombu import Queue
 from sentry_sdk.integrations.celery import CeleryIntegration
@@ -9,8 +11,11 @@ from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
 from app.config import settings
+from app.logging_config import configure_logging
 
-logger = logging.getLogger(__name__)
+configure_logging(settings.ENVIRONMENT)
+
+logger = structlog.get_logger()
 
 
 def _env_bool(name: str, default: str = "0") -> bool:
@@ -33,13 +38,13 @@ def _init_sentry() -> bool:
             ],
         )
         logger.info(
-            "Sentry initialized: environment=%s release=%s",
-            settings.ENVIRONMENT,
-            settings.APP_VERSION,
+            "sentry_initialized",
+            environment=settings.ENVIRONMENT,
+            release=settings.APP_VERSION,
         )
         return True
     except Exception:
-        logger.warning("Sentry initialization failed", exc_info=True)
+        logger.warning("sentry_init_failed", exc_info=True)
         return False
 
 
@@ -84,3 +89,37 @@ celery_app.conf.update(
     task_acks_late=True,
     task_reject_on_worker_lost=True,
 )
+
+if settings.METRICS_ENABLED:
+    from celery.signals import task_failure, task_postrun, task_prerun
+    from prometheus_client import Counter, Histogram
+
+    _task_total = Counter(
+        "celery_tasks_total",
+        "Total Celery task executions",
+        ["task_name", "status"],
+    )
+    _task_duration = Histogram(
+        "celery_task_duration_seconds",
+        "Celery task execution duration in seconds",
+        ["task_name"],
+    )
+    _task_start: dict[str, float] = {}
+
+    @task_prerun.connect
+    def _on_task_prerun(task_id: str, task, **kwargs: object) -> None:
+        _task_start[task_id] = time.perf_counter()
+
+    @task_postrun.connect
+    def _on_task_postrun(task_id: str, task, **kwargs: object) -> None:
+        start = _task_start.pop(task_id, None)
+        if start is not None:
+            _task_duration.labels(task_name=task.name).observe(time.perf_counter() - start)
+        _task_total.labels(task_name=task.name, status="success").inc()
+
+    @task_failure.connect
+    def _on_task_failure(task_id: str, sender, **kwargs: object) -> None:
+        start = _task_start.pop(task_id, None)
+        if start is not None:
+            _task_duration.labels(task_name=sender.name).observe(time.perf_counter() - start)
+        _task_total.labels(task_name=sender.name, status="failure").inc()

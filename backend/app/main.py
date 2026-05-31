@@ -1,9 +1,11 @@
 import asyncio
 import logging
 import time
+import uuid
 from contextlib import asynccontextmanager
 
 import sentry_sdk
+import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -18,6 +20,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.config import settings
 from app.database import engine
 from app.limiter import limiter
+from app.logging_config import configure_logging
 from app.redis_client import close_redis
 from app.routers import (
     analytics,
@@ -35,11 +38,7 @@ from app.routers import (
     uploads,
 )
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 def _before_send(event: dict, hint: dict) -> dict | None:
@@ -68,13 +67,13 @@ def _init_sentry() -> bool:
             before_send=_before_send,
         )
         logger.info(
-            "Sentry initialized: environment=%s release=%s",
-            settings.ENVIRONMENT,
-            settings.APP_VERSION,
+            "sentry_initialized",
+            environment=settings.ENVIRONMENT,
+            release=settings.APP_VERSION,
         )
         return True
     except Exception:
-        logger.warning("Sentry initialization failed", exc_info=True)
+        logger.warning("sentry_init_failed", exc_info=True)
         return False
 
 
@@ -103,18 +102,20 @@ async def _ensure_schema_at_head() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    configure_logging(settings.ENVIRONMENT)
+
     try:
         async with engine.connect() as conn:
             await conn.execute(text("SELECT 1"))
-        logger.info("Database connection OK")
+        logger.info("db_connection_ok")
     except Exception as exc:
-        logger.error("Database connection failed: %s", exc)
+        logger.error("db_connection_failed", error=str(exc))
 
     try:
         await _ensure_schema_at_head()
-        logger.info("Alembic migrations applied (head)")
+        logger.info("alembic_migrations_applied")
     except Exception:
-        logger.exception("Alembic upgrade failed; refusing to start with stale schema")
+        logger.exception("alembic_upgrade_failed")
         raise
 
     yield
@@ -130,39 +131,47 @@ app = FastAPI(
 )
 app.state.limiter = limiter
 
-# ── Middleware order ──────────────────────────────────────────────────────────
+# ── Prometheus ────────────────────────────────────────────────────────────────
+# instrument() must be called before any add_middleware() so the Prometheus
+# middleware sits innermost in the user stack.
+# Final stack (outer → inner): CORS → request_id → log_and_catch → Prometheus
+if settings.METRICS_ENABLED:
+    from prometheus_fastapi_instrumentator import Instrumentator
+
+    Instrumentator().instrument(app).expose(app)
+
+# ── Middleware ────────────────────────────────────────────────────────────────
 # In modern Starlette, `app.add_middleware()` *prepends* to user_middleware
 # (insert(0, ...)), so the LAST middleware registered ends up OUTERMOST. We
 # need this stack from outside in:
 #
 #     ServerErrorMiddleware   (built-in, always outermost)
 #       → CORSMiddleware       ← MUST be outside log_and_catch so the 500
-#         → log_and_catch      ← JSONResponse it returns flows back through
-#           → ExceptionMiddleware
-#             → routes
+#         → request_id         ← binds request_id before log_and_catch sees it
+#           → log_and_catch    ← JSONResponse it returns flows back through CORS
+#             → Prometheus     ← measures actual route latency (innermost)
+#               → ExceptionMiddleware
+#                 → routes
 #
-# That way CORS headers are attached to *every* response, including the
-# fall-back 500 from `log_and_catch`. If CORS sits *inside* log_and_catch, a
-# backend bug surfaces in the browser as a misleading "CORS policy" error
-# (because the 500 response ships without Access-Control-Allow-Origin).
-#
-# Therefore: register `log_and_catch` FIRST, then CORS LAST.
+# Therefore: register log_and_catch FIRST, then request_id, then CORS LAST.
 
 
 @app.middleware("http")
 async def log_and_catch(request: Request, call_next):
-    """Access log + last-resort 500 handler. Sits inside CORS in the stack."""
+    """Access log + last-resort 500 handler. Sits inside request_id in the stack."""
     start = time.perf_counter()
     try:
         response = await call_next(request)
     except Exception as exc:  # noqa: BLE001
         elapsed_ms = (time.perf_counter() - start) * 1000
-        logger.exception(
-            "Unhandled error in %s %s (%.1fms): %s",
-            request.method,
-            request.url.path,
-            elapsed_ms,
-            exc,
+        logger.error(
+            "unhandled_error",
+            method=request.method,
+            path=request.url.path,
+            status_code=500,
+            elapsed_ms=round(elapsed_ms, 1),
+            exc_type=type(exc).__name__,
+            exc_info=True,
         )
         return JSONResponse(
             status_code=500,
@@ -170,12 +179,22 @@ async def log_and_catch(request: Request, call_next):
         )
     elapsed_ms = (time.perf_counter() - start) * 1000
     logger.info(
-        "%s %s -> %d (%.1fms)",
-        request.method,
-        request.url.path,
-        response.status_code,
-        elapsed_ms,
+        "request",
+        method=request.method,
+        path=request.url.path,
+        status_code=response.status_code,
+        elapsed_ms=round(elapsed_ms, 1),
     )
+    return response
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next):
+    structlog.contextvars.clear_contextvars()
+    request_id = uuid.uuid4().hex
+    structlog.contextvars.bind_contextvars(request_id=request_id)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
     return response
 
 

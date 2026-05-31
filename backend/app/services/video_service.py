@@ -1,5 +1,5 @@
 import hashlib
-import logging
+import structlog
 import os
 import re
 import shutil
@@ -22,7 +22,7 @@ from app.constants import ENCODE_WORKERS as _ENCODE_WORKERS_DEFAULT, SLIDE_DPI
 # ~/.config/libreoffice path, making any static home-dir config irrelevant).
 _LO_XCU_SRC = Path(__file__).parent.parent.parent / "lo-emoji-substitution.xcu"
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 def _run(cmd: list[str]) -> None:
@@ -85,18 +85,14 @@ def _trim_trailing_silence(src: str, dest: str) -> bool:
         timeout=60,
     )
     if r.returncode != 0:
-        logger.warning(
-            "silenceremove failed for %s (exit %d), using original",
-            src,
-            r.returncode,
-        )
+        logger.warning("silenceremove_failed", src=src, returncode=r.returncode)
         return False
     try:
         dur = _get_audio_duration(dest)
     except (ValueError, RuntimeError, OSError):
         return False
     if dur < 0.1:
-        logger.warning("trimmed audio %s is too short (%.3fs), using original", src, dur)
+        logger.warning("trimmed_audio_too_short", src=src, duration=round(dur, 3))
         return False
     return True
 
@@ -109,8 +105,8 @@ def _seed_lo_profile(lo_user_dir: str) -> None:
         shutil.copy2(_LO_XCU_SRC, xcu_dest)
     else:
         logger.warning(
-            "lo-emoji-substitution.xcu not found at %s, skipping emoji font config",
-            _LO_XCU_SRC,
+            "lo_xcu_not_found",
+            path=str(_LO_XCU_SRC),
         )
 
 
@@ -137,12 +133,12 @@ class VideoService:
 
     def extract_slide_texts(self, pptx_path: str) -> list[str]:
         if Path(pptx_path).suffix.lower() not in {".pptx", ".ppt"}:
-            logger.info("Skipping text extraction for non-PPTX file: %s", pptx_path)
+            logger.info("skip_text_extraction_non_pptx", path=pptx_path)
             return []
         try:
             prs = Presentation(pptx_path)
         except Exception:
-            logger.exception("Failed to open PPTX: %s", pptx_path)
+            logger.exception("pptx_open_failed", path=pptx_path)
             return []
         slide_texts: list[str] = []
         for slide in prs.slides:
@@ -179,9 +175,9 @@ class VideoService:
                 cached_images = _slides_cache.get(cache_key)
             if cached_images:
                 logger.info(
-                    "Slide memory-cache hit (%s…) — returning %d images",
-                    cache_key[:8],
-                    len(cached_images),
+                    "slide_cache_hit_memory",
+                    cache_key=cache_key[:8],
+                    count=len(cached_images),
                 )
                 return cached_images
 
@@ -192,9 +188,9 @@ class VideoService:
             )
             if cached_images:
                 logger.info(
-                    "Slide disk-cache hit (%s…) — returning %d cached images",
-                    cache_key[:8],
-                    len(cached_images),
+                    "slide_cache_hit_disk",
+                    cache_key=cache_key[:8],
+                    count=len(cached_images),
                 )
                 with _slides_cache_lock:
                     _slides_cache[cache_key] = cached_images
@@ -254,14 +250,14 @@ class VideoService:
         )
         if not images:
             raise RuntimeError(f"No slides produced from {pptx_path}")
-        logger.info("Produced %d slide images at %d DPI", len(images), SLIDE_DPI)
+        logger.info("slides_produced", count=len(images), dpi=SLIDE_DPI)
 
         # ── populate cache ─────────────────────────────────────────────────────
         if cache_dir and suffix != ".pdf":
             os.makedirs(cached_dir, exist_ok=True)
             for img in images:
                 shutil.copy2(img, cached_dir)
-            logger.info("Cached %d slide images → %s…", len(images), cache_key[:8])
+            logger.info("slides_cached", count=len(images), cache_key=cache_key[:8])
             with _slides_cache_lock:
                 _slides_cache[cache_key] = [
                     os.path.join(cached_dir, Path(img).name) for img in images
@@ -281,7 +277,7 @@ class VideoService:
         effective_aud = trimmed_aud if _trim_trailing_silence(aud, trimmed_aud) else aud
 
         duration = _get_audio_duration(effective_aud)
-        logger.info("Encoding segment %d (%.2fs)", idx, duration)
+        logger.info("encoding_segment", idx=idx, duration=round(duration, 2))
 
         _run(
             [
@@ -335,7 +331,7 @@ class VideoService:
             for seg in segment_paths:
                 fh.write(f"file '{seg}'\n")
 
-        logger.info("Concatenating %d segments → %s", len(segment_paths), output_path)
+        logger.info("concatenating_segments", count=len(segment_paths), output=output_path)
         _run(
             [
                 "ffmpeg",

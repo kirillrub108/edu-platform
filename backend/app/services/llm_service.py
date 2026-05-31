@@ -1,5 +1,5 @@
 import json
-import logging
+import structlog
 import re
 from typing import Any, Awaitable, Callable
 
@@ -15,7 +15,7 @@ from app.constants import (
 )
 from app.schemas.quiz import FlagKind, QuestionFlag, RegenerateMode
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 def _compute_type_counts(n: int, types: list[str]) -> dict[str, int]:
@@ -177,11 +177,11 @@ class LLMService:
             except (json.JSONDecodeError, ValueError) as exc:
                 last_error = str(exc)
                 logger.warning(
-                    "%s: malformed LLM output (attempt %d/2): %s; raw=%s",
-                    purpose,
-                    attempt + 1,
-                    exc,
-                    raw[:300],
+                    "llm_malformed_output",
+                    purpose=purpose,
+                    attempt=attempt + 1,
+                    error=str(exc),
+                    raw=raw[:300],
                 )
         raise LLMOutputError(f"{purpose}: LLM returned invalid output: {last_error}")
 
@@ -222,13 +222,13 @@ class LLMService:
             if len(chunks) == slides_count and all(chunks):
                 return [str(c) for c in chunks], None
             got = len(chunks)
-            logger.warning("LLM returned %d SSML chunks for %d slides", got, slides_count)
+            logger.warning("llm_ssml_chunk_mismatch", got=got, expected=slides_count)
             warning = (
                 f"LLM вернул {got} чанков вместо {slides_count}. "
                 "Использован fallback — качество озвучки может быть ниже."
             )
         except json.JSONDecodeError:
-            logger.error("Failed to parse LLM SSML JSON: %s", raw[:300])
+            logger.error("llm_ssml_json_parse_failed", raw=raw[:300])
             warning = None
 
         # Mechanical split, then annotate each chunk so SSML markup is preserved.
@@ -334,7 +334,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             "живая речь преподавателя. Не добавляй новую информацию, не сокращай смысл.\n"
             "Выведи только готовый текст без комментариев."
         )
-        logger.debug("refine_slide_narration: using model=%s", model)
+        logger.debug("refine_slide_narration", model=model)
         return await self._chat(system, vision_text, model=model)
 
     async def generate_quiz_v2(
@@ -407,7 +407,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
                 got = actual_counts.get(t, 0)
                 if want > 0 and got != want:
                     logger.warning(
-                        "generate_quiz_v2: type %r: requested %d, got %d", t, want, got
+                        "quiz_type_count_mismatch", q_type=t, requested=want, got=got
                     )
             return out
 
@@ -467,15 +467,17 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             raw = self._strip_think(response.choices[0].message.content or "")
             if not raw.strip():
                 last_error = "empty response after strip_think"
-                logger.warning("grade_open_answer: empty raw (attempt %d/2)", attempt + 1)
+                logger.warning("grade_open_answer_empty_raw", attempt=attempt + 1)
                 continue
             try:
                 return _validate(json.loads(raw))
             except (json.JSONDecodeError, ValueError) as exc:
                 last_error = str(exc)
                 logger.warning(
-                    "grade_open_answer: malformed (attempt %d/2): %s; raw=%s",
-                    attempt + 1, exc, raw[:300],
+                    "grade_open_answer_malformed",
+                    attempt=attempt + 1,
+                    error=str(exc),
+                    raw=raw[:300],
                 )
         raise LLMOutputError(f"grade_open_answer: invalid output: {last_error}")
 

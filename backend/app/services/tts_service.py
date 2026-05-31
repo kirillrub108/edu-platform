@@ -1,4 +1,4 @@
-import logging
+import structlog
 import os
 import re
 import tempfile
@@ -10,7 +10,7 @@ import numpy as np
 from app.config import settings
 from app.constants import SILERO_MAX_CHARS
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 def _strip_ssml_tags(text: str) -> str:
@@ -93,11 +93,11 @@ class TTSService:
         provider = settings.TTS_PROVIDER
         effective_voice = voice or settings.SILERO_TTS_VOICE
         logger.info(
-            "TTS synthesize — provider=%s, voice=%s, output=%s",
-            provider,
-            effective_voice,
-            output_path,
-        )  # noqa: E501
+            "tts_synthesize",
+            provider=provider,
+            voice=effective_voice,
+            output=output_path,
+        )
 
         if provider == "silero":
             return self._synthesize_silero(text, output_path, effective_voice)
@@ -111,15 +111,15 @@ class TTSService:
         plain = _strip_ssml_tags(text)
         if not plain:
             logger.warning(
-                "Empty SSML chunk detected (raw=%r); generating silent placeholder at %s",
-                text[:80],
-                output_path,
+                "tts_empty_ssml_chunk",
+                raw=repr(text[:80]),
+                output=output_path,
             )
             return self._synthesize_stub(text, output_path)
 
         chunks = _split_for_tts(plain)
         if len(chunks) > 1:
-            logger.info("TTS: splitting %d chars into %d chunks", len(plain), len(chunks))
+            logger.info("tts_splitting", chars=len(plain), chunks=len(chunks))
 
         url = f"{settings.SILERO_TTS_URL}/process"
         tmp_paths: list[str] = []
@@ -157,7 +157,7 @@ class TTSService:
         sample_rate = 48000  # match Silero output rate → no resampling in FFmpeg
         words_per_second = 2.5
 
-        logger.warning("TTS stub — generating silent placeholder for %s", output_path)
+        logger.warning("tts_stub_placeholder", output_path=output_path)
 
         word_count = max(len(text.split()), 1)
         duration_seconds = max(word_count / words_per_second, 1.0)

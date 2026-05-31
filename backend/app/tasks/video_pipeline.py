@@ -1,11 +1,11 @@
 import asyncio
-import logging
 import os
 import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID, uuid4
 
+import structlog
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -27,7 +27,7 @@ from app.services.tts_service import tts_service
 from app.services.video_service import video_service
 from app.services.vision_analysis import vision_analysis_service
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 _TAG_RE = re.compile(r"<[^>]+>")
 
@@ -72,12 +72,12 @@ def _split_and_annotate(
         if len(chunks) == slides_count and all(chunks):
             return chunks, warning
         logger.warning(
-            "LLM returned %d SSML chunks for %d slides, using fallback",
-            len(chunks),
-            slides_count,
+            "llm_ssml_chunk_mismatch",
+            got=len(chunks),
+            expected=slides_count,
         )
     except Exception:
-        logger.exception("LLM SSML split failed, using fallback")
+        logger.exception("llm_ssml_split_failed")
     return llm_service._fallback_ssml(script, slides_count), None
 
 
@@ -89,6 +89,8 @@ def generate_video_lesson(
     voice: str | None = None,
     is_regen: bool = False,
 ) -> dict:
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(task_id=self.request.id, task_name=self.name)
     lesson_uuid = UUID(lesson_id)
     effective_voice = voice or settings.SILERO_TTS_VOICE
     work_dir = os.path.join(settings.STORAGE_PATH, "video_jobs", lesson_id)
@@ -187,12 +189,12 @@ def generate_video_lesson(
                         )
                     )
                 except Exception:
-                    logger.exception("VLM summarisation failed; falling back to no slide hints")
+                    logger.exception("vlm_summarisation_failed")
                     slide_summaries = []
                 logger.info(
-                    "Got %d slide summaries (%d non-empty)",
-                    len(slide_summaries),
-                    sum(1 for s in slide_summaries if s),
+                    "slide_summaries",
+                    total=len(slide_summaries),
+                    non_empty=sum(1 for s in slide_summaries if s),
                 )
                 _progress("summary", total_slides, total_slides)
 
@@ -224,10 +226,7 @@ def generate_video_lesson(
                     # slide_summaries are alignment anchors for the LLM, not spoken
                     # narration — never feed them to TTS. Use a silent placeholder.
                     slide_scripts[i] = f"<p>Слайд {i + 1}</p>"
-                    logger.warning(
-                        "Slide %d had empty SSML chunk; replaced with placeholder",
-                        i + 1,
-                    )
+                    logger.warning("empty_ssml_chunk", slide=i + 1)
             _progress("llm", 1, 1)
 
             # ── 3. TTS + encode pipeline ──────────────────────────────────────
@@ -268,7 +267,7 @@ def generate_video_lesson(
                     idx, audio_path = tts_future.result()
                     tts_done += 1
                     _progress("tts", tts_done, total_slides)
-                    logger.info("TTS %d/%d done (slide %d)", tts_done, total_slides, idx)
+                    logger.info("tts_done", done=tts_done, total=total_slides, slide=idx)
                     enc_future = enc_pool.submit(
                         video_service.encode_segment,
                         idx,
@@ -322,7 +321,7 @@ def generate_video_lesson(
             return {"status": "ok", "video_id": video_id, "video_url": video_url}
 
         except Exception as exc:
-            logger.exception("Video pipeline failed for lesson %s", lesson_id)
+            logger.exception("video_pipeline_failed", lesson_id=lesson_id)
             _set_status(session, lesson_uuid, LessonStatus.error)
             return {"status": "error", "error": str(exc)}
 
@@ -338,10 +337,10 @@ def generate_video_lesson(
                     else:
                         sync_release_credits(session, _owner_id, _credit_amount, lesson_id)
                 except Exception:
-                    logger.exception("Credit finalize failed for lesson %s", lesson_id)
+                    logger.exception("credit_finalize_failed", lesson_id=lesson_id)
 
             if work_dir and os.path.exists(work_dir):
                 if _success:
                     shutil.rmtree(work_dir, ignore_errors=True)
                 else:
-                    logger.warning("work_dir retained for post-mortem: %s", work_dir)
+                    logger.warning("work_dir_retained", path=work_dir)

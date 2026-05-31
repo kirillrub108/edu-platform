@@ -1,4 +1,4 @@
-import logging
+import structlog
 import mimetypes
 from pathlib import Path
 
@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from app.config import settings
 from app.services.signed_url_service import verify_signed_url
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 router = APIRouter(tags=["files"])
 
 CHUNK_SIZE = 1024 * 1024  # 1 MB

@@ -1,4 +1,4 @@
-import logging
+import structlog
 from uuid import UUID
 
 from celery.result import AsyncResult
@@ -27,7 +27,7 @@ from app.services.storage_service import storage_service
 from app.services.vision_analysis import vision_analysis_service
 from app.tasks.vision_pipeline import analyze_presentation_task
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/v1/lessons", tags=["slides"])
 
@@ -231,7 +231,7 @@ async def regenerate_slide_text(
         )
     except Exception as exc:
         await billing_service.release_credits(db, user.id, amount, str(slide_id))
-        logger.exception("regenerate failed for slide %s", slide_id)
+        logger.exception("slide_regen_failed", slide_id=str(slide_id))
         raise HTTPException(status_code=500, detail=f"Ошибка LLM: {exc}")
 
     row.generated_text = text or ""

@@ -27,3 +27,7 @@ slowapi==0.1.9
 defusedxml==0.7.1
 cachetools>=5.0
 sentry-sdk[fastapi,celery,sqlalchemy]>=2.0.0
+structlog>=24.0
+flower>=2.0
+prometheus-fastapi-instrumentator>=7.0
+prometheus-client>=0.20

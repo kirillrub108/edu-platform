@@ -9,7 +9,7 @@ on the answer view.
 """
 from __future__ import annotations
 
-import logging
+import structlog
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -55,7 +55,7 @@ from app.services.grading_service import (
 from app.services.quiz_service import BrokenSnapshotError, resolve_snapshot
 from app.tasks.quiz_pipeline import grade_attempt_task
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/v1/students/lessons", tags=["quiz-student"])
 

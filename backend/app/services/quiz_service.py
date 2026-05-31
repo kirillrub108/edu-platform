@@ -6,7 +6,7 @@ the teacher sees on the page.
 """
 from __future__ import annotations
 
-import logging
+import structlog
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -23,7 +23,7 @@ from app.models.quiz import Quiz, QuizQuestion, QuizStatus
 from app.models.slide_text import SlideText
 from app.services.grading_service import ResolvedQuestion, snapshot_pointers
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 class EmptyMaterialError(RuntimeError):
@@ -53,9 +53,7 @@ def _slides_to_material(slides: list[SlideText]) -> str:
 def _truncate(material: str, max_chars: int) -> str:
     if len(material) <= max_chars:
         return material
-    logger.warning(
-        "quiz material truncated from %d to %d chars", len(material), max_chars
-    )
+    logger.warning("quiz_material_truncated", from_chars=len(material), to_chars=max_chars)
     return material[:max_chars]
 
 

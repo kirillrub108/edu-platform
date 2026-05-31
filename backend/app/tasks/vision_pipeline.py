@@ -1,9 +1,9 @@
 import asyncio
-import logging
 import os
 import shutil
 from uuid import UUID
 
+import structlog
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
@@ -22,7 +22,7 @@ from app.services.video_service import video_service
 from app.services.vision_analysis import vision_analysis_service
 from app.tasks.video_pipeline import SyncSession
 
-logger = logging.getLogger(__name__)
+logger = structlog.get_logger()
 
 
 def _set_status(session: Session, lesson_id: UUID, status: LessonStatus) -> None:
@@ -50,6 +50,8 @@ def _store_slide_image(lesson_id: str, slide_idx: int, src_png: str) -> str:
 
 @celery_app.task(bind=True, name="analyze_presentation", queue="vision", acks_late=True, reject_on_worker_lost=True)
 def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> dict:
+    structlog.contextvars.clear_contextvars()
+    structlog.contextvars.bind_contextvars(task_id=self.request.id, task_name=self.name)
     lesson_uuid = UUID(lesson_id)
     work_dir = os.path.join(settings.STORAGE_PATH, "video_jobs", lesson_id)
     slides_cache_dir = os.path.join(settings.STORAGE_PATH, "slides_cache")
@@ -155,7 +157,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             return {"status": "ok", "total_slides": total, "empty_slides": empty_count}
 
         except Exception as exc:
-            logger.exception("Vision pipeline failed for lesson %s", lesson_id)
+            logger.exception("vision_pipeline_failed", lesson_id=lesson_id)
             _set_status(session, lesson_uuid, LessonStatus.error)
             return {"status": "error", "error": str(exc)}
 
@@ -169,7 +171,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                     else:
                         sync_release_credits(session, _owner_id, _credit_amount, lesson_id)
                 except Exception:
-                    logger.exception("Credit finalize failed for lesson %s", lesson_id)
+                    logger.exception("credit_finalize_failed", lesson_id=lesson_id)
 
             if os.path.exists(work_dir):
                 shutil.rmtree(work_dir, ignore_errors=True)
