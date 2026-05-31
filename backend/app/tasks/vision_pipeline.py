@@ -18,6 +18,7 @@ from app.services.billing_service import (
     sync_reserve_credits,
 )
 from app.services.storage_service import storage_service
+from app.services.tts_service import strip_tts_artifacts
 from app.services.video_service import video_service
 from app.services.vision_analysis import vision_analysis_service
 from app.tasks.video_pipeline import SyncSession
@@ -141,7 +142,15 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             # 4. Save generated texts.
             empty_count = sum(1 for t in texts if not t)
             for row, text in zip(slide_rows, texts):
-                row.generated_text = text or ""
+                clean = strip_tts_artifacts(text or "")
+                if text and clean != text:
+                    logger.warning(
+                        "vision_llm_tail_stripped",
+                        slide=row.slide_number,
+                        original_len=len(text),
+                        clean_len=len(clean),
+                    )
+                row.generated_text = clean
             session.commit()
 
             if empty_count == total:

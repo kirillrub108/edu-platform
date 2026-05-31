@@ -1,5 +1,5 @@
 from functools import lru_cache
-from typing import List
+from typing import List, Literal
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -65,6 +65,15 @@ class Settings(BaseSettings):
     # Storage
     STORAGE_PATH: str = "/app/storage"
     BASE_URL: str = "http://localhost:8000"
+    STORAGE_BACKEND: Literal["local", "s3"] = "local"
+
+    # S3-compatible storage (Yandex Object Storage, AWS S3, MinIO, …)
+    S3_ENDPOINT_URL: str = "https://storage.yandexcloud.net"
+    S3_BUCKET_NAME: str = ""
+    S3_ACCESS_KEY_ID: str = ""
+    S3_SECRET_ACCESS_KEY: str = ""
+    S3_REGION: str = "ru-central1"
+    S3_PRESIGNED_URL_EXPIRE_SECONDS: int = 3600
 
     # Signed URLs (HMAC-protected /files/*). Lifetime, in seconds.
     SIGNED_URL_EXPIRES_IN: int = 3600

@@ -13,6 +13,53 @@ from app.constants import SILERO_MAX_CHARS
 logger = structlog.get_logger()
 
 
+_LLM_TAIL_RE = re.compile(
+    r"(?:^|\n)"
+    r"(?:"
+    # Russian variants
+    r"Пожалуйста[,\s].{0,80}(?:уточни|измени|добави|напиши|сообщи|скажи|задай).{0,60}"
+    r"|Если\s+(?:вы\s+)?(?:хотите|нужно|требуется|необходимо).{0,120}"
+    r"|Не\s+стесняйтесь.{0,120}"
+    r"|Обращайтесь.{0,80}"
+    r"|(?:Если\s+)?[Уу]точните.{0,80}"
+    r"|[Нн]адеюсь[,\s].{0,120}"
+    r"|Рад(?:\s+буду)?\s+помочь.{0,80}"
+    r"|Спросите[,\s].{0,80}"
+    # English variants
+    r"|Please\s+(?:let\s+me\s+know|feel\s+free|clarify|specify|tell\s+me).{0,120}"
+    r"|Feel\s+free\s+to.{0,120}"
+    r"|(?:Don't|Do\s+not)\s+hesitate\s+to.{0,120}"
+    r"|(?:Let\s+me\s+know|If\s+you\s+(?:want|need|have|wish)).{0,120}"
+    r"|(?:I\s+)?[Hh]ope\s+(?:this|that).{0,120}"
+    r"|Happy\s+to\s+help.{0,80}"
+    r")"
+    r"[^\n]*",
+    re.MULTILINE | re.IGNORECASE,
+)
+
+_BLANK_LINES_RE = re.compile(r"\n{3,}")
+
+
+def strip_tts_artifacts(text: str) -> str:
+    """Remove markdown formatting and LLM tail phrases before sending to TTS."""
+    if not text:
+        return text
+
+    # Strip markdown: headings, bold/italic, horizontal rules, inline code
+    t = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+    t = re.sub(r"\*{2}(.+?)\*{2}", r"\1", t)
+    t = re.sub(r"\*(.+?)\*", r"\1", t)
+    t = re.sub(r"`(.+?)`", r"\1", t)
+    t = re.sub(r"^-{3,}$", "", t, flags=re.MULTILINE)
+
+    # Remove LLM tail phrases
+    t = _LLM_TAIL_RE.sub("", t)
+
+    # Collapse 3+ blank lines → single blank line, then strip
+    t = _BLANK_LINES_RE.sub("\n\n", t)
+    return t.strip()
+
+
 def _strip_ssml_tags(text: str) -> str:
     """Return plain text after removing all XML/SSML tags.
 
@@ -108,7 +155,7 @@ class TTSService:
 
     def _synthesize_silero(self, text: str, output_path: str, voice: str) -> str:
         """Send text to Silero TTS, splitting into chunks if too long."""
-        plain = _strip_ssml_tags(text)
+        plain = strip_tts_artifacts(_strip_ssml_tags(text))
         if not plain:
             logger.warning(
                 "tts_empty_ssml_chunk",
