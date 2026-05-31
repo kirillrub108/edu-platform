@@ -1,13 +1,49 @@
+import logging
 import os
 
+import sentry_sdk
 from celery import Celery
 from kombu import Queue
+from sentry_sdk.integrations.celery import CeleryIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 def _env_bool(name: str, default: str = "0") -> bool:
     return os.getenv(name, default).strip().lower() in ("1", "true", "yes", "on")
+
+
+def _init_sentry() -> bool:
+    if not settings.SENTRY_DSN:
+        return False
+    try:
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=settings.ENVIRONMENT,
+            release=settings.APP_VERSION,
+            traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+            integrations=[
+                CeleryIntegration(),
+                SqlalchemyIntegration(),
+                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+            ],
+        )
+        logger.info(
+            "Sentry initialized: environment=%s release=%s",
+            settings.ENVIRONMENT,
+            settings.APP_VERSION,
+        )
+        return True
+    except Exception:
+        logger.warning("Sentry initialization failed", exc_info=True)
+        return False
+
+
+_init_sentry()
 
 
 celery_app = Celery(

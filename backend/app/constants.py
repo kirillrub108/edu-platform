@@ -60,3 +60,9 @@ QUIZ_TYPE_DISTRIBUTION: dict[str, float] = {
 }
 # Below this count the distribution is skipped and all questions are single_choice.
 QUIZ_MIN_FOR_DISTRIBUTION: int = 4
+
+# Access code generation
+ACCESS_CODE_LENGTH: int = 6
+# No I, O, 1, 0 — visually ambiguous characters excluded.
+ACCESS_CODE_ALPHABET: str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+ACCESS_CODE_MAX_RETRIES: int = 10

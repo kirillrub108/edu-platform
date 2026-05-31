@@ -3,10 +3,14 @@ import logging
 import time
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sentry_sdk.integrations.fastapi import FastApiIntegration
+from sentry_sdk.integrations.logging import LoggingIntegration
+from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -36,6 +40,45 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def _before_send(event: dict, hint: dict) -> dict | None:
+    exc_info = hint.get("exc_info")
+    if exc_info:
+        exc = exc_info[1]
+        if isinstance(exc, StarletteHTTPException) and exc.status_code < 500:
+            return None
+    return event
+
+
+def _init_sentry() -> bool:
+    if not settings.SENTRY_DSN:
+        return False
+    try:
+        sentry_sdk.init(
+            dsn=settings.SENTRY_DSN,
+            environment=settings.ENVIRONMENT,
+            release=settings.APP_VERSION,
+            traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+            integrations=[
+                FastApiIntegration(),
+                SqlalchemyIntegration(),
+                LoggingIntegration(level=logging.INFO, event_level=logging.ERROR),
+            ],
+            before_send=_before_send,
+        )
+        logger.info(
+            "Sentry initialized: environment=%s release=%s",
+            settings.ENVIRONMENT,
+            settings.APP_VERSION,
+        )
+        return True
+    except Exception:
+        logger.warning("Sentry initialization failed", exc_info=True)
+        return False
+
+
+_init_sentry()
 
 
 async def _ensure_schema_at_head() -> None:

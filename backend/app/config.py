@@ -77,6 +77,12 @@ class Settings(BaseSettings):
     COOKIE_SECURE: bool = False      # set True in production (HTTPS only)
     COOKIE_SAMESITE: str = "Lax"    # Lax works with same-origin dev proxy
 
+    # Sentry
+    SENTRY_DSN: str = ""
+    ENVIRONMENT: str = "development"
+    APP_VERSION: str = "dev"
+    SENTRY_TRACES_SAMPLE_RATE: float = 0.1
+
     # CORS — accepts a comma-separated string from env (CORS_ORIGINS=a,b,c) or
     # a JSON array. Use "*" to allow any origin in dev.
     CORS_ORIGINS: List[str] = [

@@ -1,6 +1,7 @@
 from typing import Any
 from uuid import UUID
 
+import sentry_sdk
 from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from redis.asyncio import Redis
 from sqlalchemy import select
@@ -75,6 +76,7 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or inactive",
         )
+    sentry_sdk.set_user({"id": str(user.id), "email": user.email})
     return user
 
 

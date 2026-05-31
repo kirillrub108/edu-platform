@@ -26,3 +26,4 @@ odfpy==1.4.1
 slowapi==0.1.9
 defusedxml==0.7.1
 cachetools>=5.0
+sentry-sdk[fastapi,celery,sqlalchemy]>=2.0.0

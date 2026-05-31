@@ -57,6 +57,10 @@ services:
       # Ryuk (the cleanup reaper) is unreachable in DooD setups, disable it.
       TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
       TESTCONTAINERS_RYUK_DISABLED: "true"
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_VERSION: ${APP_VERSION:-dev}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
     # host.docker.internal isn't auto-resolved on Linux Docker Engine;
     # extra_hosts pins it to the host gateway IP.
     extra_hosts:
@@ -100,6 +104,11 @@ services:
       --loglevel=info
     env_file:
       - .env
+    environment:
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_VERSION: ${APP_VERSION:-dev}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/app:/app/app
@@ -124,6 +133,11 @@ services:
       --loglevel=info
     env_file:
       - .env
+    environment:
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_VERSION: ${APP_VERSION:-dev}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/app:/app/app
@@ -148,6 +162,11 @@ services:
       --loglevel=info
     env_file:
       - .env
+    environment:
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_VERSION: ${APP_VERSION:-dev}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/app:/app/app

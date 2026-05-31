@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import require_student
+from app.limiter import limiter
 from app.models.course import Course
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import ContentType, Lesson, Module
@@ -28,7 +29,9 @@ class EnrollRequest(BaseModel):
 
 
 @router.post("/enroll")
+@limiter.limit("10/minute")
 async def enroll(
+    request: Request,
     data: EnrollRequest,
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
@@ -48,7 +51,7 @@ async def enroll(
         )
     )
     if existing:
-        return {"enrollment_id": str(existing.id), "course_id": str(course.id)}
+        raise HTTPException(status_code=409, detail="Already enrolled in this course")
 
     enrollment = Enrollment(student_id=user.id, course_id=course.id)
     db.add(enrollment)
