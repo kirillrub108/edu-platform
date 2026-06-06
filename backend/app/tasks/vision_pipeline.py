@@ -21,7 +21,7 @@ from app.services.storage_service import storage_service
 from app.services.tts_service import strip_tts_artifacts
 from app.services.video_service import video_service
 from app.services.vision_analysis import vision_analysis_service
-from app.tasks.video_pipeline import SyncSession
+from app.tasks.video_pipeline import SyncSession, _publish
 
 logger = structlog.get_logger()
 
@@ -63,10 +63,8 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
     _credit_amount = CREDIT_WEIGHTS["vision_analyze"]
 
     def _progress(step: str, done: int, total: int) -> None:
-        self.update_state(
-            state="PROGRESS",
-            meta={"step": step, "done": done, "total": total},
-        )
+        self.update_state(state="PROGRESS", meta={"step": step, "done": done, "total": total})
+        _publish(lesson_id, {"step": step, "done": done, "total": total})
 
     with SyncSession() as session:
         try:
@@ -89,6 +87,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                 session, _owner_id, _credit_amount, lesson_id, "VISION_ANALYZE"
             ):
                 _set_status(session, lesson_uuid, LessonStatus.error)
+                _publish(lesson_id, {"status": "error"})
                 return {"status": "error", "error": "insufficient_credits"}
             _reserved = True
 
@@ -162,12 +161,14 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
 
             _set_status(session, lesson_uuid, LessonStatus.ready_for_edit)
             _progress("vision", total, total)
+            _publish(lesson_id, {"status": "ready_for_edit"})
             _success = True
             return {"status": "ok", "total_slides": total, "empty_slides": empty_count}
 
         except Exception as exc:
             logger.exception("vision_pipeline_failed", lesson_id=lesson_id)
             _set_status(session, lesson_uuid, LessonStatus.error)
+            _publish(lesson_id, {"status": "error"})
             return {"status": "error", "error": str(exc)}
 
         finally:

@@ -32,3 +32,4 @@ flower>=2.0
 prometheus-fastapi-instrumentator>=7.0
 prometheus-client>=0.20
 boto3>=1.34
+sse-starlette>=1.6.1

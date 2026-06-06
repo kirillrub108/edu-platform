@@ -1,9 +1,13 @@
+import asyncio
+import json
 from uuid import UUID
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from redis.asyncio import Redis
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
 
 from app.celery_app import celery_app
 from app.database import get_db
@@ -14,6 +18,7 @@ from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
 from app.models.quiz import AttemptStatus, Quiz, QuizAttempt, QuizQuestion
 from app.models.user import User
+from app.redis_client import get_redis
 from app.schemas.lesson import (
     LessonCreate,
     LessonOut,
@@ -254,6 +259,93 @@ async def task_status(
         pass
 
     return payload
+
+
+_SSE_TERMINAL = {"published", "ready_for_edit", "error"}
+
+
+@router.get("/{lesson_id}/progress-stream")
+async def progress_stream(
+    lesson_id: UUID,
+    lesson: Lesson = Depends(get_owned_lesson),
+    redis: Redis = Depends(get_redis),
+):
+    """SSE stream of Celery task progress for a lesson.
+
+    Publishes `{step, done, total}` events while a task runs and a terminal
+    `{status}` event when the task finishes. Uses Redis pub/sub on the
+    `lesson:{lesson_id}` channel populated by the Celery workers.
+
+    Auth via the `access_token` httpOnly cookie (same as all other endpoints).
+    EventSource sends cookies when `withCredentials: true` is set.
+    """
+    # Capture terminal state before the generator starts (DB session is still alive here).
+    terminal_payload: dict | None = None
+    if lesson.status == LessonStatus.published:
+        terminal_payload = {"status": "published", "video_url": lesson.video_url}
+    elif lesson.status == LessonStatus.error:
+        terminal_payload = {"status": "error"}
+    elif lesson.status == LessonStatus.ready_for_edit:
+        terminal_payload = {"status": "ready_for_edit"}
+
+    # Probe Redis before committing to streaming (only needed for live path).
+    # Must happen here — once EventSourceResponse is returned, HTTP headers are
+    # already sent and a 503 can no longer be raised.
+    if terminal_payload is None:
+        try:
+            await redis.ping()
+        except Exception:
+            raise HTTPException(status_code=503, detail="Streaming unavailable")
+
+    channel = f"lesson:{lesson_id}"
+
+    async def generator():
+        # If the lesson is already in a terminal state, emit once and close.
+        if terminal_payload is not None:
+            yield {"data": json.dumps(terminal_payload)}
+            return
+
+        pubsub = redis.pubsub()
+        try:
+            await pubsub.subscribe(channel)
+
+            # Emit a snapshot of the last known Celery progress so the UI
+            # doesn't start blank after a page reload. Subscribe first so we
+            # don't miss any message published between the snapshot read and
+            # the subscribe call. Mirrors the /task-status endpoint pattern.
+            task_id = lesson.video_task_id or lesson.analyze_task_id
+            if task_id:
+                try:
+                    ar = AsyncResult(str(task_id), app=celery_app)
+                    if ar.state == "PROGRESS" and isinstance(ar.info, dict):
+                        yield {"data": json.dumps(ar.info)}
+                except Exception:
+                    pass
+
+            last_heartbeat = asyncio.get_running_loop().time()
+            while True:
+                # get_message with timeout=1.0 waits up to 1 s for a message,
+                # returning None on timeout — keeps the generator responsive to
+                # client disconnects and heartbeat intervals without busy-looping.
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if msg and msg["type"] == "message":
+                    yield {"data": msg["data"]}
+                    try:
+                        data = json.loads(msg["data"])
+                        if data.get("status") in _SSE_TERMINAL:
+                            return
+                    except json.JSONDecodeError:
+                        pass
+
+                now = asyncio.get_running_loop().time()
+                if now - last_heartbeat >= 15.0:
+                    yield {"comment": "ping"}
+                    last_heartbeat = now
+        finally:
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+
+    return EventSourceResponse(generator())
 
 
 @router.get("/{lesson_id}/quiz/questions", response_model=list[QuizQuestionTeacherRead])

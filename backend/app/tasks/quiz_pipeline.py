@@ -50,7 +50,7 @@ from app.services.quiz_service import (
     replace_questions_sync,
     resolve_snapshot_sync,
 )
-from app.tasks.video_pipeline import SyncSession
+from app.tasks.video_pipeline import SyncSession, _publish
 
 logger = structlog.get_logger()
 
@@ -77,6 +77,7 @@ def generate_quiz_task(
 
     def _progress(step: str, done: int, total: int) -> None:
         self.update_state(state="PROGRESS", meta={"step": step, "done": done, "total": total})
+        _publish(lesson_id, {"step": step, "done": done, "total": total})
 
     with SyncSession() as session:
         try:

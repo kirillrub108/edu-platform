@@ -38,7 +38,44 @@ export function useVideoGeneration(
   const stopStatusPollTimer = () => {
     if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null }
   }
-  const stopPolling = () => { stopPollTimer(); stopStatusPollTimer() }
+
+  // SSE stream for real-time progress. Falls back to polling if EventSource
+  // is unavailable or the SSE connection closes unexpectedly.
+  const progressStream = useProgressStream(lessonId, (data: any) => {
+    if (data.step !== undefined) {
+      taskMeta.value = { step: data.step, done: data.done ?? 0, total: data.total ?? 1 }
+      taskStatus.value = 'PROGRESS'
+    } else if (data.status === 'published') {
+      progressStream.stop()
+      generating.value = false
+      apiFetch<any>(`/lessons/${lessonId.value}`).then(d => {
+        lesson.value = d
+        if (d.status === 'error') {
+          taskError.value = friendlyTaskError(d.last_warning) ?? 'Ошибка генерации видео.'
+        }
+      })
+      void billing.refresh()
+    } else if (data.status === 'error') {
+      progressStream.stop()
+      generating.value = false
+      apiFetch<any>(`/lessons/${lessonId.value}`).then(d => {
+        lesson.value = d
+        taskError.value = friendlyTaskError(d.last_warning) ?? 'Ошибка генерации видео.'
+      })
+      void billing.refresh()
+    }
+  }, () => {
+    // SSE closed unexpectedly — fall back to interval polling.
+    if (!generating.value) return
+    if (taskId.value) {
+      taskStatus.value = 'PENDING'
+      pollTimer = setInterval(pollStatus, 3000)
+    } else {
+      statusPollTimer = setInterval(pollForVideoCompletion, 3000)
+    }
+  })
+
+  const stopPolling = () => { stopPollTimer(); stopStatusPollTimer(); progressStream.stop() }
 
   // Fallback path: no task_id — poll the lesson status directly.
   const pollForVideoCompletion = async () => {
@@ -108,7 +145,11 @@ export function useVideoGeneration(
       })
       taskId.value = res.task_id
       taskStatus.value = 'PENDING'
-      pollTimer = setInterval(pollStatus, 3000)
+      if (typeof EventSource !== 'undefined') {
+        progressStream.start()
+      } else {
+        pollTimer = setInterval(pollStatus, 3000)
+      }
     } catch (e: any) {
       generating.value = false
       taskError.value = e?.data?.detail ?? 'Не удалось запустить генерацию'
@@ -139,13 +180,16 @@ export function useVideoGeneration(
   }
 
   // Restore-flow: if lesson is already processing when the page mounts, resume
-  // polling so the UI tracks the in-progress video job after a page refresh.
+  // tracking the in-progress video job after a page refresh.
   watch(lesson, (data) => {
     if (!data || generating.value) return
     if (data.status === 'processing') {
       generating.value = true
       stopPolling()
-      if (data.video_task_id) {
+      if (typeof EventSource !== 'undefined') {
+        taskId.value = data.video_task_id ?? null
+        progressStream.start()
+      } else if (data.video_task_id) {
         taskId.value = data.video_task_id
         taskStatus.value = 'PENDING'
         pollTimer = setInterval(pollStatus, 2000)

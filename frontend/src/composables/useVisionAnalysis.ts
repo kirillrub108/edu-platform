@@ -31,7 +31,42 @@ export function useVisionAnalysis(
   const stopStatusPolling = () => {
     if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null }
   }
-  const stopPolling = () => { stopAnalyzePolling(); stopStatusPolling() }
+
+  // SSE stream for real-time progress. Falls back to polling if EventSource
+  // is unavailable or the SSE connection closes unexpectedly.
+  const progressStream = useProgressStream(lessonId, (data: any) => {
+    if (data.step !== undefined) {
+      analyzeMeta.value = { step: data.step, done: data.done, total: data.total }
+      analyzeStatus.value = 'PROGRESS'
+    } else if (data.status === 'ready_for_edit') {
+      progressStream.stop()
+      analyzing.value = false
+      analyzeStatus.value = 'SUCCESS'
+      panelRef.value?.clearSnapshot()
+      apiFetch<any>(`/lessons/${lessonId.value}`).then(d => {
+        lesson.value = d
+        showSlideEditor.value = true
+      })
+      void billing.refresh()
+    } else if (data.status === 'error') {
+      progressStream.stop()
+      analyzing.value = false
+      analyzeError.value = 'Ошибка анализа. Попробуйте запустить снова.'
+      panelRef.value?.restoreFromSnapshot()
+      void billing.refresh()
+    }
+  }, () => {
+    // SSE closed unexpectedly — fall back to interval polling.
+    if (!analyzing.value) return
+    if (analyzeTaskId.value) {
+      analyzeStatus.value = 'PENDING'
+      analyzeTimer = setInterval(pollAnalyzeStatus, 2000)
+    } else {
+      statusPollTimer = setInterval(pollForAnalysisCompletion, 2000)
+    }
+  })
+
+  const stopPolling = () => { stopAnalyzePolling(); stopStatusPolling(); progressStream.stop() }
 
   // Fallback path: no task_id — poll the lesson status directly.
   const pollForAnalysisCompletion = async () => {
@@ -95,7 +130,11 @@ export function useVisionAnalysis(
       const res = await apiFetch<any>(`/lessons/${lessonId.value}/analyze`, { method: 'POST' })
       analyzeTaskId.value = res.task_id
       analyzeStatus.value = 'PENDING'
-      analyzeTimer = setInterval(pollAnalyzeStatus, 2000)
+      if (typeof EventSource !== 'undefined') {
+        progressStream.start()
+      } else {
+        analyzeTimer = setInterval(pollAnalyzeStatus, 2000)
+      }
     } catch (e: any) {
       analyzing.value = false
       analyzeError.value = e?.data?.detail ?? 'Не удалось запустить анализ'
@@ -120,14 +159,17 @@ export function useVisionAnalysis(
     }
   }
 
-  // Restore-flow: if lesson is already analyzing when the page mounts, start polling
-  // automatically so the UI resumes tracking in-progress work after a page refresh.
+  // Restore-flow: if lesson is already analyzing when the page mounts, resume
+  // tracking in-progress work after a page refresh.
   watch(lesson, (data) => {
     if (!data || analyzing.value) return
     if (data.status === 'analyzing') {
       analyzing.value = true
       stopPolling()
-      if (data.analyze_task_id) {
+      if (typeof EventSource !== 'undefined') {
+        analyzeTaskId.value = data.analyze_task_id ?? null
+        progressStream.start()
+      } else if (data.analyze_task_id) {
         analyzeTaskId.value = data.analyze_task_id
         analyzeStatus.value = 'PENDING'
         analyzeTimer = setInterval(pollAnalyzeStatus, 2000)

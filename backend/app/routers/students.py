@@ -51,7 +51,7 @@ async def enroll(
         )
     )
     if existing:
-        raise HTTPException(status_code=409, detail="Already enrolled in this course")
+        return {"enrollment_id": str(existing.id), "course_id": str(course.id)}
 
     enrollment = Enrollment(student_id=user.id, course_id=course.id)
     db.add(enrollment)

@@ -1,10 +1,12 @@
 import asyncio
+import json
 import os
 import re
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID, uuid4
 
+import redis as _sync_redis
 import structlog
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -34,6 +36,31 @@ _TAG_RE = re.compile(r"<[^>]+>")
 _sync_url = settings.DATABASE_URL.replace("+asyncpg", "+psycopg2")
 sync_engine = create_engine(_sync_url, pool_pre_ping=True)
 SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
+
+# Sync Redis client for progress pub/sub from prefork workers.
+# Lazy-initialized so the URL is not validated at import time (test envs set
+# REDIS_URL=memory:// which redis-py rejects). The connection is only attempted
+# when _publish() is first called, and any error is silently swallowed.
+_redis: "_sync_redis.Redis | None" = None
+
+
+def _get_sync_redis() -> "_sync_redis.Redis":
+    global _redis
+    if _redis is None:
+        _redis = _sync_redis.from_url(
+            settings.REDIS_URL, decode_responses=True, socket_connect_timeout=2
+        )
+    return _redis
+
+
+def _publish(lesson_id: str, payload: dict) -> None:
+    """Publish a progress/status event to lesson:{lesson_id} pub/sub channel.
+    Swallowed on error so a Redis outage never breaks the pipeline."""
+    try:
+        _get_sync_redis().publish(f"lesson:{lesson_id}", json.dumps(payload))
+    except Exception:
+        pass
+
 
 _TTS_WORKERS = TTS_WORKERS
 _ENCODE_WORKERS = ENCODE_WORKERS
@@ -103,10 +130,8 @@ def generate_video_lesson(
     _credit_amount = CREDIT_WEIGHTS["lesson_regen" if is_regen else "lesson_generate"]
 
     def _progress(step: str, done: int, total: int) -> None:
-        self.update_state(
-            state="PROGRESS",
-            meta={"step": step, "done": done, "total": total},
-        )
+        self.update_state(state="PROGRESS", meta={"step": step, "done": done, "total": total})
+        _publish(lesson_id, {"step": step, "done": done, "total": total})
 
     with SyncSession() as session:
         try:
@@ -134,6 +159,7 @@ def generate_video_lesson(
                 if shortfall:
                     shortfall.last_warning = "Недостаточно кредитов для генерации видео"
                 _set_status(session, lesson_uuid, LessonStatus.error)
+                _publish(lesson_id, {"status": "error"})
                 return {"status": "error", "error": "insufficient_credits"}
             _reserved = True
 
@@ -316,6 +342,7 @@ def generate_video_lesson(
             video_id = str(video_uuid)
             # _set_status commits the session, which also persists new_video.
             _set_status(session, lesson_uuid, LessonStatus.published)
+            _publish(lesson_id, {"status": "published", "video_url": video_url})
 
             _success = True
             return {"status": "ok", "video_id": video_id, "video_url": video_url}
@@ -323,6 +350,7 @@ def generate_video_lesson(
         except Exception as exc:
             logger.exception("video_pipeline_failed", lesson_id=lesson_id)
             _set_status(session, lesson_uuid, LessonStatus.error)
+            _publish(lesson_id, {"status": "error"})
             return {"status": "error", "error": str(exc)}
 
         finally:
