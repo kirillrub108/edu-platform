@@ -7,6 +7,7 @@ const props = defineProps<{
     id: string
     title: string
     description?: string | null
+    cover_url?: string | null
     is_published: boolean
     lessons_count?: number
     gradient_idx?: number
@@ -39,7 +40,15 @@ const lessonsLabel = computed(() => {
     class="group block bg-white rounded-2xl overflow-hidden border border-gray-100 transition-all duration-150
            hover:scale-[1.01] hover:border-violet-200 shadow-soft hover:shadow-soft-hover"
   >
-    <div :class="['h-20 bg-gradient-to-br', gradient]"></div>
+    <div class="relative h-32 overflow-hidden">
+      <img
+        v-if="course.cover_url"
+        :src="course.cover_url"
+        :alt="course.title"
+        class="w-full h-full object-cover"
+      />
+      <div v-else :class="['h-full bg-gradient-to-br', gradient]" />
+    </div>
     <div class="p-5">
       <h3 class="font-semibold text-gray-900 text-lg leading-tight">{{ course.title }}</h3>
       <p v-if="course.description" class="text-sm text-gray-500 mt-1.5 line-clamp-2">

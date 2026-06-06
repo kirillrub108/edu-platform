@@ -279,3 +279,22 @@ async def upload_video(
         "file_path": relative,
         "file_url": storage_service.get_url(relative, str(user.id)),
     }
+
+
+_ALLOWED_COVER_TYPES = {"image/jpeg", "image/png", "image/webp"}
+_MAX_COVER_BYTES = 5 * 1024 * 1024
+
+
+@router.post("/cover")
+async def upload_cover(
+    file: UploadFile,
+    user: User = Depends(require_teacher),
+):
+    if file.content_type not in _ALLOWED_COVER_TYPES:
+        raise HTTPException(status_code=400, detail="Допустимые форматы: JPEG, PNG, WebP")
+    content = await file.read()
+    if len(content) > _MAX_COVER_BYTES:
+        raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 5 МБ)")
+    await file.seek(0)
+    relative = await storage_service.save_upload(file, "covers")
+    return {"file_url": storage_service.get_url(relative, str(user.id))}

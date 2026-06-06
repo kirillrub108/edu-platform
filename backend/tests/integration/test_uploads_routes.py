@@ -161,6 +161,57 @@ async def test_upload_script_unauthenticated_returns_401(
     assert resp.status_code == 401
 
 
+async def test_upload_cover_returns_file_url(
+    client: AsyncClient,
+    teacher_token: dict[str, str],
+) -> None:
+    resp = await client.post(
+        "/api/v1/uploads/cover",
+        files={"file": ("photo.jpg", b"fake-jpeg-data", "image/jpeg")},
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "file_url" in body
+    assert "covers/" in body["file_url"]
+
+
+async def test_upload_cover_rejects_wrong_type(
+    client: AsyncClient,
+    teacher_token: dict[str, str],
+) -> None:
+    resp = await client.post(
+        "/api/v1/uploads/cover",
+        files={"file": ("doc.pdf", b"%PDF-fake", "application/pdf")},
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 400
+    assert "JPEG" in resp.json()["detail"] or "PNG" in resp.json()["detail"]
+
+
+async def test_upload_cover_rejects_oversized(
+    client: AsyncClient,
+    teacher_token: dict[str, str],
+) -> None:
+    payload = b"x" * (6 * 1024 * 1024)  # 6 MB > 5 MB limit
+    resp = await client.post(
+        "/api/v1/uploads/cover",
+        files={"file": ("big.jpg", payload, "image/jpeg")},
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 400
+
+
+async def test_upload_cover_unauthenticated_returns_401(
+    client: AsyncClient,
+) -> None:
+    resp = await client.post(
+        "/api/v1/uploads/cover",
+        files={"file": ("photo.jpg", b"fake-jpeg-data", "image/jpeg")},
+    )
+    assert resp.status_code == 401
+
+
 async def test_upload_pptx_with_refresh_token_returns_401(
     client: AsyncClient,
     teacher_user: Any,

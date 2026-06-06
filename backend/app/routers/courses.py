@@ -21,8 +21,21 @@ from app.schemas.course import (
     ModuleCreate,
     ModuleOut,
 )
+from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/courses", tags=["courses"])
+
+
+def _course_out(course: Course, user_id: str) -> CourseOut:
+    out = CourseOut.model_validate(course)
+    out.cover_url = storage_service.resign_url(out.cover_url, user_id)
+    return out
+
+
+def _course_detail_out(course: Course, user_id: str) -> CourseDetail:
+    out = CourseDetail.model_validate(course)
+    out.cover_url = storage_service.resign_url(out.cover_url, user_id)
+    return out
 
 
 async def generate_unique_access_code(db: AsyncSession) -> str:
@@ -60,7 +73,7 @@ async def list_courses(
     courses = list(result.all())
     for course in courses:
         course.lessons_count = sum(len(m.lessons) for m in course.modules)
-    return courses
+    return [_course_out(c, str(user.id)) for c in courses]
 
 
 @router.post("/", response_model=CourseOut, status_code=status.HTTP_201_CREATED)
@@ -69,11 +82,11 @@ async def create_course(
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
-    course = Course(title=data.title, description=data.description, owner_id=user.id)
+    course = Course(title=data.title, description=data.description, cover_url=data.cover_url, owner_id=user.id)
     db.add(course)
     await db.commit()
     await db.refresh(course, attribute_names=["owner"])
-    return course
+    return _course_out(course, str(user.id))
 
 
 @router.get("/{course_id}", response_model=CourseDetail)
@@ -94,7 +107,7 @@ async def get_course(
         raise HTTPException(status_code=404, detail="Course not found")
     if course.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Not your course")
-    return course
+    return _course_detail_out(course, str(user.id))
 
 
 @router.put("/{course_id}", response_model=CourseOut)
@@ -113,7 +126,7 @@ async def update_course(
         await db.rollback()
         raise HTTPException(status_code=409, detail="access_code already in use")
     await db.refresh(course, attribute_names=["owner"])
-    return course
+    return _course_out(course, str(user.id))
 
 
 @router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -156,7 +169,7 @@ async def toggle_publish(
     course.is_published = not course.is_published
     await db.commit()
     await db.refresh(course, attribute_names=["owner"])
-    return course
+    return _course_out(course, str(user.id))
 
 
 @router.post("/{course_id}/access-code/generate", response_model=CourseOut)
@@ -174,7 +187,7 @@ async def generate_access_code(
         await db.rollback()
         raise HTTPException(status_code=500, detail="Failed to generate unique access code")
     await db.refresh(course, attribute_names=["owner"])
-    return course
+    return _course_out(course, str(user.id))
 
 
 @router.delete("/{course_id}/access-code", response_model=CourseOut)
@@ -188,4 +201,4 @@ async def delete_access_code(
     course.access_mode = AccessMode.link
     await db.commit()
     await db.refresh(course, attribute_names=["owner"])
-    return course
+    return _course_out(course, str(user.id))

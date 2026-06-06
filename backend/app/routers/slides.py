@@ -2,7 +2,7 @@ import structlog
 from uuid import UUID
 
 from celery.result import AsyncResult
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +10,7 @@ from app.celery_app import celery_app
 from app.constants import CREDIT_WEIGHTS
 from app.database import get_db
 from app.dependencies import get_owned_lesson, require_teacher
+from app.limiter import limiter
 from app.models.credit import CreditOperation
 from app.models.lesson import CreationMode, Lesson, LessonStatus
 from app.models.slide_text import SlideText
@@ -49,8 +50,11 @@ def _row_to_out(row: SlideText, user_id: str) -> SlideTextOut:
     )
 
 
+# TODO: в тестах сбрасывать лимитер через limiter.reset() или MemoryStorage в фикстуре
 @router.post("/{lesson_id}/analyze")
+@limiter.limit("2/minute")
 async def analyze_lesson_slides(
+    request: Request,
     lesson_id: UUID,
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),

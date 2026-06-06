@@ -10,6 +10,7 @@ from app.schemas.user import UserOut
 class CourseCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     description: str | None = None
+    cover_url: str | None = None
 
 
 class CourseUpdate(BaseModel):

@@ -1,7 +1,7 @@
 from uuid import UUID
 
 from celery.result import AsyncResult
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -23,6 +23,7 @@ from app.schemas.lesson import (
     TaskStatusResponse,
     VideoGenerateRequest,
 )
+from app.limiter import limiter
 from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
 from app.services import billing_service
 from app.services.storage_service import storage_service
@@ -129,8 +130,11 @@ async def update_script(
     return _lesson_out(lesson, str(user.id))
 
 
+# TODO: в тестах сбрасывать лимитер через limiter.reset() или MemoryStorage в фикстуре
 @router.post("/{lesson_id}/generate-video")
+@limiter.limit("3/minute")
 async def generate_video(
+    request: Request,
     lesson_id: UUID,
     data: VideoGenerateRequest,
     user: User = Depends(require_teacher),
