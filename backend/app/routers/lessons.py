@@ -25,6 +25,7 @@ from app.schemas.lesson import (
 )
 from app.limiter import limiter
 from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
+from app.constants import CREDIT_WEIGHTS
 from app.services import billing_service
 from app.services.storage_service import storage_service
 from app.tasks.video_pipeline import generate_video_lesson
@@ -152,6 +153,12 @@ async def generate_video(
     if data.pptx_path and data.pptx_path != lesson.pptx_path:
         lesson.pptx_path = data.pptx_path
         await db.commit()
+
+    is_regen = lesson.status == LessonStatus.published
+    cost_key = "lesson_regen" if is_regen else "lesson_generate"
+    balance = await billing_service.get_balance(db, user.id)
+    if balance["available"] < CREDIT_WEIGHTS[cost_key]:
+        raise HTTPException(status_code=402, detail="Недостаточно кредитов для генерации видео")
 
     task = generate_video_lesson.apply_async(
         args=[str(lesson.id), pptx_path, data.voice], queue="video"
