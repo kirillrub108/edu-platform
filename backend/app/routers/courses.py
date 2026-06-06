@@ -159,6 +159,21 @@ async def create_module(
     return module
 
 
+@router.delete("/{course_id}/modules/{module_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_module(
+    course_id: UUID,
+    module_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_course(course_id, user, db)
+    module = await db.get(Module, module_id)
+    if not module or module.course_id != course_id:
+        raise HTTPException(status_code=404, detail="Module not found")
+    await db.delete(module)
+    await db.commit()
+
+
 @router.put("/{course_id}/publish", response_model=CourseOut)
 async def toggle_publish(
     course_id: UUID,

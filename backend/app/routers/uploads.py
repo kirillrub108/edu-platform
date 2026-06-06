@@ -12,6 +12,7 @@ from sqlalchemy import delete
 
 from app.database import get_db
 from app.dependencies import require_teacher
+from app.models.course import Course
 from app.models.lesson import Lesson, LessonStatus
 from app.models.slide_text import SlideText
 from app.models.user import User
@@ -288,7 +289,9 @@ _MAX_COVER_BYTES = 5 * 1024 * 1024
 @router.post("/cover")
 async def upload_cover(
     file: UploadFile,
+    course_id: UUID | None = None,
     user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
 ):
     if file.content_type not in _ALLOWED_COVER_TYPES:
         raise HTTPException(status_code=400, detail="Допустимые форматы: JPEG, PNG, WebP")
@@ -297,4 +300,15 @@ async def upload_cover(
         raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 5 МБ)")
     await file.seek(0)
     relative = await storage_service.save_upload(file, "covers")
-    return {"file_url": storage_service.get_url(relative, str(user.id))}
+    cover_url = storage_service.get_url(relative, str(user.id))
+
+    if course_id is not None:
+        course = await db.get(Course, course_id)
+        if not course:
+            raise HTTPException(status_code=404, detail="Course not found")
+        if course.owner_id != user.id:
+            raise HTTPException(status_code=403, detail="Not your course")
+        course.cover_url = cover_url
+        await db.commit()
+
+    return {"cover_url": cover_url}

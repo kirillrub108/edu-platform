@@ -1,5 +1,6 @@
 # TTS
 SILERO_MAX_CHARS: int = 800  # conservative limit: Silero returns 500 on very long inputs
+TTS_CACHE_TTL_DAYS: int = 7
 
 # Slide rendering
 SLIDE_DPI: int = 150  # indistinguishable from 300 DPI on 1080p, 4× smaller PNGs

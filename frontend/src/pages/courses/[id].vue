@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Trash2 } from 'lucide-vue-next'
+
 definePageMeta({ middleware: ['auth', 'teacher'] })
 
 const route = useRoute()
@@ -13,6 +15,13 @@ const addingModule = ref(false)
 const publishing = ref(false)
 const newLessonTitle = ref<Record<string, string>>({})
 const addingLesson = ref<Record<string, boolean>>({})
+
+const coverInputRef = ref<HTMLInputElement | null>(null)
+const uploadingCover = ref(false)
+const showDeleteConfirm = ref(false)
+const deletingCourse = ref(false)
+const deletingModule = ref<Record<string, boolean>>({})
+const deletingLesson = ref<Record<string, boolean>>({})
 
 const activeTab = ref<'content' | 'access'>('content')
 const accessLoading = ref(false)
@@ -151,6 +160,69 @@ const statusColor: Record<string, string> = {
   error: 'bg-red-100 text-red-600',
 }
 
+const uploadCover = async (e: Event) => {
+  const file = (e.target as HTMLInputElement).files?.[0]
+  if (!file) return
+  uploadingCover.value = true
+  actionError.value = ''
+  try {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await apiFetch<{ cover_url: string }>(
+      `/uploads/cover?course_id=${route.params.id}`,
+      { method: 'POST', body: form },
+    )
+    course.value.cover_url = res.cover_url
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Ошибка при загрузке обложки'
+  } finally {
+    uploadingCover.value = false
+    if (coverInputRef.value) coverInputRef.value.value = ''
+  }
+}
+
+const deleteCourse = async () => {
+  deletingCourse.value = true
+  actionError.value = ''
+  try {
+    await apiFetch(`/courses/${route.params.id}`, { method: 'DELETE' })
+    await navigateTo('/dashboard')
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Ошибка при удалении курса'
+    showDeleteConfirm.value = false
+  } finally {
+    deletingCourse.value = false
+  }
+}
+
+const deleteModule = async (moduleId: string) => {
+  if (!window.confirm('Удалить модуль вместе со всеми его уроками?')) return
+  deletingModule.value[moduleId] = true
+  actionError.value = ''
+  try {
+    await apiFetch(`/courses/${route.params.id}/modules/${moduleId}`, { method: 'DELETE' })
+    await load()
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Ошибка при удалении модуля'
+  } finally {
+    deletingModule.value[moduleId] = false
+  }
+}
+
+const deleteLesson = async (lessonId: string) => {
+  if (!window.confirm('Удалить урок?')) return
+  deletingLesson.value[lessonId] = true
+  actionError.value = ''
+  try {
+    await apiFetch(`/lessons/${lessonId}`, { method: 'DELETE' })
+    await load()
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Ошибка при удалении урока'
+  } finally {
+    deletingLesson.value[lessonId] = false
+  }
+}
+
 onMounted(async () => {
   await load()
   await restoreScroll()
@@ -168,11 +240,41 @@ onMounted(async () => {
 
     <!-- Header -->
     <div class="flex items-start justify-between mb-6">
-      <div>
-        <NuxtLink to="/dashboard" class="text-sm text-brand hover:underline mb-1 block">← Мои курсы</NuxtLink>
-        <h1 class="text-2xl font-semibold">{{ course.title }}</h1>
-        <p v-if="course.description" class="text-gray-500 mt-1 text-sm">{{ course.description }}</p>
+      <div class="flex gap-4">
+        <!-- Cover -->
+        <div
+          class="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200 flex-shrink-0 cursor-pointer group"
+          :class="uploadingCover ? 'opacity-50' : ''"
+          @click="coverInputRef?.click()"
+        >
+          <img
+            v-if="course.cover_url"
+            :src="course.cover_url"
+            alt="Обложка"
+            class="w-full h-full object-cover"
+          />
+          <div v-else class="w-full h-full bg-gray-100 flex items-center justify-center text-gray-400 text-xs text-center px-1">
+            Обложка
+          </div>
+          <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition flex items-center justify-center text-white text-xs">
+            {{ uploadingCover ? '…' : 'Изменить' }}
+          </div>
+        </div>
+        <input
+          ref="coverInputRef"
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          class="hidden"
+          @change="uploadCover"
+        />
+
+        <div>
+          <NuxtLink to="/dashboard" class="text-sm text-brand hover:underline mb-1 block">← Мои курсы</NuxtLink>
+          <h1 class="text-2xl font-semibold">{{ course.title }}</h1>
+          <p v-if="course.description" class="text-gray-500 mt-1 text-sm">{{ course.description }}</p>
+        </div>
       </div>
+
       <div class="flex flex-col items-end gap-2">
         <div class="flex gap-2">
           <NuxtLink
@@ -188,6 +290,29 @@ onMounted(async () => {
           >
             {{ publishing ? '…' : course.is_published ? 'Снять с публикации' : 'Опубликовать' }}
           </button>
+          <UiButton
+            v-if="!showDeleteConfirm"
+            variant="danger"
+            size="sm"
+            :disabled="deletingCourse || loading"
+            @click="showDeleteConfirm = true"
+          >
+            Удалить курс
+          </UiButton>
+          <template v-else>
+            <span class="text-xs text-red-600 self-center max-w-40 text-right leading-tight">
+              Удалить курс? Все уроки и прогресс учеников будут потеряны.
+            </span>
+            <UiButton variant="danger" size="sm" :loading="deletingCourse" @click="deleteCourse">
+              Да, удалить
+            </UiButton>
+            <button
+              class="text-sm text-gray-500 hover:text-gray-700"
+              @click="showDeleteConfirm = false"
+            >
+              Отмена
+            </button>
+          </template>
         </div>
         <span
           v-if="course.is_published"
@@ -235,13 +360,20 @@ onMounted(async () => {
           <div class="font-medium text-gray-800 mb-3 flex items-center gap-2">
             <span class="text-brand/60 text-xs font-mono">M</span>
             {{ m.title }}
+            <button
+              class="ml-auto text-gray-300 hover:text-red-500 transition disabled:opacity-40"
+              :disabled="deletingModule[m.id] || loading"
+              @click="deleteModule(m.id)"
+            >
+              <Trash2 class="w-4 h-4" />
+            </button>
           </div>
 
           <ul class="space-y-1 mb-3">
-            <li v-for="l in m.lessons" :key="l.id">
+            <li v-for="l in m.lessons" :key="l.id" class="flex items-center gap-1 group/lesson">
               <NuxtLink
                 :to="`/lessons/${l.id}`"
-                class="flex items-center justify-between rounded-lg px-3 py-2 hover:bg-gray-50 transition group border border-transparent hover:border-gray-200"
+                class="flex-1 flex items-center justify-between rounded-lg px-3 py-2 hover:bg-gray-50 transition group border border-transparent hover:border-gray-200"
               >
                 <span class="text-sm text-gray-800 group-hover:text-brand transition flex items-center gap-2">
                   <span class="text-gray-300 text-xs">▶</span>
@@ -254,6 +386,13 @@ onMounted(async () => {
                   {{ statusLabel[l.status] ?? l.status }}
                 </span>
               </NuxtLink>
+              <button
+                class="text-gray-300 hover:text-red-500 transition opacity-0 group-hover/lesson:opacity-100 disabled:opacity-40 px-1"
+                :disabled="deletingLesson[l.id] || loading"
+                @click="deleteLesson(l.id)"
+              >
+                <Trash2 class="w-4 h-4" />
+              </button>
             </li>
             <li v-if="!m.lessons?.length" class="text-sm text-gray-400 italic px-3 py-1">
               нет уроков
