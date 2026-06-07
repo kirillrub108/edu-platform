@@ -55,4 +55,4 @@ class Course(Base):
         cascade="all, delete-orphan",
         order_by="Module.order",
     )
-    enrollments = relationship("Enrollment", back_populates="course", cascade="all, delete-orphan")
+    enrollments = relationship("Enrollment", back_populates="course")

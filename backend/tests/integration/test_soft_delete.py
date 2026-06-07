@@ -101,7 +101,7 @@ async def test_restore_non_archived_returns_400(
     assert resp.status_code == 400
 
 
-async def test_archived_course_hidden_from_my_courses(
+async def test_archived_course_appears_in_my_courses_as_archived(
     client: AsyncClient,
     db_session: AsyncSession,
     teacher_user: User,
@@ -112,17 +112,22 @@ async def test_archived_course_hidden_from_my_courses(
     await make_enrollment(db_session, student_user, course)
 
     resp = await client.get("/api/v1/students/my-courses", cookies=student_token)
-    assert str(course.id) in [c["id"] for c in resp.json()]
+    body = resp.json()
+    assert str(course.id) in [c["id"] for c in body]
+    assert next(c for c in body if c["id"] == str(course.id))["is_archived"] is False
 
     course.deleted_at = datetime.now(timezone.utc)
     await db_session.commit()
 
     resp = await client.get("/api/v1/students/my-courses", cookies=student_token)
     assert resp.status_code == 200
-    assert str(course.id) not in [c["id"] for c in resp.json()]
+    body = resp.json()
+    # Archived course still visible — student retains access to their history.
+    assert str(course.id) in [c["id"] for c in body]
+    assert next(c for c in body if c["id"] == str(course.id))["is_archived"] is True
 
 
-async def test_archived_course_direct_url_404_for_student(
+async def test_archived_course_direct_url_accessible_for_enrolled_student(
     client: AsyncClient,
     db_session: AsyncSession,
     teacher_user: User,
@@ -137,7 +142,8 @@ async def test_archived_course_direct_url_404_for_student(
     resp = await client.get(
         f"/api/v1/students/courses/{course.id}", cookies=student_token
     )
-    assert resp.status_code == 404
+    # Enrolled students can still open archived course content.
+    assert resp.status_code == 200
 
 
 async def test_soft_delete_user_blocks_auth_and_anonymizes(

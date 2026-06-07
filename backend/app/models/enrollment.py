@@ -27,8 +27,10 @@ class Enrollment(Base):
     student_id = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
+    # RESTRICT (not CASCADE) so soft-deleted courses keep their enrollment history.
+    # Hard-deleting a course with enrollments raises IntegrityError → 409 in the router.
     course_id = Column(
-        UUID(as_uuid=True), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True), ForeignKey("courses.id", ondelete="RESTRICT"), nullable=False
     )
     enrolled_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(

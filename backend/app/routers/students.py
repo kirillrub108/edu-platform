@@ -38,19 +38,15 @@ async def enroll(
 ):
     course: Course | None = None
     if data.course_id:
-        course = await db.scalar(
-            select(Course).where(
-                Course.id == data.course_id, Course.deleted_at.is_(None)
-            )
-        )
+        course = await db.scalar(select(Course).where(Course.id == data.course_id))
     elif data.access_code:
-        course = await db.scalar(
-            select(Course).where(
-                Course.access_code == data.access_code, Course.deleted_at.is_(None)
-            )
-        )
+        course = await db.scalar(select(Course).where(Course.access_code == data.access_code))
 
-    if not course or not course.is_published:
+    if not course:
+        raise HTTPException(status_code=404, detail="Course not available")
+    if course.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="Course is not available")
+    if not course.is_published:
         raise HTTPException(status_code=404, detail="Course not available")
 
     existing = await db.scalar(
@@ -76,8 +72,7 @@ async def my_courses(
     enrollments = await db.scalars(
         select(Enrollment)
         .join(Course, Enrollment.course_id == Course.id)
-        # Archived courses (deleted_at set) disappear from the student's list.
-        .where(Enrollment.student_id == user.id, Course.deleted_at.is_(None))
+        .where(Enrollment.student_id == user.id)
         .options(
             selectinload(Enrollment.course).selectinload(Course.owner),
             selectinload(Enrollment.course).selectinload(Course.modules).selectinload(Module.lessons),
@@ -132,8 +127,7 @@ async def course_details(
 
     course = await db.scalar(
         select(Course)
-        # Archived course → 404 even for an enrolled student (direct URL).
-        .where(Course.id == course_id, Course.deleted_at.is_(None))
+        .where(Course.id == course_id)
         .options(
             selectinload(Course.owner),
             selectinload(Course.modules).selectinload(Module.lessons),
