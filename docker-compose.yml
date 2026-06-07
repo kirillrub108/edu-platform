@@ -180,6 +180,36 @@ services:
     networks:
       - edu-network
 
+  celery_email_worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    user: "1000:1000"
+    # Dedicated mail worker so transactional email never competes with the
+    # video/vision pipelines for concurrency.
+    command: >
+      celery -A app.celery_app worker
+      --pool=prefork
+      --concurrency=2
+      --queues=celery_email
+      --hostname=email@%h
+      --loglevel=info
+    env_file:
+      - .env
+    environment:
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      APP_VERSION: ${APP_VERSION:-dev}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+    volumes:
+      - ./backend/storage:/app/storage
+      - ./backend/app:/app/app
+    depends_on:
+      - backend
+      - redis
+    networks:
+      - edu-network
+
   prometheus:
     image: prom/prometheus:latest
     ports:

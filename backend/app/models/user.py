@@ -36,6 +36,10 @@ class User(Base):
         nullable=False,
     )
     is_active = Column(Boolean, default=True, nullable=False)
+    # Email ownership proof. New registrations start False and must click the
+    # signed verification link; content-creating teacher endpoints are gated on
+    # this via require_verified_teacher. Existing users are backfilled to True.
+    email_verified = Column(Boolean, server_default="false", nullable=False, default=False)
     # Soft delete: non-null = hidden everywhere (see app/database.py global filter)
     # and slated for physical purge after SOFT_DELETE_PURGE_DAYS.
     deleted_at = Column(DateTime(timezone=True), nullable=True, default=None, index=True)

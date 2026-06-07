@@ -1,16 +1,48 @@
 import secrets
 from datetime import datetime, timezone
+from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
+from fastapi.responses import RedirectResponse
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.database import get_db
 from app.dependencies import get_current_user
 from app.limiter import limiter
 from app.models.user import User
 from app.schemas.auth import UserLogin, UserOut, UserRegister
-from app.services.auth_service import AuthService, decode_token, get_auth_service
+from app.services.auth_service import (
+    AuthService,
+    decode_token,
+    generate_email_verification_token,
+    get_auth_service,
+    verify_email_verification_token,
+)
+from app.tasks.email_pipeline import send_email
+
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/v1/auth", tags=["auth"])
+
+
+def _enqueue_verification_email(user: User) -> None:
+    """Mint a signed verification token and enqueue the verification email.
+    Enqueue failures (e.g. broker down) are logged, never raised — registration
+    and resend must not fail because mail couldn't be queued."""
+    token = generate_email_verification_token(str(user.id))
+    verify_url = f"{settings.BASE_URL}/api/v1/auth/verify-email?token={token}"
+    try:
+        send_email.delay(
+            to=user.email,
+            subject="Подтвердите ваш email — Edllm",
+            template_name="verify_email.html",
+            context={"full_name": user.full_name or "", "verify_url": verify_url},
+        )
+    except Exception:
+        logger.warning("verification_email_enqueue_failed", user_id=str(user.id), exc_info=True)
 
 
 def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
@@ -52,12 +84,14 @@ async def register(
     data: UserRegister,
     service: AuthService = Depends(get_auth_service),
 ) -> User:
-    return await service.register(
+    user = await service.register(
         email=data.email,
         password=data.password,
         full_name=data.full_name,
         role=data.role,
     )
+    _enqueue_verification_email(user)
+    return user
 
 
 @router.post("/login", status_code=status.HTTP_200_OK)
@@ -133,3 +167,50 @@ async def logout_all(
 @router.get("/me", response_model=UserOut)
 async def me(user: User = Depends(get_current_user)) -> User:
     return user
+
+
+@router.get("/verify-email")
+async def verify_email(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+) -> RedirectResponse:
+    """Validate the signed token, flip email_verified to True (idempotent), and
+    302 back to the SPA login. Invalid/expired tokens redirect with verified=0
+    and a reason — never a 500."""
+    try:
+        user_id = verify_email_verification_token(token)
+    except ValueError as exc:
+        return RedirectResponse(
+            f"{settings.FRONTEND_URL}/login?verified=0&reason={exc}",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    user = await db.scalar(select(User).where(User.id == UUID(user_id)))
+    if user is None:
+        return RedirectResponse(
+            f"{settings.FRONTEND_URL}/login?verified=0&reason=not_found",
+            status_code=status.HTTP_302_FOUND,
+        )
+
+    if not user.email_verified:
+        user.email_verified = True
+        await db.commit()
+
+    return RedirectResponse(
+        f"{settings.FRONTEND_URL}/login?verified=1",
+        status_code=status.HTTP_302_FOUND,
+    )
+
+
+@router.post("/resend-verification", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("3/minute")
+async def resend_verification(
+    request: Request,
+    user: User = Depends(get_current_user),
+) -> Response:
+    """Re-send the verification email to the logged-in user. Already-verified
+    users get a 400 and no email is sent."""
+    if user.email_verified:
+        raise HTTPException(status_code=400, detail="Email already verified")
+    _enqueue_verification_email(user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

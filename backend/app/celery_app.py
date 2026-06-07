@@ -61,6 +61,7 @@ celery_app = Celery(
         "app.tasks.vision_pipeline",
         "app.tasks.quiz_pipeline",
         "app.tasks.purge_pipeline",
+        "app.tasks.email_pipeline",
     ],
 )
 
@@ -76,6 +77,7 @@ celery_app.conf.update(
         Queue("video", routing_key="video"),
         Queue("vision", routing_key="vision"),
         Queue("quiz", routing_key="quiz"),
+        Queue("celery_email", routing_key="celery_email"),
     ),
     task_default_queue="video",
     task_default_routing_key="video",

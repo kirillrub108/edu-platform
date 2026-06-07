@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.constants import ACCESS_CODE_ALPHABET, ACCESS_CODE_LENGTH, ACCESS_CODE_MAX_RETRIES
 from app.database import get_db
-from app.dependencies import require_teacher
+from app.dependencies import require_teacher, require_verified_teacher
 from app.models.course import AccessMode, Course
 from app.models.lesson import Module
 from app.models.user import User
@@ -121,7 +121,7 @@ async def list_courses_grouped(
 @router.post("/", response_model=CourseOut, status_code=status.HTTP_201_CREATED)
 async def create_course(
     data: CourseCreate,
-    user: User = Depends(require_teacher),
+    user: User = Depends(require_verified_teacher),
     db: AsyncSession = Depends(get_db),
 ):
     course = Course(title=data.title, description=data.description, cover_url=data.cover_url, owner_id=user.id)
@@ -156,7 +156,7 @@ async def get_course(
 async def update_course(
     course_id: UUID,
     data: CourseUpdate,
-    user: User = Depends(require_teacher),
+    user: User = Depends(require_verified_teacher),
     db: AsyncSession = Depends(get_db),
 ):
     course = await _get_owned_course(course_id, user, db)
@@ -210,7 +210,7 @@ async def restore_course(
 async def create_module(
     course_id: UUID,
     data: ModuleCreate,
-    user: User = Depends(require_teacher),
+    user: User = Depends(require_verified_teacher),
     db: AsyncSession = Depends(get_db),
 ):
     await _get_owned_course(course_id, user, db)

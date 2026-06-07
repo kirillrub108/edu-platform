@@ -715,6 +715,33 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## Email-верификация и отправка писем
+
+**Контекст:** при регистрации нужно подтверждать email, а после публикации видеолекции — уведомлять преподавателя. Письма не должны блокировать запросы или конкурировать с генерацией видео за concurrency.
+
+**Решение:**
+
+- **Stateless verify-токен** через `itsdangerous.URLSafeTimedSerializer` (подпись на `SECRET_KEY`, salt `email-verify`, срок `EMAIL_VERIFICATION_TTL_SECONDS`). Токен — сам по себе доказательство, **таблицы в БД нет** (`generate_/verify_email_verification_token` в `services/auth_service.py`).
+- **Отдельная очередь `celery_email`** и воркер `celery_email_worker` (`-Q celery_email -c 2`). Таска `send_email` (`app/tasks/email_pipeline.py`) — sync, `autoretry_for=(EmailDeliveryError,)` (сеть/5xx), `max_retries=3`, exp backoff; провайдерский 4xx — постоянная ошибка (`RuntimeError`, без ретраев).
+- **Тонкий `email_service`**: Jinja2-рендер (`templates/email/*.html`) + sync-отправка через провайдер, выбираемый по `EMAIL_PROVIDER` (реализован Resend по HTTP, интерфейс готов под SendGrid). Web-сторона провайдера НЕ дёргает — только ставит `send_email.delay(...)`.
+- **Гейтинг, а не блок логина:** `require_verified_teacher` (переиспользует `require_teacher`) навешен только на эндпоинты создания/изменения контента (courses POST/PUT, modules, lessons POST + generate-video, uploads/\*, slides analyze). Неверифицированный teacher логинится и читает данные, но контент не создаёт → 403.
+- `video_pipeline` после `_set_status(published)` ставит письмо «видео готово»; сбой постановки обёрнут и не роняет статус.
+
+**Альтернативы:**
+
+- *Токен в БД (one-time)* — даёт отзыв и одноразовость, но требует таблицу + чистку; для подтверждения email избыточно, подписанного TTL-токена достаточно.
+- *Блокировать логин до верификации* — хуже UX (юзер не может зайти и переотправить письмо), ломает resend-флоу.
+- *Слать письма из очереди video/vision* — отнимает concurrency у тяжёлой генерации; отдельная очередь изолирует.
+
+**Trade-offs:**
+
+- + Подтверждение email не трогает access-путь и не требует БД-состояния.
+- + Падение почтового провайдера ретраится и не влияет ни на регистрацию, ни на published-статус.
+- − Stateless-токен нельзя отозвать досрочно (живёт весь TTL); приемлемо для verify.
+- − `EMAIL_VERIFICATION_TTL_SECONDS`/retry — в `constants.py`, секреты (`RESEND_API_KEY`, `EMAIL_FROM`, `FRONTEND_URL`) — в `config.py`/`.env`.
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.

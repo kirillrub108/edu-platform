@@ -307,6 +307,7 @@ async def teacher_user(db_session: Any) -> Any:
         full_name="Teacher One",
         role=UserRole.teacher,
         is_active=True,
+        email_verified=True,
     )
     db_session.add(user)
     await db_session.commit()
@@ -355,6 +356,25 @@ def student_token(student_user: Any) -> dict[str, str]:
 
 
 # ── 6. External-service mocks ────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def mock_send_email(monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Stub the send_email task's enqueue so no real email provider is hit.
+
+    Celery runs in EAGER mode, so an un-stubbed `send_email.delay(...)` would
+    execute the task body in-process and call Resend. Patching `.delay` on the
+    shared task object covers every caller (auth router, video pipeline), since
+    they all reference the same registered task. Returns the Mock so tests can
+    assert enqueue calls / read kwargs.
+    """
+    from unittest.mock import MagicMock
+
+    from app.tasks import email_pipeline
+
+    m = MagicMock(name="send_email.delay")
+    monkeypatch.setattr(email_pipeline.send_email, "delay", m)
+    return m
 
 def _synthetic_wav(duration_s: float = 1.0, sample_rate: int = 48000) -> bytes:
     """Return WAV bytes — silent, 16-bit mono — that wave / ffprobe can read."""

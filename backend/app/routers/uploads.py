@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
 
 from app.database import get_db
-from app.dependencies import require_teacher
+from app.dependencies import require_verified_teacher
 from app.models.course import Course
 from app.models.lesson import Lesson, LessonStatus
 from app.models.slide_text import SlideText
@@ -201,7 +201,7 @@ def _extract_script_text(filename: str, content: bytes) -> str:
 async def upload_pptx(
     file: UploadFile,
     lesson_id: UUID | None = None,
-    user: User = Depends(require_teacher),
+    user: User = Depends(require_verified_teacher),
     db: AsyncSession = Depends(get_db),
 ):
     await validate_upload(file, [".pptx", ".ppt", ".pdf"])
@@ -230,7 +230,7 @@ async def upload_pptx(
 async def upload_script(
     file: UploadFile,
     lesson_id: UUID | None = None,
-    user: User = Depends(require_teacher),
+    user: User = Depends(require_verified_teacher),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload a TXT/MD/PDF file, extract its text and (optionally) save to lesson.script.
@@ -272,7 +272,7 @@ async def upload_script(
 @router.post("/video")
 async def upload_video(
     file: UploadFile,
-    user: User = Depends(require_teacher),
+    user: User = Depends(require_verified_teacher),
 ):
     await validate_upload(file, [".mp4", ".webm", ".mov"])
     relative = await storage_service.save_upload(file, "videos")
@@ -290,7 +290,7 @@ _MAX_COVER_BYTES = 5 * 1024 * 1024
 async def upload_cover(
     file: UploadFile,
     course_id: UUID | None = None,
-    user: User = Depends(require_teacher),
+    user: User = Depends(require_verified_teacher),
     db: AsyncSession = Depends(get_db),
 ):
     if file.content_type not in _ALLOWED_COVER_TYPES:

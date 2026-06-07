@@ -34,11 +34,13 @@ import jwt
 from argon2 import PasswordHasher
 from argon2.exceptions import VerifyMismatchError
 from fastapi import Depends, HTTPException, status
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.constants import EMAIL_VERIFICATION_TTL_SECONDS
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.redis_client import get_redis
@@ -136,6 +138,34 @@ def decode_token(token: str, *, verify_exp: bool = True) -> dict[str, Any]:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
+
+# ── Stateless email-verification token (itsdangerous, signed with SECRET_KEY) ──
+# No DB row — the token *is* the proof. A separate salt isolates it from any
+# other itsdangerous use of the same SECRET_KEY.
+
+_EMAIL_VERIFY_SALT = "email-verify"
+
+
+def _email_verify_serializer() -> URLSafeTimedSerializer:
+    return URLSafeTimedSerializer(settings.SECRET_KEY, salt=_EMAIL_VERIFY_SALT)
+
+
+def generate_email_verification_token(user_id: str) -> str:
+    return _email_verify_serializer().dumps(user_id)
+
+
+def verify_email_verification_token(token: str) -> str:
+    """Return the user_id carried by a valid token. Raises ValueError (never an
+    HTTP 5xx) on an expired or tampered token so callers can redirect cleanly.
+    The ValueError message ('expired' | 'invalid') doubles as the redirect
+    reason code."""
+    try:
+        return _email_verify_serializer().loads(token, max_age=EMAIL_VERIFICATION_TTL_SECONDS)
+    except SignatureExpired as exc:
+        raise ValueError("expired") from exc
+    except BadSignature as exc:
+        raise ValueError("invalid") from exc
 
 
 # ── Service ──────────────────────────────────────────────────────────────────

@@ -20,6 +20,7 @@ from app.models.course import Course
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
 from app.models.slide_text import SlideText
+from app.models.user import User
 from app.services.billing_service import (
     sync_charge_credits,
     sync_release_credits,
@@ -131,6 +132,31 @@ def _set_status(
     if status in (LessonStatus.published, LessonStatus.error):
         lesson.video_task_id = None
     session.commit()
+
+
+def _enqueue_video_ready_email(session: Session, lesson: Lesson, owner_id: UUID) -> None:
+    """Notify the course owner that their video lesson is published. Best-effort:
+    any failure (owner gone, no email, broker down) is logged and swallowed so it
+    can never roll back the published status."""
+    try:
+        from app.tasks.email_pipeline import send_email
+
+        owner = session.get(User, owner_id)
+        if not owner or not owner.email:
+            return
+        lesson_url = f"{settings.FRONTEND_URL}/lessons/{lesson.id}"
+        send_email.delay(
+            to=owner.email,
+            subject="Видеолекция готова — Edllm",
+            template_name="video_ready.html",
+            context={
+                "full_name": owner.full_name or "",
+                "lesson_title": lesson.title or "",
+                "lesson_url": lesson_url,
+            },
+        )
+    except Exception:
+        logger.warning("video_ready_email_enqueue_failed", lesson_id=str(lesson.id), exc_info=True)
 
 
 def _split_and_annotate(
@@ -477,6 +503,10 @@ def generate_video_lesson(
             # _set_status commits the session, which also persists new_video.
             _set_status(session, lesson_uuid, LessonStatus.published)
             _publish(lesson_id, {"status": "published", "video_url": video_url})
+
+            # Notify the owner via email (separate celery_email queue). Failure
+            # here must never undo the published status.
+            _enqueue_video_ready_email(session, owner_lesson, owner_course.owner_id)
 
             # Remove checkpoint on clean completion — no longer needed.
             if cp_redis:

@@ -17,4 +17,5 @@ class UserOut(UserBase):
     id: UUID
     role: UserRole
     is_active: bool
+    email_verified: bool
     created_at: datetime

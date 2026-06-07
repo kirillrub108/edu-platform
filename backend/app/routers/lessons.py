@@ -11,7 +11,12 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.celery_app import celery_app
 from app.database import get_db
-from app.dependencies import get_current_user, get_owned_lesson, require_teacher
+from app.dependencies import (
+    get_current_user,
+    get_owned_lesson,
+    require_teacher,
+    require_verified_teacher,
+)
 from app.models.course import Course
 from app.models.enrollment import Enrollment
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
@@ -57,7 +62,7 @@ router = APIRouter(prefix="/api/v1/lessons", tags=["lessons"])
 @router.post("/", response_model=LessonOut, status_code=status.HTTP_201_CREATED)
 async def create_lesson(
     data: LessonCreate,
-    user: User = Depends(require_teacher),
+    user: User = Depends(require_verified_teacher),
     db: AsyncSession = Depends(get_db),
 ):
     module = await db.get(Module, data.module_id)
@@ -143,7 +148,7 @@ async def generate_video(
     request: Request,
     lesson_id: UUID,
     data: VideoGenerateRequest,
-    user: User = Depends(require_teacher),
+    user: User = Depends(require_verified_teacher),
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):

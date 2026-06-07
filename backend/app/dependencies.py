@@ -105,6 +105,18 @@ async def require_teacher(user: User = Depends(get_current_user)) -> User:
     return user
 
 
+async def require_verified_teacher(user: User = Depends(require_teacher)) -> User:
+    """Teacher whose email is verified. Gate for content-creating/modifying
+    endpoints only — GET and /auth/* stay open so an unverified teacher can sign
+    in, browse, and trigger a resend, but cannot create content until verified."""
+    if not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email not verified. Please verify your email to create content.",
+        )
+    return user
+
+
 async def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
     """Gate for billing admin endpoints. There is no admin UserRole; access is
     granted by a shared secret (`ADMIN_API_TOKEN`) sent in the X-Admin-Token

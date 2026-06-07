@@ -53,6 +53,14 @@ class Settings(BaseSettings):
     YANDEX_FOLDER_ID: str = ""
     YANDEX_API_KEY: str = ""
 
+    # Email — transactional mail (verification, video-ready). Sent only from the
+    # send_email Celery task. Provider is pluggable; Resend is implemented today.
+    EMAIL_PROVIDER: str = "resend"
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "Edllm <no-reply@edllm.app>"
+    # Public origin of the SPA — used to build verify/redirect/lesson links.
+    FRONTEND_URL: str = "http://localhost:3000"
+
     # TTS
     TTS_PROVIDER: str = "silero"
     SILERO_TTS_URL: str = "http://silero-tts:9898"

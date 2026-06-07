@@ -67,6 +67,13 @@ QUIZ_TYPE_DISTRIBUTION: dict[str, float] = {
 # Below this count the distribution is skipped and all questions are single_choice.
 QUIZ_MIN_FOR_DISTRIBUTION: int = 4
 
+# Email
+# Lifetime of the signed email-verification token (itsdangerous max_age).
+EMAIL_VERIFICATION_TTL_SECONDS: int = 60 * 60 * 24  # 24h
+# send_email Celery task retry policy on retriable provider failures.
+EMAIL_SEND_MAX_RETRIES: int = 3
+EMAIL_SEND_RETRY_BACKOFF: int = 5  # base seconds; Celery grows it exponentially
+
 # Access code generation
 ACCESS_CODE_LENGTH: int = 6
 # No I, O, 1, 0 — visually ambiguous characters excluded.
