@@ -27,8 +27,10 @@ const deletingLesson = ref<Record<string, boolean>>({})
 const activeTab = ref<'content' | 'access'>('content')
 const accessLoading = ref(false)
 const accessError = ref('')
-const copied = ref(false)
-let copyTimeout: ReturnType<typeof setTimeout> | null = null
+const copiedCode = ref(false)
+const copiedLink = ref(false)
+let codeTimeout: ReturnType<typeof setTimeout> | null = null
+let linkTimeout: ReturnType<typeof setTimeout> | null = null
 
 const load = async () => {
   loading.value = true
@@ -106,11 +108,18 @@ const joinCodeUrl = computed(() =>
   import.meta.client ? `${window.location.origin}/join?code=${course.value?.access_code}` : ''
 )
 
-const copyText = async (text: string) => {
+const copyCode = async (text: string) => {
   await navigator.clipboard.writeText(text)
-  copied.value = true
-  if (copyTimeout) clearTimeout(copyTimeout)
-  copyTimeout = setTimeout(() => { copied.value = false }, 2000)
+  copiedCode.value = true
+  if (codeTimeout) clearTimeout(codeTimeout)
+  codeTimeout = setTimeout(() => { copiedCode.value = false }, 2000)
+}
+
+const copyLink = async (text: string) => {
+  await navigator.clipboard.writeText(text)
+  copiedLink.value = true
+  if (linkTimeout) clearTimeout(linkTimeout)
+  linkTimeout = setTimeout(() => { copiedLink.value = false }, 2000)
 }
 
 const setMode = async (mode: 'link' | 'code') => {
@@ -519,9 +528,9 @@ onMounted(async () => {
           </code>
           <button
             class="px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition whitespace-nowrap"
-            @click="copyText(joinLinkUrl)"
+            @click="copyLink(joinLinkUrl)"
           >
-            {{ copied ? '✓ Скопировано' : 'Копировать' }}
+            {{ copiedLink ? '✓ Скопировано' : 'Копировать' }}
           </button>
         </div>
       </div>
@@ -536,9 +545,9 @@ onMounted(async () => {
             </div>
             <button
               class="px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition whitespace-nowrap"
-              @click="copyText(course.access_code)"
+              @click="copyCode(course.access_code)"
             >
-              {{ copied ? '✓ Скопировано' : 'Копировать' }}
+              {{ copiedCode ? '✓ Скопировано' : 'Копировать' }}
             </button>
           </div>
           <div class="flex items-center justify-end gap-2 mt-2">
@@ -561,9 +570,9 @@ onMounted(async () => {
             </code>
             <button
               class="px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition whitespace-nowrap"
-              @click="copyText(joinCodeUrl)"
+              @click="copyLink(joinCodeUrl)"
             >
-              {{ copied ? '✓ Скопировано' : 'Копировать' }}
+              {{ copiedLink ? '✓ Скопировано' : 'Копировать' }}
             </button>
           </div>
         </div>
