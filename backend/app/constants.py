@@ -8,6 +8,11 @@ SLIDE_DPI: int = 150  # indistinguishable from 300 DPI on 1080p, 4× smaller PNG
 # Upload limits
 MAX_SCRIPT_BYTES: int = 10 * 1024 * 1024  # 10 MB
 
+# Soft delete
+# How long a soft-deleted (archived) record lingers before the daily
+# purge_soft_deleted Celery task physically removes it and its files.
+SOFT_DELETE_PURGE_DAYS: int = 30
+
 # Worker concurrency
 TTS_WORKERS: int = 4     # matches NUMBER_OF_THREADS in silero-tts docker-compose service
 ENCODE_WORKERS: int = 3  # concurrent FFmpeg processes; leaves headroom for LO and TTS threads

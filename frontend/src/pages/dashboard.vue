@@ -1,20 +1,32 @@
 <script setup lang="ts">
-import { Plus, BookOpen, CheckCircle2, Layers, AlertCircle, ArrowRight } from 'lucide-vue-next'
+import { Plus, BookOpen, CheckCircle2, Layers, AlertCircle } from 'lucide-vue-next'
 
 definePageMeta({ middleware: ['auth', 'teacher'], layout: 'bare' })
 
 const { apiFetch } = useApi()
-const courses = ref<any[]>([])
+
+// Grouped course state: kept here (matches the existing useApi-in-page pattern;
+// no Pinia store needed) so archive/restore can move cards between sections
+// without a full reload.
+const groups = reactive<{ published: any[]; drafts: any[]; archived: any[] }>({
+  published: [],
+  drafts: [],
+  archived: [],
+})
 const loading = ref(true)
 const apiError = ref('')
-
-const VISIBLE_COURSES = 6
+const actionError = ref('')
 
 const load = async () => {
   loading.value = true
   apiError.value = ''
   try {
-    courses.value = await apiFetch<any[]>('/courses/')
+    const data = await apiFetch<{ published: any[]; drafts: any[]; archived: any[] }>(
+      '/courses/grouped',
+    )
+    groups.published = data.published ?? []
+    groups.drafts = data.drafts ?? []
+    groups.archived = data.archived ?? []
   } catch (e: any) {
     if (e?.response?.status !== 401) {
       apiError.value = 'Не удалось загрузить курсы. Проверьте, что бэкенд запущен.'
@@ -24,14 +36,65 @@ const load = async () => {
   }
 }
 
+const sections = computed(() => [
+  { key: 'published', title: 'Опубликованные', items: groups.published },
+  { key: 'drafts', title: 'Черновики', items: groups.drafts },
+  { key: 'archived', title: 'Архив', items: groups.archived },
+])
+
+const isEmpty = computed(
+  () => !groups.published.length && !groups.drafts.length && !groups.archived.length,
+)
+
 const stats = computed(() => ({
-  total: courses.value.length,
-  published: courses.value.filter(c => c.is_published).length,
-  lessons: courses.value.reduce((a, c) => a + (c.lessons_count ?? 0), 0),
+  total: groups.published.length + groups.drafts.length,
+  published: groups.published.length,
+  lessons: [...groups.published, ...groups.drafts].reduce(
+    (a, c) => a + (c.lessons_count ?? 0),
+    0,
+  ),
 }))
 
-const visibleCourses = computed(() => courses.value.slice(0, VISIBLE_COURSES))
-const hiddenCount = computed(() => Math.max(0, courses.value.length - VISIBLE_COURSES))
+const removeFrom = (arr: any[], id: string): any | null => {
+  const i = arr.findIndex(c => c.id === id)
+  return i !== -1 ? arr.splice(i, 1)[0] : null
+}
+
+const sortByCreatedDesc = (arr: any[]) =>
+  arr.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
+const archiveCourse = async (id: string) => {
+  actionError.value = ''
+  try {
+    await apiFetch(`/courses/${id}`, { method: 'DELETE' })
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Не удалось архивировать курс'
+    return
+  }
+  const course = removeFrom(groups.published, id) ?? removeFrom(groups.drafts, id)
+  if (!course) {
+    await load()
+    return
+  }
+  course.is_archived = true
+  course.days_until_purge = 30
+  groups.archived.unshift(course)
+}
+
+const restoreCourse = async (id: string) => {
+  actionError.value = ''
+  let restored: any
+  try {
+    restored = await apiFetch<any>(`/courses/${id}/restore`, { method: 'PATCH' })
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Не удалось восстановить курс'
+    return
+  }
+  removeFrom(groups.archived, id)
+  const target = restored.is_published ? groups.published : groups.drafts
+  target.unshift(restored)
+  sortByCreatedDesc(target)
+}
 
 onMounted(async () => {
   await load()
@@ -87,7 +150,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- error state -->
+      <!-- error states -->
       <div
         v-if="apiError"
         class="flex items-start gap-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-2xl p-4 mb-6"
@@ -95,30 +158,26 @@ onMounted(async () => {
         <AlertCircle class="w-5 h-5 shrink-0 mt-0.5" />
         <div>{{ apiError }}</div>
       </div>
+      <div
+        v-if="actionError"
+        class="flex items-start gap-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-2xl p-4 mb-6"
+      >
+        <AlertCircle class="w-5 h-5 shrink-0 mt-0.5" />
+        <div>{{ actionError }}</div>
+      </div>
 
       <!-- 2-column layout: courses + analytics side-by-side on lg+ -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <!-- Courses column -->
-        <section class="lg:col-span-2 space-y-3">
-          <div class="flex items-center justify-between">
-            <h2 class="text-base font-semibold text-gray-900">Курсы</h2>
-            <NuxtLink
-              v-if="hiddenCount > 0"
-              to="/courses"
-              class="text-sm text-violet-700 hover:text-violet-800 inline-flex items-center gap-1"
-            >
-              Все курсы ({{ courses.length }}) <ArrowRight class="w-3.5 h-3.5" />
-            </NuxtLink>
-          </div>
-
+        <div class="lg:col-span-2 space-y-8">
           <!-- loading -->
           <div v-if="loading" class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <SkeletonCard v-for="i in 4" :key="i" />
           </div>
 
-          <!-- empty -->
+          <!-- empty (no courses at all) -->
           <div
-            v-else-if="!courses.length"
+            v-else-if="isEmpty"
             class="text-center py-16 bg-white rounded-2xl border border-gray-100"
           >
             <div class="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 grid place-items-center mx-auto mb-3">
@@ -134,15 +193,28 @@ onMounted(async () => {
             </NuxtLink>
           </div>
 
-          <!-- grid (bounded to VISIBLE_COURSES) -->
-          <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <CourseCard
-              v-for="(c, i) in visibleCourses"
-              :key="c.id"
-              :course="{ ...c, gradient_idx: i }"
-            />
-          </div>
-        </section>
+          <!-- grouped sections (empty sections are hidden) -->
+          <template v-else>
+            <section v-for="section in sections" :key="section.key" v-show="section.items.length">
+              <div class="flex items-center gap-2 mb-3">
+                <h2 class="text-base font-semibold text-gray-900">{{ section.title }}</h2>
+                <span class="text-xs font-medium text-gray-500 bg-gray-100 rounded-full px-2 py-0.5 tabular-nums">
+                  {{ section.items.length }}
+                </span>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <CourseCard
+                  v-for="(c, i) in section.items"
+                  :key="c.id"
+                  :course="{ ...c, gradient_idx: i }"
+                  :show-actions="true"
+                  @archive="archiveCourse"
+                  @restore="restoreCourse"
+                />
+              </div>
+            </section>
+          </template>
+        </div>
 
         <!-- Analytics column -->
         <aside class="lg:col-span-1">

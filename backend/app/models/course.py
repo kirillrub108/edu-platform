@@ -37,6 +37,9 @@ class Course(Base):
     )
     access_code = Column(String(20), nullable=True, unique=True)
     is_published = Column(Boolean, default=False, nullable=False)
+    # Soft delete (archive). Unlike User/Lesson this is NOT filtered globally —
+    # teachers must still see archived courses (see app/database.py comment).
+    deleted_at = Column(DateTime(timezone=True), nullable=True, default=None, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

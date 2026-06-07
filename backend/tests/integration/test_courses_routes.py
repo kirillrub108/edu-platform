@@ -71,37 +71,37 @@ async def test_teacher_lists_only_own_courses(
     assert "Theirs" not in titles
 
 
-async def test_delete_course_cascades_to_modules_and_lessons(
+async def test_delete_course_soft_deletes_and_retains_children(
     client: AsyncClient,
     db_session: AsyncSession,
     teacher_user: User,
     teacher_token: dict[str, str],
 ) -> None:
+    # DELETE is now a soft delete (archive): the course is hidden from students
+    # and physically removed only by the purge task. Children are retained.
     course = await make_course(db_session, owner=teacher_user)
     module = await make_module(db_session, course)
     lesson = await make_lesson(db_session, module)
+    # Capture PKs before expire_all() so the queries below don't lazy-refresh
+    # an expired ORM attribute (sync IO) inside the async session.
+    course_id, module_id, lesson_id = course.id, module.id, lesson.id
 
     resp = await client.delete(
-        f"/api/v1/courses/{course.id}", cookies=teacher_token
+        f"/api/v1/courses/{course_id}", cookies=teacher_token
     )
     assert resp.status_code == 204
 
-    # Direct DB checks — cascade must have removed the children.
-    refetch = await client.get(
-        f"/api/v1/courses/{course.id}", cookies=teacher_token
-    )
-    assert refetch.status_code == 404
-
     db_session.expire_all()
-    module_row = await db_session.execute(
-        select(Module).where(Module.id == module.id)
-    )
-    assert module_row.scalar_one_or_none() is None
+    # Course row stays, with deleted_at set.
+    course_row = await db_session.scalar(select(Course).where(Course.id == course_id))
+    assert course_row is not None
+    assert course_row.deleted_at is not None
 
-    lesson_row = await db_session.execute(
-        select(Lesson).where(Lesson.id == lesson.id)
-    )
-    assert lesson_row.scalar_one_or_none() is None
+    # Children are retained until purge.
+    module_row = await db_session.scalar(select(Module).where(Module.id == module_id))
+    assert module_row is not None
+    lesson_row = await db_session.scalar(select(Lesson).where(Lesson.id == lesson_id))
+    assert lesson_row is not None
 
 
 async def test_publish_toggle_flips_is_published(

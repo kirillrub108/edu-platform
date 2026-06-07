@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import delete
+from sqlalchemy import delete, select
 
 from app.database import get_db
 from app.dependencies import require_teacher
@@ -210,7 +210,7 @@ async def upload_pptx(
 
     # Optionally attach the uploaded file to a lesson right away
     if lesson_id is not None:
-        lesson = await db.get(Lesson, lesson_id)
+        lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
         if lesson is None:
             raise HTTPException(status_code=404, detail="Lesson not found")
         lesson.pptx_path = relative
@@ -260,7 +260,7 @@ async def upload_script(
         )
 
     if lesson_id is not None:
-        lesson = await db.get(Lesson, lesson_id)
+        lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
         if lesson is None:
             raise HTTPException(status_code=404, detail="Lesson not found")
         lesson.script = script
@@ -311,4 +311,7 @@ async def upload_cover(
         course.cover_url = cover_url
         await db.commit()
 
-    return {"cover_url": cover_url}
+    # Return both keys: `cover_url` (read by pages/courses/[id].vue) and
+    # `file_url` (read by components/CourseCoverUpload.vue, matching the
+    # /uploads/pptx and /uploads/script convention).
+    return {"cover_url": cover_url, "file_url": cover_url}

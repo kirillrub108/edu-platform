@@ -36,6 +36,9 @@ class User(Base):
         nullable=False,
     )
     is_active = Column(Boolean, default=True, nullable=False)
+    # Soft delete: non-null = hidden everywhere (see app/database.py global filter)
+    # and slated for physical purge after SOFT_DELETE_PURGE_DAYS.
+    deleted_at = Column(DateTime(timezone=True), nullable=True, default=None, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

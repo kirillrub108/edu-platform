@@ -153,8 +153,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     user: "1000:1000"
+    # --beat embeds the scheduler in this worker (single-instance setup) so the
+    # daily purge_soft_deleted task fires. Only ONE beat must run cluster-wide.
     command: >
       celery -A app.celery_app worker
+      --beat
+      --schedule=/tmp/celerybeat-schedule
       --pool=prefork
       --concurrency=2
       --queues=quiz

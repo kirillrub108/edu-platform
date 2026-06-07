@@ -688,6 +688,33 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## Soft delete: глобальный фильтр для User/Lesson, явный — для Course
+
+**Контекст:** нужно архивирование курсов (teacher видит архив, студент — нет, физическое удаление через 30 дней) и «полное скрытие» для User/Lesson.
+
+**Решение:**
+
+- Колонка `deleted_at: DateTime?(indexed)` на `users`, `courses`, `lessons`.
+- User и Lesson скрываются глобально: слушатель `do_orm_execute` на `Session` (под AsyncSession) добавляет `with_loader_criteria(deleted_at IS NULL)` ко всем ORM-SELECT (см. `app/database.py`).
+- Course **намеренно НЕ** в фильтре — иначе teacher не увидел бы архив. Видимость архива у студентов компенсируется явными `Course.deleted_at.is_(None)` в `routers/students.py`.
+- `DELETE /courses/{id}` = soft delete (204), `PATCH /courses/{id}/restore` = сброс. `GET /courses/grouped` отдаёт `{published, drafts, archived}` (отдельный эндпоинт, т.к. форма ответа отличается от `list[CourseOut]` и `response_model` фиксирован на маршрут).
+- Физическое удаление + чистка файлов — задача `purge_soft_deleted` (очередь `quiz`, beat раз в сутки), sync-сессия с `execution_options(include_deleted=True)` для обхода фильтра.
+
+**Альтернативы:**
+
+- *Фильтр и для Course* — ломает teacher-архив; пришлось бы повсюду пробрасывать «show deleted».
+- *`?grouped=true` к `GET /courses/`* — один маршрут с двумя формами ответа неудобен для `response_model`/OpenAPI.
+- *Хард-delete как раньше* — нет восстановления и «передумал».
+
+**Trade-offs:**
+
+- + Скрытие User/Lesson — в одном месте, не размазано по роутерам.
+- − `Session.get()` фильтр не перехватывает → `db.get(User/Lesson)` заменены на `select().where()`.
+- − Soft-deleted teacher с живыми курсами: `Course.owner` грузится как `None` до purge (см. KNOWN_PROBLEMS).
+- − Эмбеддед beat (`--beat` на celery_quiz) — допустимо для одного инстанса, не для кластера.
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.

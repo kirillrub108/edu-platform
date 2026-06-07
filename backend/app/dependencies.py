@@ -70,7 +70,8 @@ async def get_current_user(
             detail="Token missing subject",
         )
 
-    user = await db.get(User, UUID(user_id))
+    # select (not db.get) so the global soft-delete filter excludes deleted users.
+    user = await db.scalar(select(User).where(User.id == UUID(user_id)))
     if not user or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -216,8 +216,13 @@ def test_generate_video_lesson_marks_error_on_tts_failure(
 
     lesson = _seed_lesson(sync_session, pptx_path=_seed_pptx_on_disk)
 
+    # Unique voice → unique TTS cache key (cache file is "{sha256}.{voice}.wav").
+    # This guarantees a cache MISS so the mocked-to-fail synthesize() is actually
+    # invoked; otherwise a WAV cached by another test (the TTS disk cache lives
+    # under the session-scoped STORAGE_PATH) would be reused and the pipeline
+    # would succeed. synthesize is mocked to raise, so the voice value is inert.
     result = generate_video_lesson.apply(
-        args=[str(lesson.id), lesson.pptx_path, "xenia"]
+        args=[str(lesson.id), lesson.pptx_path, "tts-fail-test-voice"]
     ).get()
     assert result["status"] == "error"
 

@@ -48,7 +48,9 @@ def auth_app():
 
     async def _mock_db():
         session = AsyncMock()
-        session.get = AsyncMock(return_value=user)
+        # get_current_user selects the user (select().where()) so the global
+        # soft-delete filter applies — stub scalar (not get).
+        session.scalar = AsyncMock(return_value=user)
         yield session
 
     async def _mock_redis():

@@ -38,9 +38,17 @@ async def enroll(
 ):
     course: Course | None = None
     if data.course_id:
-        course = await db.get(Course, data.course_id)
+        course = await db.scalar(
+            select(Course).where(
+                Course.id == data.course_id, Course.deleted_at.is_(None)
+            )
+        )
     elif data.access_code:
-        course = await db.scalar(select(Course).where(Course.access_code == data.access_code))
+        course = await db.scalar(
+            select(Course).where(
+                Course.access_code == data.access_code, Course.deleted_at.is_(None)
+            )
+        )
 
     if not course or not course.is_published:
         raise HTTPException(status_code=404, detail="Course not available")
@@ -67,7 +75,9 @@ async def my_courses(
 ):
     enrollments = await db.scalars(
         select(Enrollment)
-        .where(Enrollment.student_id == user.id)
+        .join(Course, Enrollment.course_id == Course.id)
+        # Archived courses (deleted_at set) disappear from the student's list.
+        .where(Enrollment.student_id == user.id, Course.deleted_at.is_(None))
         .options(
             selectinload(Enrollment.course).selectinload(Course.owner),
             selectinload(Enrollment.course).selectinload(Course.modules).selectinload(Module.lessons),
@@ -92,9 +102,13 @@ async def preview_course(
 ):
     course: Course | None = None
     if code:
-        course = await db.scalar(select(Course).where(Course.access_code == code))
+        course = await db.scalar(
+            select(Course).where(Course.access_code == code, Course.deleted_at.is_(None))
+        )
     elif course_id:
-        course = await db.get(Course, course_id)
+        course = await db.scalar(
+            select(Course).where(Course.id == course_id, Course.deleted_at.is_(None))
+        )
 
     if not course or not course.is_published:
         raise HTTPException(status_code=404, detail="Course not found")
@@ -118,7 +132,8 @@ async def course_details(
 
     course = await db.scalar(
         select(Course)
-        .where(Course.id == course_id)
+        # Archived course → 404 even for an enrolled student (direct URL).
+        .where(Course.id == course_id, Course.deleted_at.is_(None))
         .options(
             selectinload(Course.owner),
             selectinload(Course.modules).selectinload(Module.lessons),
@@ -152,7 +167,7 @@ async def get_lesson_for_student(
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await db.get(Lesson, lesson_id)
+    lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
     module = await db.get(Module, lesson.module_id)
@@ -171,7 +186,7 @@ async def get_lesson_for_student(
 
 
 async def _get_progress(user: User, lesson_id: UUID, db: AsyncSession) -> LessonProgress:
-    lesson = await db.get(Lesson, lesson_id)
+    lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
     module = await db.get(Module, lesson.module_id)
@@ -202,7 +217,7 @@ async def complete_lesson(
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await db.get(Lesson, lesson_id)
+    lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
     if lesson is None:
         raise HTTPException(status_code=404, detail="Lesson not found")
     if lesson.content_type == ContentType.quiz:

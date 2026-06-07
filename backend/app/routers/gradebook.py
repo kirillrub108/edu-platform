@@ -1,6 +1,7 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -47,7 +48,7 @@ async def patch_progress(
     await _get_owned_course(course_id, user, db)
     updates = data.model_dump(exclude_unset=True)
     progress = await gradebook_service.patch_progress(course_id, progress_id, updates, db)
-    lesson = await db.get(Lesson, progress.lesson_id)
+    lesson = await db.scalar(select(Lesson).where(Lesson.id == progress.lesson_id))
     if lesson is None:
         raise HTTPException(status_code=404, detail="Lesson not found")
     return GradebookCellRead(

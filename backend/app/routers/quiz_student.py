@@ -66,7 +66,7 @@ router = APIRouter(prefix="/api/v1/students/lessons", tags=["quiz-student"])
 async def _ensure_enrolled(
     db: AsyncSession, student: User, lesson_id: UUID
 ) -> tuple[Lesson, Enrollment]:
-    lesson = await db.get(Lesson, lesson_id)
+    lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
     if lesson is None:
         raise HTTPException(status_code=404, detail="Lesson not found")
     module = await db.get(Module, lesson.module_id)

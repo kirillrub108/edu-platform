@@ -1,8 +1,9 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
+from app.constants import SOFT_DELETE_PURGE_DAYS
 from app.models.course import AccessMode
 from app.schemas.user import UserOut
 
@@ -60,6 +61,25 @@ class CourseOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     lessons_count: int = 0
+    # Source column for the computed fields below; not serialized itself.
+    deleted_at: datetime | None = Field(default=None, exclude=True)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def is_archived(self) -> bool:
+        return self.deleted_at is not None
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def days_until_purge(self) -> int | None:
+        """Whole days left before purge; None if not archived, clamped at 0."""
+        if self.deleted_at is None:
+            return None
+        deleted = self.deleted_at
+        if deleted.tzinfo is None:
+            deleted = deleted.replace(tzinfo=timezone.utc)
+        days_since = (datetime.now(timezone.utc) - deleted).days
+        return max(0, SOFT_DELETE_PURGE_DAYS - days_since)
 
 
 class StudentCourseOut(CourseOut):
@@ -78,3 +98,9 @@ class CoursePreview(BaseModel):
     description: str | None
     access_mode: AccessMode
     is_published: bool
+
+
+class CourseGroupedResponse(BaseModel):
+    published: list[CourseOut] = []
+    drafts: list[CourseOut] = []
+    archived: list[CourseOut] = []

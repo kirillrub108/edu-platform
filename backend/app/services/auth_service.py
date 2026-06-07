@@ -61,6 +61,16 @@ def verify_password(plain: str, hashed: str) -> bool:
         return False
 
 
+def soft_delete_user(user: User) -> None:
+    """Soft-delete a user in place: mark deleted, deactivate (so existing tokens
+    fail get_current_user's is_active check → 401), and anonymize PII. The row
+    is physically removed later by the purge_soft_deleted task. Caller commits."""
+    user.deleted_at = datetime.now(timezone.utc)
+    user.is_active = False
+    user.email = f"deleted_{uuid.uuid4().hex}@anon.invalid"
+    user.full_name = None
+
+
 # ── JWT primitives ───────────────────────────────────────────────────────────
 
 
@@ -227,7 +237,7 @@ class AuthService:
                 detail="Session expired, please log in again",
             )
 
-        user = await self.db.get(User, uuid.UUID(user_id))
+        user = await self.db.scalar(select(User).where(User.id == uuid.UUID(user_id)))
         if not user or not user.is_active:
             await self.redis.delete(key)
             raise HTTPException(status_code=401, detail="User not found or inactive")

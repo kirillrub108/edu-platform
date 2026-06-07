@@ -1,4 +1,5 @@
 import secrets
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,6 +17,7 @@ from app.models.user import User
 from app.schemas.course import (
     CourseCreate,
     CourseDetail,
+    CourseGroupedResponse,
     CourseOut,
     CourseUpdate,
     ModuleCreate,
@@ -74,6 +76,46 @@ async def list_courses(
     for course in courses:
         course.lessons_count = sum(len(m.lessons) for m in course.modules)
     return [_course_out(c, str(user.id)) for c in courses]
+
+
+# NOTE: must be declared before GET "/{course_id}" so "grouped" isn't parsed
+# as a course_id UUID.
+@router.get("/grouped", response_model=CourseGroupedResponse)
+async def list_courses_grouped(
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    """Teacher dashboard view: all owned courses partitioned into
+    published / drafts / archived (Course is not globally filtered, so archived
+    rows are returned here). published & drafts sort by created_at desc,
+    archived by deleted_at desc."""
+    result = await db.scalars(
+        select(Course)
+        .where(Course.owner_id == user.id)
+        .options(
+            selectinload(Course.owner),
+            selectinload(Course.modules).selectinload(Module.lessons),
+        )
+    )
+    published: list[tuple[datetime, CourseOut]] = []
+    drafts: list[tuple[datetime, CourseOut]] = []
+    archived: list[tuple[datetime, CourseOut]] = []
+    for course in result.all():
+        course.lessons_count = sum(len(m.lessons) for m in course.modules)
+        out = _course_out(course, str(user.id))
+        if course.deleted_at is not None:
+            archived.append((course.deleted_at, out))
+        elif course.is_published:
+            published.append((course.created_at, out))
+        else:
+            drafts.append((course.created_at, out))
+    for bucket in (published, drafts, archived):
+        bucket.sort(key=lambda pair: pair[0], reverse=True)
+    return CourseGroupedResponse(
+        published=[o for _, o in published],
+        drafts=[o for _, o in drafts],
+        archived=[o for _, o in archived],
+    )
 
 
 @router.post("/", response_model=CourseOut, status_code=status.HTTP_201_CREATED)
@@ -135,9 +177,29 @@ async def delete_course(
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
+    """Soft delete (archive): the course is hidden from students and physically
+    removed by the purge task after SOFT_DELETE_PURGE_DAYS. Idempotency guard:
+    409 if already archived."""
     course = await _get_owned_course(course_id, user, db)
-    await db.delete(course)
+    if course.deleted_at is not None:
+        raise HTTPException(status_code=409, detail="Course already archived")
+    course.deleted_at = datetime.now(timezone.utc)
     await db.commit()
+
+
+@router.patch("/{course_id}/restore", response_model=CourseOut)
+async def restore_course(
+    course_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    course = await _get_owned_course(course_id, user, db)
+    if course.deleted_at is None:
+        raise HTTPException(status_code=400, detail="Course is not archived")
+    course.deleted_at = None
+    await db.commit()
+    await db.refresh(course, attribute_names=["owner"])
+    return _course_out(course, str(user.id))
 
 
 @router.post(

@@ -558,7 +558,7 @@ async def get_attempt_detail(
     )
     if attempt is None:
         raise HTTPException(status_code=404, detail="Attempt not found")
-    student = await db.get(User, attempt.student_id)
+    student = await db.scalar(select(User).where(User.id == attempt.student_id))
     if student is None:
         raise HTTPException(status_code=404, detail="Student not found")
 

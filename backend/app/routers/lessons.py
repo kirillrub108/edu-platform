@@ -354,7 +354,7 @@ async def get_quiz_questions(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await db.get(Lesson, lesson_id)
+    lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
     quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson_id))

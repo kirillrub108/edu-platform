@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Trash2 } from 'lucide-vue-next'
+import { Trash2, Archive } from 'lucide-vue-next'
 
 definePageMeta({ middleware: ['auth', 'teacher'] })
 
@@ -18,8 +18,9 @@ const addingLesson = ref<Record<string, boolean>>({})
 
 const coverInputRef = ref<HTMLInputElement | null>(null)
 const uploadingCover = ref(false)
-const showDeleteConfirm = ref(false)
-const deletingCourse = ref(false)
+const showArchiveConfirm = ref(false)
+const archivingCourse = ref(false)
+const restoringCourse = ref(false)
 const deletingModule = ref<Record<string, boolean>>({})
 const deletingLesson = ref<Record<string, boolean>>({})
 
@@ -181,17 +182,32 @@ const uploadCover = async (e: Event) => {
   }
 }
 
-const deleteCourse = async () => {
-  deletingCourse.value = true
+const archiveCourse = async () => {
+  archivingCourse.value = true
   actionError.value = ''
   try {
+    // DELETE is a soft delete (archive): the course moves to the dashboard's
+    // "Архив" section and is purged after 30 days unless restored.
     await apiFetch(`/courses/${route.params.id}`, { method: 'DELETE' })
     await navigateTo('/dashboard')
   } catch (e: any) {
-    actionError.value = e?.data?.detail ?? 'Ошибка при удалении курса'
-    showDeleteConfirm.value = false
+    actionError.value = e?.data?.detail ?? 'Ошибка при архивации курса'
+    showArchiveConfirm.value = false
   } finally {
-    deletingCourse.value = false
+    archivingCourse.value = false
+  }
+}
+
+const restoreCourse = async () => {
+  restoringCourse.value = true
+  actionError.value = ''
+  try {
+    await apiFetch(`/courses/${route.params.id}/restore`, { method: 'PATCH' })
+    await load()
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Ошибка при восстановлении курса'
+  } finally {
+    restoringCourse.value = false
   }
 }
 
@@ -283,39 +299,62 @@ onMounted(async () => {
           >
             Журнал оценок
           </NuxtLink>
-          <button
-            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 min-w-36 text-center"
-            :disabled="publishing"
-            @click="togglePublish"
-          >
-            {{ publishing ? '…' : course.is_published ? 'Снять с публикации' : 'Опубликовать' }}
-          </button>
-          <UiButton
-            v-if="!showDeleteConfirm"
-            variant="danger"
-            size="sm"
-            :disabled="deletingCourse || loading"
-            @click="showDeleteConfirm = true"
-          >
-            Удалить курс
-          </UiButton>
-          <template v-else>
-            <span class="text-xs text-red-600 self-center max-w-40 text-right leading-tight">
-              Удалить курс? Все уроки и прогресс учеников будут потеряны.
-            </span>
-            <UiButton variant="danger" size="sm" :loading="deletingCourse" @click="deleteCourse">
-              Да, удалить
-            </UiButton>
+
+          <!-- Active course: publish toggle + archive -->
+          <template v-if="!course.is_archived">
             <button
-              class="text-sm text-gray-500 hover:text-gray-700"
-              @click="showDeleteConfirm = false"
+              class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 min-w-36 text-center"
+              :disabled="publishing"
+              @click="togglePublish"
             >
-              Отмена
+              {{ publishing ? '…' : course.is_published ? 'Снять с публикации' : 'Опубликовать' }}
             </button>
+            <UiButton
+              v-if="!showArchiveConfirm"
+              variant="danger"
+              size="sm"
+              :disabled="archivingCourse || loading"
+              @click="showArchiveConfirm = true"
+            >
+              В архив
+            </UiButton>
+            <template v-else>
+              <span class="text-xs text-amber-600 self-center max-w-44 text-right leading-tight">
+                В архив? Студенты потеряют доступ, через 30 дней курс будет удалён.
+              </span>
+              <UiButton variant="danger" size="sm" :loading="archivingCourse" @click="archiveCourse">
+                В архив
+              </UiButton>
+              <button
+                class="text-sm text-gray-500 hover:text-gray-700"
+                @click="showArchiveConfirm = false"
+              >
+                Отмена
+              </button>
+            </template>
           </template>
+
+          <!-- Archived course: restore only -->
+          <UiButton
+            v-else
+            variant="primary"
+            size="sm"
+            :loading="restoringCourse"
+            @click="restoreCourse"
+          >
+            Восстановить
+          </UiButton>
         </div>
+
         <span
-          v-if="course.is_published"
+          v-if="course.is_archived"
+          class="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+        >
+          <Archive class="w-3 h-3" />
+          В архиве<template v-if="course.days_until_purge != null"> · удалится через {{ course.days_until_purge }} дн.</template>
+        </span>
+        <span
+          v-else-if="course.is_published"
           class="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full"
         >
           опубликован

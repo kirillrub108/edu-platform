@@ -5,6 +5,7 @@ import time
 import sentry_sdk
 import structlog
 from celery import Celery
+from celery.schedules import crontab
 from kombu import Queue
 from sentry_sdk.integrations.celery import CeleryIntegration
 from sentry_sdk.integrations.logging import LoggingIntegration
@@ -59,6 +60,7 @@ celery_app = Celery(
         "app.tasks.video_pipeline",
         "app.tasks.vision_pipeline",
         "app.tasks.quiz_pipeline",
+        "app.tasks.purge_pipeline",
     ],
 )
 
@@ -88,6 +90,16 @@ celery_app.conf.update(
     # silently dropped.
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    # Daily soft-delete purge. Routed to the `quiz` queue → handled by the
+    # celery_quiz worker. A beat scheduler must be running (the celery_quiz
+    # worker is started with --beat in docker-compose) for this to fire.
+    beat_schedule={
+        "purge-soft-deleted-daily": {
+            "task": "purge_soft_deleted",
+            "schedule": crontab(hour=3, minute=0),
+            "options": {"queue": "quiz"},
+        },
+    },
 )
 
 if settings.METRICS_ENABLED:

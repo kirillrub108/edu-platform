@@ -91,6 +91,8 @@ class Lesson(Base):
     analyze_task_id = Column(String(64), nullable=True)
     video_task_id = Column(String(64), nullable=True)
     last_warning = Column(Text, nullable=True)
+    # Soft delete: non-null = hidden everywhere (see app/database.py global filter).
+    deleted_at = Column(DateTime(timezone=True), nullable=True, default=None, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),
