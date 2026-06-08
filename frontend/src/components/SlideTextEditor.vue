@@ -22,6 +22,7 @@ const emit = defineEmits<{ (e: 'ready'): void; (e: 'back'): void }>()
 
 const { apiFetch } = useApi()
 const billing = useBillingStore()
+const { ensureVerified } = useAiGuard()
 
 const slides = ref<SlideText[]>([])
 const regenError = ref('')
@@ -153,6 +154,8 @@ const regenerate = async () => {
     if (regenController.value === controller) regenController.value = null
   }
 }
+
+const guardedRegenerate = () => ensureVerified(regenerate)
 
 const onKeydown = (e: KeyboardEvent) => {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
@@ -388,7 +391,7 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
                 size="sm"
                 :loading="!!isRegenCurrent"
                 :disabled="!current.image_url"
-                @click="regenerate"
+                @click="guardedRegenerate"
               >
                 <template #icon><Sparkles class="w-4 h-4" /></template>
                 Регенерировать LLM

@@ -117,6 +117,38 @@ async def require_verified_teacher(user: User = Depends(require_teacher)) -> Use
     return user
 
 
+async def require_verified_email(user: User = Depends(get_current_user)) -> User:
+    """AI-operation gate: any authenticated user whose email is verified. Role
+    and ownership checks are layered separately by the route's other
+    dependencies (e.g. `get_owned_lesson`). The machine-readable
+    `email_not_verified` detail is the contract the frontend's bypass-guard
+    relies on. See AI_GATED_ENDPOINTS below."""
+    if not user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="email_not_verified",
+        )
+    return user
+
+
+# Every endpoint that triggers an LLM / vision / TTS operation must sit behind
+# `require_verified_email` or `require_verified_teacher`. This registry is the
+# source of truth the guard test (tests/integration/test_ai_gating_guard.py)
+# checks against: adding a new AI route means adding it here AND gating it, or
+# the guard test fails. Student quiz grading is intentionally excluded — see
+# docs/DECISIONS.md.
+AI_GATED_ENDPOINTS: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("POST", "/api/v1/lessons/{lesson_id}/analyze"),
+        ("POST", "/api/v1/lessons/{lesson_id}/generate-video"),
+        ("POST", "/api/v1/lessons/{lesson_id}/slides/{slide_id}/regenerate"),
+        ("POST", "/api/v1/lessons/{lesson_id}/quiz/generate"),
+        ("POST", "/api/v1/lessons/{lesson_id}/quiz/questions/{question_id}/regenerate"),
+        ("POST", "/api/v1/lessons/{lesson_id}/quiz/ai-review"),
+    }
+)
+
+
 async def require_admin(x_admin_token: str | None = Header(default=None)) -> None:
     """Gate for billing admin endpoints. There is no admin UserRole; access is
     granted by a shared secret (`ADMIN_API_TOKEN`) sent in the X-Admin-Token

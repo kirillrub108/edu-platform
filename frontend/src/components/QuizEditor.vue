@@ -27,6 +27,9 @@ const {
   regenerate, runAiReview,
 } = useQuizAuthoring(lessonIdRef)
 
+const { ensureVerified } = useAiGuard()
+const guardedAiReview = () => ensureVerified(runAiReview)
+
 const TYPE_LABELS: Record<QuestionType, string> = {
   single_choice: 'Один из',
   multiple_choice: 'Несколько из',
@@ -97,13 +100,14 @@ const defaultPayload = (type: QuestionType): Record<string, any> => {
   }
 }
 
-const onRegenerate = async (q: TeacherQuestion, mode: RegenerateMode) => {
-  try {
-    await regenerate(q, mode)
-  } catch (e: any) {
-    alert(e?.data?.detail ?? 'Не удалось перегенерировать вопрос')
-  }
-}
+const onRegenerate = (q: TeacherQuestion, mode: RegenerateMode) =>
+  ensureVerified(async () => {
+    try {
+      await regenerate(q, mode)
+    } catch (e: any) {
+      alert(e?.data?.detail ?? 'Не удалось перегенерировать вопрос')
+    }
+  })
 
 const onDelete = async (q: TeacherQuestion) => {
   if (!confirm('Удалить вопрос?')) return
@@ -131,9 +135,7 @@ const toggleGenType = (type: QuestionType) => {
   }
 }
 
-const onGenerate = () => {
-  showGenModal.value = true
-}
+const onGenerate = () => ensureVerified(() => { showGenModal.value = true })
 
 const onConfirmGenerate = async () => {
   if (questions.value.length > 0) {
@@ -188,7 +190,7 @@ onUnmounted(() => {
           size="sm"
           :loading="qaRunning"
           :disabled="!questions.length || generating"
-          @click="runAiReview"
+          @click="guardedAiReview"
         >
           <template #icon><ShieldCheck class="w-4 h-4" /></template>
           AI-проверка

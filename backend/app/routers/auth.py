@@ -5,6 +5,7 @@ from uuid import UUID
 import structlog
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response, status
 from fastapi.responses import RedirectResponse
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +14,9 @@ from app.database import get_db
 from app.dependencies import get_current_user
 from app.limiter import limiter
 from app.models.user import User
-from app.schemas.auth import UserLogin, UserOut, UserRegister
+from app.redis_client import get_redis
+from app.schemas.auth import UserLogin, UserOut, UserRegister, VerifyEmailRequest
+from app.services import email_token_service
 from app.services.auth_service import (
     AuthService,
     decode_token,
@@ -33,7 +36,9 @@ def _enqueue_verification_email(user: User) -> None:
     Enqueue failures (e.g. broker down) are logged, never raised — registration
     and resend must not fail because mail couldn't be queued."""
     token = generate_email_verification_token(str(user.id))
-    verify_url = f"{settings.BASE_URL}/api/v1/auth/verify-email?token={token}"
+    # Point at the SPA page (POST /auth/verify-email, one-time consume), not the
+    # legacy backend GET redirect. The GET endpoint stays for direct hits.
+    verify_url = f"{settings.FRONTEND_URL}/verify-email?token={token}"
     try:
         send_email.delay(
             to=user.email,
@@ -202,15 +207,49 @@ async def verify_email(
     )
 
 
+@router.post("/verify-email", status_code=status.HTTP_200_OK)
+async def verify_email_post(
+    data: VerifyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> dict:
+    """SPA-facing verification: one-time consume of the token, then flip
+    email_verified (idempotent for an already-verified account reached with a
+    fresh token). 400 on an invalid / expired / already-used token. No auth or
+    CSRF — the signed, single-use token is itself the proof."""
+    try:
+        user_id = await email_token_service.consume(redis, data.token)
+    except email_token_service.TokenError as exc:
+        raise HTTPException(status_code=400, detail=exc.reason)
+
+    user = await db.scalar(select(User).where(User.id == UUID(user_id)))
+    if user is None:
+        raise HTTPException(status_code=400, detail="invalid")
+
+    if not user.email_verified:
+        user.email_verified = True
+        await db.commit()
+
+    return {"email_verified": True}
+
+
 @router.post("/resend-verification", status_code=status.HTTP_204_NO_CONTENT)
 @limiter.limit("3/minute")
 async def resend_verification(
     request: Request,
     user: User = Depends(get_current_user),
+    redis: Redis = Depends(get_redis),
 ) -> Response:
     """Re-send the verification email to the logged-in user. Already-verified
-    users get a 400 and no email is sent."""
+    users get a 400 and no email is sent; a per-user Redis cooldown returns 429
+    on rapid repeats (on top of the slowapi per-IP limit)."""
     if user.email_verified:
         raise HTTPException(status_code=400, detail="Email already verified")
+    if await email_token_service.under_cooldown(redis, str(user.id)):
+        raise HTTPException(
+            status_code=429,
+            detail="Письмo уже отправлено. Подождите перед повторной отправкой.",
+        )
     _enqueue_verification_email(user)
+    await email_token_service.start_cooldown(redis, str(user.id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)

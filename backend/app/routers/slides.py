@@ -9,7 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.celery_app import celery_app
 from app.constants import CREDIT_WEIGHTS
 from app.database import get_db
-from app.dependencies import get_owned_lesson, require_teacher, require_verified_teacher
+from app.dependencies import (
+    get_owned_lesson,
+    require_teacher,
+    require_verified_email,
+    require_verified_teacher,
+)
 from app.limiter import limiter
 from app.models.credit import CreditOperation
 from app.models.lesson import CreationMode, Lesson, LessonStatus
@@ -180,6 +185,7 @@ async def regenerate_slide_text(
     lesson_id: UUID,
     slide_id: UUID,
     user: User = Depends(require_teacher),
+    _verified: User = Depends(require_verified_email),
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):

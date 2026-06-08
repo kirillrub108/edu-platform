@@ -742,6 +742,35 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## Одноразовость verify-токена, гейтинг AI и подтверждение почты на фронте
+
+**Контекст:** базовый email-verify уже был (stateless `itsdangerous`-токен, Resend, `require_verified_teacher` на контент-эндпоинтах). Требовалось: гарантировать одноразовость ссылки, загейтить **весь** AI-функционал, и довести фичу до фронта (плашка + модалка + страница `/verify-email`).
+
+**Решение:**
+
+- **Одноразовость поверх stateless-токена.** Сам подписанный токен не меняли (старый GET-путь и его тесты живы). Новый `services/email_token_service.py` (`issue`/`consume`) при успешном `consume` атомарно помечает токен израсходованным в Redis: `email_verify_used:<sha256(token)>` через `SET NX` (TTL = срок токена). Повтор того же токена → `TokenError("used")` → 400. Переиспользуется общий async-Redis проекта.
+- **POST `/auth/verify-email {token}` для SPA** (рядом со старым GET-redirect, который оставлен как fallback). Письмо теперь ведёт на `FRONTEND_URL/verify-email?token=…` → страница дёргает POST. Идемпотентно для уже подтверждённого аккаунта со свежим токеном; 400 на битый/истёкший/использованный.
+- **Resend-cooldown.** `email_verify_cooldown:<user_id>` (TTL `EMAIL_VERIFY_RESEND_COOLDOWN_SECONDS=60`) поверх slowapi-лимита → 429 при спаме.
+- **`require_verified_email`** (поверх `get_current_user`, role-agnostic, `detail="email_not_verified"`) навешен на ранее НЕзагейченные AI-эндпоинты: slide regenerate, quiz generate / question regenerate / ai-review. `require_verified_teacher` на analyze/generate-video оставлен как был. Гейт-тест принимает обе зависимости.
+- **Реестр + страж.** `AI_GATED_ENDPOINTS` в `dependencies.py` — источник истины. `tests/integration/test_ai_gating_guard.py`: (1) каждый эндпоинт реестра реально зависит от verify-гейта; (2) каждый роут, ставящий Celery-таску (кроме infra `send_email` и студенческого `grade_attempt_task`), обязан быть в реестре. Новый незагейченный AI-эндпоинт → тест падает.
+- **Dev без почты:** `send_email_sync` при пустом `RESEND_API_KEY` логирует письмо (со ссылкой в контексте) и не падает.
+- **Фронт:** `is_email_verified` в auth-store (Pinia) + состояние модалки; `useAiGuard().ensureVerified(action)` оборачивает все AI-кнопки (generate-video, analyze, slide regenerate, quiz generate/regenerate/ai-review) — при неверифицированной почте запрос на бэк не уходит, открывается `VerifyEmailModal` (смонтирована один раз в `app.vue`). Плашка в `AppHeader`, страница `pages/verify-email.vue`.
+
+**Альтернативы:**
+
+- *Полностью opaque Redis-токен (как в типовом дизайне)* — переписывал бы рабочий stateless-токен и его тесты; sha256-нонс даёт одноразовость без этого.
+- *Студенческий `grade_attempt` тоже под гейт* — ломает прохождение тестов неверифицированным студентам без фронтового аналога модалки; явно исключён в страже.
+- *Общий суб-роутер `Depends(require_verified_email)`* — слишком инвазивно (AI-эндпоинты размазаны по 3 роутерам с разными зависимостями); выбран явный реестр + страж.
+
+**Trade-offs:**
+
+- + Одноразовость и cooldown без БД-состояния и без нового Redis-пула.
+- + Любой новый AI-эндпоинт ловится стражем (для Celery — автоматически).
+- − Синхронные AI-эндпоинты (без Celery) страж автоматически не находит — держатся реестром вручную (для них работает проверка №1).
+- − Сосуществуют два verify-гейта (`_teacher` / `_email`); намеренно, чтобы не трогать рабочие эндпоинты и их сообщения.
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.

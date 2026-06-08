@@ -6,6 +6,7 @@ interface UserOut {
   full_name: string | null
   role: 'teacher' | 'student'
   is_active: boolean
+  email_verified: boolean
   created_at: string
 }
 
@@ -13,9 +14,18 @@ export const useAuthStore = defineStore('auth', () => {
   const { apiFetch } = useApi()
   const user = ref<UserOut | null>(null)
   const isAuthenticated = computed(() => !!user.value)
+  const isEmailVerified = computed(() => !!user.value?.email_verified)
+
+  // Global "verify your email" prompt. Opened by useAiGuard when an unverified
+  // user clicks an AI action, or by the AppHeader badge. The modal itself is
+  // mounted once in app.vue.
+  const verifyPromptOpen = ref(false)
+  const openVerifyPrompt = () => { verifyPromptOpen.value = true }
+  const closeVerifyPrompt = () => { verifyPromptOpen.value = false }
 
   const clearSession = () => {
     user.value = null
+    verifyPromptOpen.value = false
   }
 
   const fetchMe = async () => {
@@ -61,6 +71,10 @@ export const useAuthStore = defineStore('auth', () => {
   return {
     user,
     isAuthenticated,
+    isEmailVerified,
+    verifyPromptOpen,
+    openVerifyPrompt,
+    closeVerifyPrompt,
     login,
     register,
     logout,

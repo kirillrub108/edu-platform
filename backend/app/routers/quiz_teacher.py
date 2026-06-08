@@ -27,7 +27,7 @@ from app.constants import (
     QUIZ_TYPE_DISTRIBUTION,
 )
 from app.database import get_db
-from app.dependencies import get_owned_lesson
+from app.dependencies import get_owned_lesson, require_verified_email
 from app.limiter import limiter
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import Lesson, Module
@@ -349,6 +349,7 @@ async def generate_quiz(
     request: Request,
     lesson_id: UUID,
     payload: QuizGenerateRequest,
+    _verified: User = Depends(require_verified_email),
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ) -> QuizGenerateResponse:
@@ -410,6 +411,7 @@ async def regenerate_question(
     lesson_id: UUID,
     question_id: UUID,
     payload: QuizRegenerateRequest,
+    _verified: User = Depends(require_verified_email),
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ) -> QuizQuestionTeacherRead:
@@ -451,6 +453,7 @@ async def regenerate_question(
 async def ai_review(
     request: Request,
     lesson_id: UUID,
+    _verified: User = Depends(require_verified_email),
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ) -> list[QuestionFlag]:

@@ -24,9 +24,14 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class VerifyEmailRequest(BaseModel):
+    token: str
+
+
 __all__ = [
     "UserRegister",
     "UserLogin",
     "TokenResponse",
+    "VerifyEmailRequest",
     "UserOut",
 ]

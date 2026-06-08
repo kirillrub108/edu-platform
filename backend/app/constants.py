@@ -70,6 +70,9 @@ QUIZ_MIN_FOR_DISTRIBUTION: int = 4
 # Email
 # Lifetime of the signed email-verification token (itsdangerous max_age).
 EMAIL_VERIFICATION_TTL_SECONDS: int = 60 * 60 * 24  # 24h
+# Min seconds between two resend-verification requests for the same user
+# (Redis cooldown, enforced on top of the slowapi per-IP limit).
+EMAIL_VERIFY_RESEND_COOLDOWN_SECONDS: int = 60
 # send_email Celery task retry policy on retriable provider failures.
 EMAIL_SEND_MAX_RETRIES: int = 3
 EMAIL_SEND_RETRY_BACKOFF: int = 5  # base seconds; Celery grows it exponentially

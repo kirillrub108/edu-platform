@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { GraduationCap, LogOut, Menu } from 'lucide-vue-next'
+import { GraduationCap, LogOut, Menu, MailWarning } from 'lucide-vue-next'
 
 const auth = useAuthStore()
-const { user, isAuthenticated } = storeToRefs(auth)
-const { logout } = auth
+const { user, isAuthenticated, isEmailVerified } = storeToRefs(auth)
+const { logout, openVerifyPrompt } = auth
 
 onMounted(() => {
   if (!user.value) auth.fetchMe()
@@ -32,6 +32,16 @@ const dashboardLink = computed(() =>
       </NuxtLink>
 
 <div v-if="isAuthenticated" class="hidden md:flex items-center gap-3">
+        <button
+          v-if="user && !isEmailVerified"
+          type="button"
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 transition"
+          title="Подтвердите email, чтобы открыть AI-функции"
+          @click="openVerifyPrompt"
+        >
+          <MailWarning class="w-3.5 h-3.5" />
+          Почта не подтверждена
+        </button>
         <div class="flex items-center gap-2.5">
           <div class="w-8 h-8 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-xs font-semibold">
             {{ initials }}

@@ -38,8 +38,13 @@ const {
   pipelineStages, currentStageIdx, cancellingVideo, stopPolling: stopVideoPolling,
 } = useVideoGeneration(lessonId, lesson, mode, script, flushScript, isAuto, showSlideEditor)
 
+// Block AI actions behind email verification — opens the verify prompt and
+// never hits the backend when the user is unverified.
+const { ensureVerified } = useAiGuard()
 // Reset the LLM-fallback warning banner each time generation starts.
-const generateVideo = async () => { warningDismissed.value = false; await _generateVideo() }
+const generateVideo = () =>
+  ensureVerified(async () => { warningDismissed.value = false; await _generateVideo() })
+const guardedStartAnalysis = () => ensureVerified(startAnalysis)
 
 const lessonStatusForBadge = computed(() => {
   if (analyzing.value) return 'analyzing'
@@ -244,7 +249,7 @@ watch(lessonId, (newId, oldId) => {
         :cancelling-analysis="cancellingAnalysis"
         @file-change="pptxFile = $event; uploadError = ''"
         @upload="uploadPptx"
-        @start-analyze="startAnalysis"
+        @start-analyze="guardedStartAnalysis"
         @cancel-analyze="cancelAnalysis"
         @toggle-slide-editor="showSlideEditor = !showSlideEditor"
         @slide-back="showSlideEditor = false"

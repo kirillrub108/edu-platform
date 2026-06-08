@@ -90,5 +90,11 @@ def send_email_sync(
     """Render `template_name` with `context` and send it. Sync — call only from
     the send_email Celery task. Raises EmailDeliveryError on retriable failures."""
     html = render_template(template_name, context)
+    if not settings.RESEND_API_KEY:
+        # Dev / unconfigured: don't contact a provider. Log the message — the
+        # context carries any verify/lesson link — so local flows stay testable,
+        # and return success so register/resend never fail for lack of mail config.
+        logger.info("email_skipped_no_provider", to=to, subject=subject, context=context)
+        return
     build_provider().send(to=to, subject=subject, html=html)
     logger.info("email_sent", to=to, template=template_name, provider=settings.EMAIL_PROVIDER)
