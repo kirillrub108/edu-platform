@@ -1,463 +1,260 @@
 # AUTH_FLOW — авторизация, токены, роли
 
-> Документ описывает текущую реализацию **как есть**. Дыры (особенно в refresh-флоу) явно помечены — не воспринимай их как «правильное поведение».
+> Документ описывает **текущую** реализацию как есть (проверено по коду на 2026-06-09).
+> ⚠️ Раньше аутентификация работала на `Authorization: Bearer` + `localStorage` + bcrypt.
+> Сейчас это **httpOnly-cookie + double-submit CSRF + Argon2id + ротация refresh-семейств**.
+> Если встретишь в других доках (или в `CLAUDE.md`) описание Bearer/localStorage/bcrypt — это
+> устаревшее, источник истины — код в [auth_service.py](../backend/app/services/auth_service.py),
+> [dependencies.py](../backend/app/dependencies.py), [routers/auth.py](../backend/app/routers/auth.py),
+> [useApi.ts](../frontend/src/composables/useApi.ts).
 
 ---
 
 ## 1. Схема аутентификации в одной картинке
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ Browser (Nuxt SPA)                                                      │
+┌──────────────────────────────────────────────────────────────────────────┐
+│ Browser (Nuxt SPA)                                                       │
 │                                                                          │
-│  localStorage:                                                           │
-│   ├── access_token    (JWT, HS256, type=access, exp=30min)              │
-│   └── refresh_token   (JWT, HS256, type=refresh, exp=30days)            │
+│  Cookies (выставляет сервер):                                            │
+│   ├── access_token   httpOnly, path=/                    (JWT, ~15 мин)  │
+│   ├── refresh_token  httpOnly, path=/api/v1/auth/refresh (JWT, ~14 дн)  │
+│   └── csrf_token     НЕ httpOnly, path=/   (случайные 32 байта hex)      │
 │                                                                          │
-│  useState('auth.user')  ← загружается через GET /auth/me               │
-└──────────────┬───────────────────────────────────────────────┬──────────┘
-               │ Authorization: Bearer <access_token>          │
-               ▼                                               │
-┌─────────────────────────────────────────────────────────────────────────┐
-│ FastAPI                                                                 │
-│                                                                          │
-│  /auth/register, /auth/login   ← публичные                              │
-│  /auth/refresh                 ← публичный, требует refresh_token       │
-│  /auth/me                      ← Depends(get_current_user)              │
-│  все остальные /api/v1/*       ← Depends(require_teacher/student)       │
+│  Pinia useAuthStore.user  ← загружается через GET /auth/me              │
+│  (никакие токены в JS/localStorage не хранятся)                          │
+└───────────┬──────────────────────────────────────────────┬─────────────┘
+            │ credentials: 'include' (куки летят сами)      │
+            │ + X-CSRF-Token: <значение csrf_token>         │ на POST/PUT/PATCH/DELETE
+            ▼                                               │
+┌──────────────────────────────────────────────────────────────────────────┐
+│ FastAPI                                                                  │
+│  /auth/register, /auth/login         ← публичные, выставляют куки        │
+│  /auth/refresh                       ← публичный, читает refresh-cookie  │
+│  /auth/logout                        ← чистит куки + revoke в Redis      │
+│  /auth/me, всё остальное /api/v1/*   ← Depends(get_current_user / ...)   │
 │                                                                          │
 │  dependencies.py:                                                        │
-│   HTTPBearer → decode_token → DB lookup User → role check               │
-└─────────────────────────────────────────────────────────────────────────┘
+│   Cookie(access_token) → decode_token → type==access → blacklist-check   │
+│     → CSRF-check (для state-changing) → DB lookup User → role/email/own  │
+└──────────────────────────────────────────────────────────────────────────┘
+                  │ refresh-семейства / blacklist / email-cooldown
+                  ▼
+              ┌────────┐
+              │ Redis  │  refresh:{user_id}:{family_id} · blacklist:{jti}
+              └────────┘
 ```
 
 ---
 
-## 2. Что именно хранится в JWT
+## 2. Хеширование пароля — Argon2id
 
-Оба токена — **JWT HS256**, подписаны общим `SECRET_KEY` (env), различаются только полем `type` и сроком жизни.
+Активный хешер — **Argon2id** (`argon2-cffi`, дефолты OWASP). Memory-hard, нет лимита 72 байта,
+нет pre-hash-костылей. См. [auth_service.py](../backend/app/services/auth_service.py):
 
-### Payload (одинаковый для access и refresh, плюс `type` + `exp`)
+```python
+from argon2 import PasswordHasher
+_ph = PasswordHasher()
 
+def hash_password(password: str) -> str:        return _ph.hash(password)
+def verify_password(plain, hashed) -> bool:     # _ph.verify(), False на VerifyMismatchError
+```
+
+> Старые доки (и `## 5` в [DECISIONS.md](DECISIONS.md), и `## 3` в более ранней версии этого файла,
+> и `KNOWN_PROBLEMS §1.3`) упоминают `bcrypt(sha256(password))`. **Это уже не так** — bcrypt удалён,
+> весь связанный с ним техдолг (password shucking) неактуален.
+
+---
+
+## 3. Токены: что в них лежит и сколько живут
+
+Оба токена — **JWT HS256**, подписаны общим `SECRET_KEY`. Различаются полем `type`, набором
+claim'ов и сроком жизни.
+
+### Access-token (claim `type=access`)
 ```json
-{
-  "sub": "uuid-of-user",
-  "email": "user@example.com",
-  "role": "teacher",
-  "type": "access",
-  "exp": 1715000000
-}
+{ "sub": "<user-uuid>", "email": "...", "role": "teacher",
+  "jti": "<uuid>", "iat": 1715000000, "exp": 1715000900,
+  "type": "access", "family_id": "<uuid>" }
+```
+- `jti` — нужен для blacklist при logout.
+- `family_id` — привязывает access к refresh-семейству, чтобы `/auth/logout` мог отозвать семейство,
+  имея только access-cookie (refresh-cookie до `/auth/logout` не доходит — он path-scoped).
+- `role` информативен; реальная роль **читается из БД** на каждом запросе.
+
+### Refresh-token (claim `type=refresh`)
+```json
+{ "sub": "<user-uuid>", "family_id": "<uuid>", "jti": "<uuid>",
+  "iat": ..., "exp": ..., "type": "refresh" }
 ```
 
-Поля:
-- `sub` — UUID пользователя (используется в `dependencies.get_current_user` для `db.get(User, UUID(sub))`).
-- `email`, `role` — продублированы из БД, **информативные**, не используются для проверок (роль читается из БД заново на каждом запросе — это важно).
-- `type` — `"access"` или `"refresh"`. Защита от использования refresh там, где нужен access.
-- `exp` — Unix timestamp истечения. Проверяется `jwt.decode` автоматически.
+### Параметры срока жизни (`config.py`, переопределяются из `.env`)
 
-### Параметры срока жизни
-
-| Токен | Срок | Источник |
+| Параметр | Дефолт | Назначение |
 |---|---|---|
-| access | 30 минут (`ACCESS_TOKEN_EXPIRE_MINUTES`) | `.env` |
-| refresh | 30 дней (`REFRESH_TOKEN_EXPIRE_DAYS`) | `.env` |
-| алгоритм | HS256 | хардкод в `auth_service.py` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | 15 | время жизни access |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | 14 | sliding-окно refresh при `remember_me=true` |
+| `REFRESH_TOKEN_SESSION_DAYS` | 1 | sliding-окно при `remember_me=false` |
+| `REFRESH_TOKEN_ABSOLUTE_MAX_DAYS` | 90 | абсолютный потолок жизни семейства |
+| `JWT_ALGORITHM` | HS256 | алгоритм подписи |
 
-### Где это всё реализовано
-
-- [backend/app/services/auth_service.py](../backend/app/services/auth_service.py) — `create_access_token`, `create_refresh_token`, `decode_token`, `hash_password`, `verify_password`.
-- [backend/app/dependencies.py](../backend/app/dependencies.py) — `get_current_user`, `require_teacher`, `require_student`.
-
----
-
-## 3. Хеширование пароля — `bcrypt(sha256(password))`
-
-### Что в коде
-
-```python
-def hash_password(password: str) -> str:
-    digest = hashlib.sha256(password.encode()).digest()
-    return bcrypt.hashpw(digest, bcrypt.gensalt()).decode()
-
-def verify_password(plain: str, hashed: str) -> bool:
-    digest = hashlib.sha256(plain.encode()).digest()
-    return bcrypt.checkpw(digest, hashed.encode())
-```
-
-### Почему так
-
-Bcrypt усекает входной пароль на 72-м байте. Длинные пароли (или пароли с многобайтными UTF-8 символами) теряют хвост → разные пароли могут получить одинаковый хеш. SHA-256 даёт 32 байта на любой вход → влезает в bcrypt'овые 72.
-
-### Что с этим не так
-
-Это **известный анти-паттерн**: открывает к атаке «password shucking» — если у злоумышленника есть отдельная база `sha256` хешей этих же паролей (украденная из другого сервиса), он может брутфорсить bcrypt-хеши намного быстрее, потому что внутри они 32-байтные SHA-256 digest'ы.
-
-См. [KNOWN_PROBLEMS.md → раздел Security](KNOWN_PROBLEMS.md). Правильнее использовать **argon2id** или ограничить длину пароля при регистрации до 72 байт.
+`exp` refresh-токена = `min(now + sliding_days, absolute_expires_at)` — токен не может пережить
+абсолютный дедлайн семейства, даже если обойти Redis.
 
 ---
 
-## 4. Регистрация — пошагово
+## 4. Транспорт: httpOnly-куки + double-submit CSRF
 
-`POST /api/v1/auth/register`
+Логин/refresh выставляют три куки (`routers/auth.py:_set_auth_cookies`):
 
-Файл: [backend/app/routers/auth.py:register](../backend/app/routers/auth.py)
+| Cookie | httpOnly | path | Назначение |
+|---|---|---|---|
+| `access_token` | ✅ | `/` | летит со всеми API-запросами |
+| `refresh_token` | ✅ | `/api/v1/auth/refresh` | летит **только** на refresh — не утекает в обычные запросы |
+| `csrf_token` | ❌ | `/` | JS читает и шлёт обратно как `X-CSRF-Token` |
 
-1. Валидация Pydantic ([schemas/auth.py:UserRegister](../backend/app/schemas/auth.py)):
-   - `email: EmailStr` — формальная проверка.
-   - `password: str` — длина 6-128.
-   - `full_name: str | None`.
-   - `role: UserRole = UserRole.teacher` (по умолчанию).
-2. `existing = await db.scalar(select(User).where(User.email == data.email))` → 400 «Email already registered», если найден.
-3. Создание `User`:
-   ```python
-   User(
-       email=data.email,
-       hashed_password=hash_password(data.password),
-       full_name=data.full_name,
-       role=data.role,
-   )
-   ```
-4. `db.add(user)` → `await db.commit()` → `await db.refresh(user)`.
-5. Сразу выдаются токены (без отдельного логина):
-   ```python
-   payload = {"sub": str(user.id), "email": user.email, "role": user.role.value}
-   return TokenResponse(
-       access_token=create_access_token(payload),
-       refresh_token=create_refresh_token(payload),
-   )
-   ```
-6. Статус `201 Created`.
+`secure`/`samesite` берутся из `COOKIE_SECURE`/`COOKIE_SAMESITE` (в проде → `secure=True`).
 
-**Замечание:** регистрация автоматически авторизует пользователя. Никакой email-верификации нет.
+**CSRF (double-submit):** на каждый state-changing запрос (`POST/PUT/PATCH/DELETE`)
+[dependencies.py:get_current_token_payload](../backend/app/dependencies.py) сравнивает заголовок
+`X-CSRF-Token` со значением cookie `csrf_token`. Не совпало / отсутствует → **403 `CSRF token invalid`**.
+Атакующий с другого origin не может прочитать non-httpOnly куку → не подделает заголовок.
+Есть и отдельная зависимость `check_csrf` для неаутентифицированных state-changing-эндпоинтов.
+
+На фронте это автоматизирует [useApi.ts](../frontend/src/composables/useApi.ts): читает `csrf_token`
+из `document.cookie`, добавляет `X-CSRF-Token` для мутаций (кроме `/auth/*`), и всегда шлёт
+`credentials: 'include'`.
 
 ---
 
-## 5. Логин — пошагово
+## 5. Refresh — ротация семейств и детект кражи
 
-`POST /api/v1/auth/login`
+Состояние семейства лежит в Redis под `refresh:{user_id}:{family_id}`:
+```json
+{ "jti": "<текущий валидный jti>", "created_at": "...",
+  "absolute_expires_at": "...", "sliding_days": 14 }
+```
 
-1. Валидация: `UserLogin{email, password}`.
-2. `db.scalar(select(User).where(User.email == data.email))` → если нет → 401 «Invalid credentials».
-3. `verify_password(data.password, user.hashed_password)` → если ложь → 401.
-4. `if not user.is_active` → 403 «User is inactive».
-5. Возвращает пару токенов (тот же `_tokens_for(user)`).
+Логика `AuthService.refresh()` ([auth_service.py](../backend/app/services/auth_service.py)):
+1. Декодировать refresh-токен, проверить `type==refresh`, достать `sub/family_id/jti`.
+2. Прочитать запись семейства. Нет записи → **401 Session expired**.
+3. `family.jti != token.jti` → **reuse detected**: запись удаляется, всё семейство сжигается
+   (предполагаем, что старый токен украли) → **401 «All sessions invalidated»**.
+4. Проверить абсолютный дедлайн (sliding не может его продлить).
+5. Проверить, что юзер существует и активен.
+6. Сминтить **новую пару**, перезаписать `jti` семейства, сбросить sliding-TTL.
+
+Эндпоинт: `POST /api/v1/auth/refresh` — читает `refresh_token` из cookie, отдаёт `{}` и новые куки.
 
 ---
 
-## 6. Как frontend хранит и использует токены
+## 6. Серверная проверка токена — слои
 
-### Хранение
+`get_current_token_payload` ([dependencies.py](../backend/app/dependencies.py)):
+1. Нет cookie `access_token` → 401 `Not authenticated`.
+2. `decode_token` (подпись + exp). `type != access` → 401.
+3. `jti` в `blacklist:{jti}` (Redis) → 401 `Token has been revoked`.
+4. Для state-changing методов — CSRF double-submit (см. §4).
 
-[frontend/src/composables/useAuth.ts](../frontend/src/composables/useAuth.ts):
-
-```ts
-const persistTokens = (tokens: TokenResponse) => {
-  if (!import.meta.client) return
-  localStorage.setItem('access_token', tokens.access_token)
-  localStorage.setItem('refresh_token', tokens.refresh_token)
-}
-```
-
-Оба токена — в `localStorage`. **Это XSS-уязвимое хранилище**: любой инжектированный JS получит к ним доступ. См. [KNOWN_PROBLEMS.md → Security](KNOWN_PROBLEMS.md).
-
-### Глобальный state
-
-```ts
-const user = useState<UserOut | null>('auth.user', () => null)
-```
-
-`useState('auth.user', factory)` — это встроенный Nuxt-механизм глобального реактивного синглтона. Все компоненты, вызывающие `useAuth().user`, получают одно и то же значение.
-
-### Использование в API-клиенте
-
-[frontend/src/composables/useApi.ts](../frontend/src/composables/useApi.ts):
-
-```ts
-const apiFetch = async <T>(path: string, options: FetchOptions = {}) => {
-  const headers: Record<string, string> = { ...options.headers }
-  const token = localStorage.getItem('access_token')
-  if (token) headers.Authorization = `Bearer ${token}`
-  try {
-    return await $fetch<T>(path, { baseURL: base, ...options, headers })
-  } catch (err: any) {
-    if (err?.response?.status === 401 && import.meta.client) {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      await navigateTo('/login')
-    }
-    throw err
-  }
-}
-```
-
-**Важно:** на 401 клиент чистит **оба** токена и редиректит на `/login`. Refresh-токен **не используется** — даже если бы он ещё был валиден.
+`get_current_user` поверх него:
+- `select(User).where(id == sub)` — **через `select`, не `db.get`**, чтобы сработал глобальный
+  soft-delete-фильтр (удалённые юзеры невидимы).
+- Не найден / `is_active == False` → 401.
+- Прокидывает юзера в Sentry-контекст.
 
 ---
 
-## 7. Серверная проверка токена — три слоя
+## 7. Роли и гейты доступа
 
-[backend/app/dependencies.py](../backend/app/dependencies.py)
+Двухролевая модель `UserRole`: **teacher** / **student** (админ-роли в БД нет).
 
-```python
-security = HTTPBearer()
+| Зависимость | Что проверяет |
+|---|---|
+| `require_teacher` | роль == teacher |
+| `require_student` | роль == student |
+| `require_verified_teacher` | teacher **и** `email_verified` — гейт на создание/изменение контента |
+| `require_verified_email` | любой залогиненный с подтверждённой почтой — гейт на AI-операции |
+| `require_admin` | shared-secret в заголовке `X-Admin-Token` == `ADMIN_API_TOKEN` (биллинг-админка; пустой токен = доступ выключен) |
+| `require_lesson_access` | teacher-владелец **или** записанный на курс student → `(user, lesson, is_owner)` |
+| `get_owned_lesson` | урок принадлежит курсу текущего teacher (иначе 404) |
 
-async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    payload = decode_token(credentials.credentials)         # ← слой 1
-    if payload.get("type") != "access":                     # ← слой 2
-        raise HTTPException(401, "Invalid token type")
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(401, "Token missing subject")
-    user = await db.get(User, UUID(user_id))                # ← слой 3
-    if not user or not user.is_active:
-        raise HTTPException(401, "User not found or inactive")
-    return user
-```
-
-### Слой 1 — `HTTPBearer + decode_token`
-- `HTTPBearer()` парсит заголовок `Authorization: Bearer <token>` → если нет, FastAPI сам возвращает 403.
-- `decode_token` ([auth_service.py](../backend/app/services/auth_service.py)):
-  ```python
-  def decode_token(token: str) -> dict:
-      try:
-          return jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-      except jwt.ExpiredSignatureError:
-          raise HTTPException(401, "Token expired")
-      except jwt.InvalidTokenError:
-          raise HTTPException(401, "Invalid token")
-  ```
-  Проверяет подпись и `exp` автоматически.
-
-### Слой 2 — `type == "access"`
-Защита от того, чтобы клиент не подсунул refresh-токен в `Authorization` заголовок. Refresh должен использоваться только в `/auth/refresh`, и наоборот.
-
-### Слой 3 — DB lookup
-`db.get(User, UUID(sub))` — каждое защищённое обращение делает один SELECT в БД. Это значит:
-- **Изменения роли в БД применяются мгновенно** (например, изменили `role` на `student` в админке → следующий запрос вернёт 403, даже если access-токен ещё содержит `role: teacher` в payload).
-- **`is_active = False` мгновенно блокирует пользователя** на следующем запросе.
-- Цена: дополнительный SELECT на каждом защищённом эндпоинте. Не оптимизировано (можно было бы кешировать), но в текущем масштабе — приемлемо.
+### AI-гейтинг
+Каждый эндпоинт, дёргающий LLM/vision/TTS, обязан стоять за `require_verified_email` или
+`require_verified_teacher`. Реестр-источник истины — `AI_GATED_ENDPOINTS` в
+[dependencies.py](../backend/app/dependencies.py); тест
+[test_ai_gating_guard.py](../backend/tests/integration/test_ai_gating_guard.py) падает, если добавить
+AI-роут и забыть его туда внести. Проверка студенческого квиза намеренно исключена (см. DECISIONS).
 
 ---
 
-## 8. Проверка ролей — `require_teacher` / `require_student`
+## 8. Email-верификация
 
-```python
-async def require_teacher(user: User = Depends(get_current_user)) -> User:
-    if user.role != UserRole.teacher:
-        raise HTTPException(403, "Teacher role required")
-    return user
+Регистрация ставит юзера с `email_verified=False` и ставит письмо в очередь (`celery_email`).
 
-async def require_student(user: User = Depends(get_current_user)) -> User:
-    if user.role != UserRole.student:
-        raise HTTPException(403, "Student role required")
-    return user
-```
+- **Токен** — stateless, подписан `itsdangerous.URLSafeTimedSerializer` (salt `email-verify`),
+  TTL `EMAIL_VERIFICATION_TTL_SECONDS` = 24 ч. DB-строки нет: токен сам по себе — доказательство.
+- `GET /auth/verify-email?token=…` — валидирует, ставит `email_verified=True` (идемпотентно),
+  **302** на SPA `/login?verified=1` (или `verified=0&reason=expired|invalid|not_found`). Никогда не 500.
+- `POST /auth/verify-email` — SPA-вариант: **одноразовое** «потребление» токена через
+  `email_token_service.consume` (Redis), затем флип флага. 400 на невалидный/просроченный/использованный.
+- `POST /auth/resend-verification` — повторная отправка залогиненному; per-user Redis-cooldown
+  (`EMAIL_VERIFY_RESEND_COOLDOWN_SECONDS`) поверх slowapi per-IP лимита.
 
-### Где какие используются
-
-| Роутер | Guard | Эндпоинты |
-|---|---|---|
-| `/api/v1/courses/*` | `require_teacher` | весь CRUD курсов и модулей |
-| `/api/v1/lessons/*` | `require_teacher` | всё |
-| `/api/v1/uploads/*` | `require_teacher` | загрузка PPTX, скриптов, видео |
-| `/api/v1/slides/*` | `require_teacher` | анализ, редактирование слайдов |
-| `/api/v1/students/*` | `require_student` | enroll, my-courses, complete |
-| `/api/v1/auth/me` | `get_current_user` (любая роль) | — |
-
-### Двухролевая модель — без админа
-
-В `UserRole` enum только два значения: `teacher`, `student`. Никакой роли «admin» нет. Если понадобится — добавлять enum-значение, генерить миграцию (`alembic revision --autogenerate`).
+На фронте непроверенному юзеру `useAiGuard` открывает `VerifyEmailModal` при клике на AI-действие.
 
 ---
 
-## 9. Frontend middleware
+## 9. Logout
 
-### `auth.ts` — проверка авторизованности
+- `POST /auth/logout` — best-effort: из access-cookie достаёт `jti`/`family_id`, кладёт
+  `blacklist:{jti}` в Redis до естественного `exp`, удаляет refresh-семейство, **чистит все три куки**.
+  Главное действие — очистка кук — выполняется всегда, даже если Redis недоступен.
+- `POST /auth/logout-all` — `scan` + `delete` всех `refresh:{user_id}:*`. Уже выданные access-токены
+  доживают до своего `exp` (≤ `ACCESS_TOKEN_EXPIRE_MINUTES`) — сознательный размен ради stateless-пути.
 
-[frontend/src/middleware/auth.ts](../frontend/src/middleware/auth.ts):
-
-```ts
-export default defineNuxtRouteMiddleware(async () => {
-  if (!import.meta.client) return
-
-  const { user, fetchMe } = useAuth()
-
-  if (!user.value) {
-    await fetchMe()
-  }
-
-  if (!user.value) {
-    return navigateTo('/login')
-  }
-})
-```
-
-Логика:
-1. Только на клиенте (SSR отключён, но всё равно guard).
-2. Если `user.value` пуст (например, после refresh страницы) → дёргает `/auth/me` через `fetchMe()`.
-3. Если после этого всё ещё пусто → редирект на `/login`.
-
-`fetchMe()` ловит любые ошибки и ставит `user.value = null` — если access-токен истёк, на 401 `useApi` уже почистил localStorage, поэтому `user` остаётся пустым → middleware редиректит.
-
-### `teacher.ts` — проверка роли
-
-[frontend/src/middleware/teacher.ts](../frontend/src/middleware/teacher.ts):
-
-```ts
-export default defineNuxtRouteMiddleware(() => {
-  if (!import.meta.client) return
-
-  const { user } = useAuth()
-
-  if (user.value && user.value.role !== 'teacher') {
-    return navigateTo('/student/dashboard')
-  }
-})
-```
-
-**Замечание:** этот guard НЕ проверяет, авторизован ли пользователь — он только редиректит студентов в их кабинет, **если они каким-то образом оказались** на teacher-странице. Авторизация проверяется отдельным middleware `auth`, который должен идти **первым** в `definePageMeta({ middleware: ['auth', 'teacher'] })`.
+Тонкость в коде: куки чистятся на **возвращаемом** `Response`, а не на инжектированном `response`
+параметре (FastAPI отдаёт именно возвращённый объект).
 
 ---
 
-## 10. Истечение access-токена — что произойдёт
+## 10. Rate limiting
 
-Это критичный сценарий и здесь есть **дыра**. Описываю как есть.
-
-### Текущее поведение
-
-1. Прошло 30 минут от логина. Access-токен истёк.
-2. Пользователь делает любой запрос (например, кликнул на курс).
-3. Frontend (`useApi`) шлёт `Authorization: Bearer <expired-token>`.
-4. Backend (`decode_token`) ловит `jwt.ExpiredSignatureError` → возвращает 401 «Token expired».
-5. Frontend (`useApi`) в обработчике catch:
-   ```ts
-   if (err?.response?.status === 401) {
-     localStorage.removeItem('access_token')
-     localStorage.removeItem('refresh_token')
-     await navigateTo('/login')
-   }
-   ```
-6. **Refresh-токен в `localStorage` есть, но он не используется.** Пользователя выкидывает на `/login`, теряя текущую страницу и контекст.
-
-### Почему это плохо
-
-- Преподаватель работал над уроком, нажал «Сгенерировать видео» через 31 минуту после логина → его выкидывает, всё несохранённое теряется.
-- Текст в `SlideTextEditor` сохраняется через debounce 500ms — но если 401 случится во время save → потеря.
-- Разрыв UX каждые 30 минут.
-
-### Эндпоинт `/auth/refresh` существует, но неинтегрирован
-
-[backend/app/routers/auth.py:refresh](../backend/app/routers/auth.py):
-
-```python
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh(data: RefreshRequest, db: AsyncSession = Depends(get_db)):
-    payload = decode_token(data.refresh_token)
-    if payload.get("type") != "refresh":
-        raise HTTPException(401, "Not a refresh token")
-    user_id = payload.get("sub")
-    user = await db.get(User, user_id) if user_id else None
-    if not user:
-        raise HTTPException(401, "User not found")
-    return _tokens_for(user)
-```
-
-Эндпоинт работает корректно, но **никто его не вызывает с фронта**. Чтобы починить, нужно в `useApi.apiFetch` добавить interceptor:
-
-```ts
-// псевдокод
-catch (err) {
-  if (err?.response?.status === 401 && refresh_token) {
-    const new_tokens = await fetch('/auth/refresh', { body: {refresh_token} })
-    if (ok) {
-      // сохранить, ретраить оригинальный запрос
-    } else {
-      // logout
-    }
-  }
-}
-```
-
-С учётом одновременных запросов нужна синхронизация (single-flight), иначе несколько вкладок будут параллельно делать refresh. См. [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md).
-
-### Дополнительно: refresh-токен не отзывается
-
-Текущая `refresh` функция возвращает **новую** пару, но **не инвалидирует** старый refresh-токен. Это значит:
-- Если refresh-токен украли — он работает 30 дней.
-- Logout на фронте чистит localStorage, но не аннулирует токены на сервере.
-- Нет blacklist / token versioning на пользователе.
-
-Правильнее: хранить `refresh_token_id` или `token_version` в таблице `users`, инкрементировать при logout, в `decode_token` для refresh — сравнивать.
+`slowapi` (см. [limiter.py](../backend/app/limiter.py)) с per-route декораторами:
+`register` 3/min, `login` 5/min, `refresh` 10/min, `resend-verification` 3/min. Превышение → 429
+(отдельный handler в `main.py`).
 
 ---
 
-## 11. Logout
+## 11. Frontend: где живёт состояние
 
-### Frontend
-
-[useAuth.ts:logout](../frontend/src/composables/useAuth.ts):
-
-```ts
-const logout = async () => {
-  if (import.meta.client) {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
-  }
-  user.value = null
-  await navigateTo('/login')
-}
-```
-
-**Только клиентская очистка.** Сервер ничего не знает про logout — токены остаются валидными до своего `exp`.
-
-### Серверного эндпоинта нет
-
-Не реализован ни `/auth/logout`, ни blacklist. Если refresh-токен утёк — пострадавший должен либо ждать 30 дней, либо у админа должна быть кнопка `is_active = False`.
+- [stores/auth.ts](../frontend/src/stores/auth.ts) (**Pinia** `useAuthStore`) — `user`, `isAuthenticated`,
+  `isEmailVerified`, `login/register/logout/fetchMe`, флаг `verifyPromptOpen`. **Токены не хранятся** —
+  они в httpOnly-куках; стор знает только профиль из `/auth/me`.
+- [useApi.ts](../frontend/src/composables/useApi.ts) — единственная обёртка над fetch:
+  `credentials: 'include'`, double-submit CSRF, **реактивный** refresh на 401 (singleflight
+  `refreshPromise` — пачка параллельных 401 даёт ровно одну ротацию), на провал → `clearSession` + `/login`.
+  `/auth/me` трактуется как «проба сессии»: 401 на нём = «аноним», без редиректа.
+- Middleware: [auth.ts](../frontend/src/middleware/auth.ts) — **opt-in на странице** (не глобальный
+  по дизайну), [teacher.ts](../frontend/src/middleware/teacher.ts) — выкидывает студентов из
+  teacher-страниц на `/student/dashboard`, [guest.ts](../frontend/src/middleware/guest.ts) — уводит
+  залогиненных с `/login`,`/register`.
 
 ---
 
-## 12. CORS и токены
+## 12. Self-check
 
-В [main.py](../backend/app/main.py):
-
-```python
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=...,
-    allow_credentials=False if _allow_all else True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=600,
-)
-```
-
-- `allow_credentials=True` нужен только если бы токены были в cookies. Сейчас токены — в `Authorization` заголовке, технически `credentials: false` сработал бы, но `True` оставлен «на будущее».
-- `allow_origins` берётся из `CORS_ORIGINS` (.env), по умолчанию `["http://localhost:3000"]`.
-- При `CORS_ORIGINS=["*"]` (dev-only) `allow_credentials` принудительно ставится в `False` — это требование CORS-спецификации.
-
-**Порядок middleware:** `CORSMiddleware` зарегистрирован **последним** в коде, что в современной Starlette означает «обернёт всё снаружи» (Starlette использует `insert(0)` в `add_middleware`). Это критично: 500-ка от `log_and_catch` идёт обратно через CORS → получает заголовки → браузер видит правильную ошибку, а не «CORS policy».
-
----
-
-## 13. Self-check
-
-После чтения этого файла должен уметь объяснить:
-
-1. Где именно хранятся access и refresh токены и почему это уязвимость?
-2. Что произойдёт, если в БД у пользователя поменять роль с teacher на student? (Ответ: следующий запрос на teacher-эндпоинт вернёт 403, потому что роль читается из БД, не из payload.)
-3. Что случится через 30 минут после логина, если пользователь активно работает? (Текущее поведение: выкидывает на /login. Желаемое: автоматический refresh — не реализовано.)
-4. Может ли студент зайти на teacher-эндпоинт через подмену role в payload? (Нет — payload не подделать без `SECRET_KEY`, и проверка идёт в БД.)
-5. Можно ли использовать refresh-токен в `Authorization: Bearer <refresh>`? (Нет — `dependencies.get_current_user` явно проверяет `payload.type == "access"`.)
-6. Что нужно сделать, чтобы реализовать proper logout? (Серверный blacklist или token versioning + эндпоинт `/auth/logout`.)
+1. Где физически лежит access-token в браузере и почему JS не может его прочитать?
+   <sub>httpOnly-cookie `access_token`, path=/. См. §4.</sub>
+2. Что произойдёт, если злоумышленник переиграет уже ротированный refresh-jti?
+   <sub>Reuse-detection сжигает всё семейство → 401. См. §5.</sub>
+3. Почему `refresh_token`-cookie имеет `path=/api/v1/auth/refresh`, а не `/`?
+   <sub>Чтобы не утекать с каждым запросом; доходит только до refresh-эндпоинта. §4.</sub>
+4. Как добавить новый AI-эндпоинт, не уронив CI?
+   <sub>Повесить `require_verified_email`/`require_verified_teacher` И внести в `AI_GATED_ENDPOINTS`. §7.</sub>
 
 ---
 
 ## Связанные документы
-
-- [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md) — детальный разбор security-долга.
-- [DECISIONS.md](DECISIONS.md) — почему JWT, а не сессии; почему bcrypt, а не argon2.
-- [DATA_FLOW.md](DATA_FLOW.md) — как auth работает в контексте конкретных сценариев.
+- [ARCHITECTURE.md](ARCHITECTURE.md) · [DATA_FLOW.md](DATA_FLOW.md) · [DECISIONS.md](DECISIONS.md) · [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md)
+</content>
+</invoke>

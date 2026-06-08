@@ -23,7 +23,19 @@
 
 ## 1. Security
 
-### 1.1 ⚠ JWT в `localStorage`
+> **⚠️ Статус на 2026-06-09 — большой блок безопасности из этого раздела УЖЕ РЕШЁН.**
+> Аутентификацию переписали (см. [AUTH_FLOW.md](AUTH_FLOW.md)). Конкретно:
+> - **1.1 (JWT в localStorage)** — ✅ решено: токены теперь в **httpOnly-куках**, не в JS-доступном месте.
+> - **1.2 (refresh не используется)** — ✅ решено: `useApi.ts` делает реактивный refresh на 401 с singleflight.
+> - **1.3 (`bcrypt(sha256)`)** — ✅ решено: пароли на **Argon2id**, sha256-обёртки/bcrypt больше нет.
+> - **1.6 (refresh не отзывается)** — ✅ решено: ротация семейств + детект reuse + blacklist access-jti при logout.
+> - **1.7 (нет rate-limiting)** — ✅ решено: `slowapi` на `/auth/*` (login 5/min, refresh 10/min, register 3/min).
+>
+> Подсекции ниже оставлены как исторический контекст «что и зачем чинили». Реально открытыми
+> в этом разделе остаются: **1.4** (`/files/*` — теперь HMAC-подписанные URL, частично закрыто),
+> **1.5** (дефолт `SECRET_KEY`), **1.8** (XXE в `.docx`), **1.9** (CORS).
+
+### 1.1 ⚠ ~~JWT в `localStorage`~~ → ✅ решено (httpOnly-куки), см. баннер выше
 
 - **Где:** [frontend/src/composables/useAuth.ts](../frontend/src/composables/useAuth.ts), [useApi.ts](../frontend/src/composables/useApi.ts).
 - **Что не так:** оба токена (access + refresh) хранятся в `localStorage`.
@@ -172,7 +184,11 @@
 
 ## 3. Performance и масштабирование
 
-### 3.1 Один Celery worker на всё
+### 3.1 ~~Один Celery worker на всё~~ → ✅ решено (очереди разделены)
+
+> **✅ Статус на 2026-06-09:** реализовано ровно как предлагалось ниже. В
+> [docker-compose.yml](../docker-compose.yml) теперь отдельные воркеры на очереди `video`/`vision`/`quiz`/`celery_email`
+> (плюс beat в `celery_quiz`). Текст ниже — исторический контекст.
 
 - **Где:** [docker-compose.yml](../docker-compose.yml) — `celery_worker` командой `-c 2`.
 - **Что не так:** обе задачи (`generate_video_lesson` и `analyze_presentation_task`) идут в одну очередь. Когда vision-анализ занимает все 2 слота — генерация видео простаивает.
@@ -250,7 +266,13 @@
 
 ## 4. Maintainability и developer experience
 
-### 4.1 ⚠ Нет тестов вообще
+### 4.1 ~~⚠ Нет тестов вообще~~ → ✅ решено (есть suite + CI gate)
+
+> **✅ Статус на 2026-06-09:** в `backend/tests/` теперь есть `unit/` и `integration/` (≈30 файлов)
+> с async-клиентом, фабриками и `testcontainers`-Postgres; CI требует `--cov-fail-under=70`
+> ([.github/workflows/ci.yml](../.github/workflows/ci.yml)). Есть и фронт-тесты на Vitest
+> (`frontend/tests/`). Запуск — см. [CLAUDE.md](../CLAUDE.md) / [DEPLOYMENT.md](DEPLOYMENT.md).
+> Текст ниже — исторический контекст.
 
 - **Где:** `backend/tests/` пуст.
 - **Что не так:** ни одного теста — ни юнит, ни интеграционного. Любой рефакторинг — слепая зона.
@@ -323,7 +345,12 @@
 - **Что не так:** не очевидно, что эти значения связаны (например, `_TTS_WORKERS` в коде пайплайна должно совпадать с `NUMBER_OF_THREADS=4` в compose-конфиге Silero).
 - **Фикс:** собрать все в `config.py` как `Settings` поля. Связанные — задокументировать в комментарии.
 
-### 4.5 Нет линтера/форматтера/CI
+### 4.5 ~~Нет линтера/форматтера/CI~~ → частично решено (CI есть, линтер — нет)
+
+> **Статус на 2026-06-09:** CI появился ([.github/workflows/ci.yml](../.github/workflows/ci.yml),
+> `lint.yml`): test + coverage-gate + build/deploy-скелет под Yandex Cloud. **Но** `lint`-job — пока
+> заглушка: `ruff` ещё не сконфигурирован в `backend/pyproject.toml`, так что линт по факту
+> пропускается (no-op). Открытым остаётся именно подключение ruff/eslint, а не «нет CI».
 
 - **Где:** репозиторий.
 - **Что не так:** `pyrightconfig.json` есть, но не запускается автоматически. Нет `ruff`/`black`/`mypy`. Нет `eslint`/`prettier` для frontend.

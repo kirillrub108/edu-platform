@@ -20,7 +20,9 @@ Read `docs/ARCHITECTURE.md` first for the big picture, then `docs/DATA_FLOW.md` 
 Everything is intended to run via Docker Compose. The `.env` at repo root is shared by all containers; `.env.example` is the template.
 
 ```bash
-# Full stack (postgres, redis, silero-tts, backend, celery_video, celery_vision, frontend)
+# Full stack: postgres, redis, silero-tts, backend, four Celery workers
+# (celery_video, celery_vision, celery_quiz [runs beat], celery_email_worker),
+# plus monitoring (prometheus, grafana :3001, flower :5555) and frontend.
 docker-compose up --build
 
 # Auto-apply migrations happens in backend lifespan; to create a new one:
@@ -51,14 +53,14 @@ Open URLs:
 ### Async backend, sync Celery
 `asyncpg` + `AsyncSession` everywhere in routers/services. Celery tasks use the sync URL (`DATABASE_URL.replace("+asyncpg", "+psycopg2")`) and a regular `Session`. Do not import `AsyncSession` into `app/tasks/*` — prefork workers will deadlock or hit greenlet errors. This split is intentional, see `docs/DECISIONS.md`.
 
-### Two Celery workers, two queues
-`docker-compose.yml` runs `celery_video` (queue=`video`, concurrency=2) and `celery_vision` (queue=`vision`, concurrency=1) separately. When adding a new task, route it to the right queue or the worker won't pick it up. (Note: `docs/ARCHITECTURE.md` §8.3 still describes the old single-worker setup — the code is the source of truth.)
+### Four Celery workers, four queues (+ one beat)
+`docker-compose.yml` runs a dedicated worker per queue: `celery_video` (queue=`video`, c=2), `celery_vision` (queue=`vision`, c=1), `celery_quiz` (queue=`quiz`, c=2), and `celery_email_worker` (queue=`celery_email`, c=2). Queues/routing are declared in `app/celery_app.py`. When adding a new task, route it to the right queue or no worker will pick it up. **Beat** (the scheduler for the daily `purge_soft_deleted` job) is embedded in `celery_quiz` via `--beat` — exactly one beat must run cluster-wide, so don't add `--beat` to another worker.
 
 ### Migrations auto-apply on backend start
 `app/main.py:_ensure_schema_at_head` runs `alembic upgrade head` inside the FastAPI lifespan. Forgetting to generate a migration after a model change = backend refuses to start. New models **must** be re-exported in `app/models/__init__.py` (along with any new enums — `LessonStatus`, `CreationMode`, `ContentType`, `AccessMode`, `UserRole` follow this pattern), otherwise Alembic autogenerate won't see them.
 
-### Local storage, not S3
-Everything (uploaded PPTX, generated PNG/WAV/MP4, caches) is in `backend/storage/`, bind-mounted into the backend and both celery containers. Exposed read-only via FastAPI `StaticFiles` at `/files/*` (URLs are signed — see `services/signed_url_service.py`). Cache directories `slides_cache/` and `summaries_cache/` are keyed by content hash; deleting them is safe and just forces re-rendering.
+### Storage backend (local default, S3 optional)
+`STORAGE_BACKEND` (`config.py`) switches between `local` and `s3` (Yandex Object Storage / S3-compatible); `services/storage_service.py` abstracts both. In `local` mode everything (uploaded PPTX, generated PNG/WAV/MP4, caches) lives in `backend/storage/`, bind-mounted into the backend and every celery container, and served read-only via the `files` router at `/files/*` with HMAC-signed URLs (`services/signed_url_service.py`); that router is **registered only when `STORAGE_BACKEND == "local"`**. Cache dirs `slides_cache/` and `summaries_cache/` are keyed by content hash — deleting them is safe and just forces re-rendering.
 
 ### Video pipeline concurrency
 `app/tasks/video_pipeline.py` runs two thread pools in parallel (TTS pool + FFmpeg encoder pool) and chains them with `as_completed` so encoding slide *k* starts the moment its WAV is ready. If you touch this file, preserve the streaming relationship — going back to "TTS all → encode all" roughly doubles pipeline latency. Pool sizes and other tunables (`TTS_WORKERS`, `ENCODE_WORKERS`, `SILERO_MAX_CHARS`, `SLIDE_DPI`, `MAX_SCRIPT_BYTES`) live in `app/constants.py` — change them there, not inline.
@@ -75,14 +77,18 @@ Without it you get `MissingGreenlet` when serializing a row right after `UPDATE`
 ### Frontend state
 Pinia is the canonical state layer — auth lives in `src/stores/auth.ts` (`useAuthStore`). `composables/useCreationMode.ts` is *not* a state singleton, just a module of constants (`CreationMode`, `CREATION_MODE_CARDS`). When adding new shared state, prefer a Pinia store over `useState('key', factory)` singletons.
 
-### API client and auth
-`composables/useApi.ts` is the single fetch wrapper. It reads `Authorization: Bearer …` from `localStorage`, proactively refreshes the access token ~5s before its `exp` (decoded client-side without signature verification), and uses a **singleflight `refreshPromise`** so a burst of parallel 401s triggers only one `/auth/refresh` rotation. If refresh fails, tokens are cleared and the user is redirected to `/login`. Don't add a second refresh path — extend `useApi` instead, or you'll race the singleflight.
+### API client and auth (cookie-based — NOT Bearer/localStorage)
+Auth runs on **httpOnly cookies + double-submit CSRF**, not `Authorization: Bearer`. No token ever touches JS/localStorage. `composables/useApi.ts` is the single fetch wrapper: it sends `credentials: 'include'` (the `access_token` cookie rides along), and for state-changing methods (`POST/PUT/PATCH/DELETE`, except `/auth/*`) it reads the non-httpOnly `csrf_token` cookie and forwards it as the `X-CSRF-Token` header — the server (`dependencies.py:get_current_token_payload`) 403s if they don't match. Refresh is **reactive**: on a 401 it calls `/auth/refresh` (refresh token is in an httpOnly cookie scoped to `/api/v1/auth/refresh`) behind a **singleflight `refreshPromise`** so a burst of 401s triggers one rotation, then retries the original request once. On refresh failure it calls `store.clearSession()` and redirects to `/login`. `/auth/me` is treated as a session probe (a 401 there means "anonymous", no redirect). Don't add a second refresh path or reintroduce Bearer/localStorage — extend `useApi`. Server side: Argon2id passwords, refresh-token rotation with Redis families + reuse detection (`services/auth_service.py`); full picture in `docs/AUTH_FLOW.md`.
+
+### AI-operation gating (CI-enforced)
+Every endpoint that triggers an LLM / vision / TTS call **must** sit behind `require_verified_email` or `require_verified_teacher` (email-verified users only) **and** be listed in `AI_GATED_ENDPOINTS` in `dependencies.py`. The guard test `tests/integration/test_ai_gating_guard.py` fails if you add such a route without doing both. Video/vision generation also reserves credits up front (`RESERVE`) and releases/charges on completion — see `services/billing_service.py` and `CREDIT_WEIGHTS` in `constants.py`.
 
 ### Rate limiting
 `slowapi` is wired in `app/limiter.py` and registered on `app.state.limiter` in `main.py`, with a dedicated 429 handler. Per-route limits use the `@limiter.limit(...)` decorator (see `routers/auth.py`). Tests that hit limited endpoints in a loop will start 429-ing — use distinct client IPs or reset the limiter in fixtures.
 
 ### Routing rules
-- `middleware/auth.ts` — global guard for authenticated routes
+- `middleware/auth.ts` — **opt-in per page** (`definePageMeta({ middleware: 'auth' })`), not a global guard. Keep it that way — public pages (landing/login/register) must stay reachable.
+- `middleware/guest.ts` — bounces already-authenticated users off `/login`, `/register`
 - `middleware/teacher.ts` — bounces students out of teacher pages to `/student/dashboard`
 - Route role: teachers land on `/dashboard`, students on `/student/dashboard`
 

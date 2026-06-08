@@ -3,6 +3,16 @@
 > Что именно происходит между «пользователь нажал кнопку» и «увидел результат».
 > Все пути — относительно `backend/app/` и `frontend/src/`.
 
+> **⚠️ Частичная устарелость (на 2026-06-09).** Документ написан до ряда изменений:
+> - **Аутентификация** теперь на httpOnly-куках + CSRF (не localStorage Bearer), пароли — Argon2id.
+>   Раздел §1 ниже обновлён; полная картина — в [AUTH_FLOW.md](AUTH_FLOW.md).
+> - **Прогресс задач** стримится по **SSE** (`/lessons/{id}/progress-stream`, `useProgressStream.ts`),
+>   поллинг `/task-status/{id}` — fallback. Где в тексте сказано «фронт поллит каждые N сек» — читать
+>   как «SSE + поллинг-fallback».
+> - **Ещё не описаны здесь** сценарии: квизы (создание/прохождение/проверка), биллинг/списание
+>   кредитов при генерации, email-верификация и AI-гейтинг, soft-delete. См.
+>   [ARCHITECTURE.md](ARCHITECTURE.md) §9b и [DECISIONS.md](DECISIONS.md).
+
 ---
 
 ## Содержание
@@ -24,29 +34,32 @@
 
 1. Пользователь открывает `/register`. Форма в [pages/register.vue](../frontend/src/pages/register.vue).
 2. Заполняет email/password/full_name, выбирает роль (по умолчанию `teacher`).
-3. По submit: `useAuth.register(...)` → `useApi.apiFetch('/auth/register', { method: 'POST', body: {...} })`.
-4. Запрос летит на `POST /api/v1/auth/register` ([routers/auth.py](../backend/app/routers/auth.py)).
+3. По submit: `useAuthStore.register(...)` (Pinia) → `apiFetch('/auth/register', { method: 'POST', body: {...} })`.
+4. Запрос летит на `POST /api/v1/auth/register` ([routers/auth.py](../backend/app/routers/auth.py), лимит 3/min).
 5. На бэкенде:
-   - `db.scalar(select(User).where(User.email == data.email))` — проверка дубля → 400 если есть.
-   - `hash_password(password)` — `bcrypt(sha256(password.encode()))`.
-   - `db.add(User(...))` → `await db.commit()` → `await db.refresh(user)`.
-   - Генерируются access + refresh токены через `create_access_token(payload)` и `create_refresh_token(payload)`. Payload: `{sub: str(user.id), email, role, type, exp}`.
-6. Возвращается `TokenResponse{access_token, refresh_token, token_type: "bearer"}` со статусом 201.
-7. Frontend (`useAuth.register`):
-   - `localStorage.setItem('access_token', ...)` и `refresh_token`.
-   - `await fetchMe()` → `apiFetch('/auth/me')` → подгружается user в `useState('auth.user')`.
-8. Дальше пользователь либо сам идёт в `/dashboard`, либо нужный middleware (`auth.ts`) пропустит его на любую страницу.
+   - `db.scalar(select(User).where(User.email == data.email))` — проверка дубля → **409** если есть.
+   - `hash_password(password)` — **Argon2id** (`argon2-cffi`).
+   - `db.add(User(...))` (`email_verified=False`) → `commit` → `refresh`.
+   - Ставит в очередь письмо верификации (`celery_email`) с подписанным токеном (best-effort).
+6. Возвращается **`UserOut`** (профиль, без токенов) со статусом 201.
+7. Frontend (`useAuthStore.register`) сразу вызывает `login(email, password)` (см. ниже) → сессия поднимается.
+8. Дальше middleware (`teacher.ts`/`auth.ts` — opt-in на странице) разводит teacher/student по дашбордам.
+   До подтверждения email teacher может ходить по кабинету, но **AI/создание контента заблокировано**
+   (`require_verified_*`, 403) — фронт показывает `VerifyEmailModal`.
 
 ### Логин
 
-1. Форма [pages/login.vue](../frontend/src/pages/login.vue) → submit → `useAuth.login(email, password)`.
-2. `POST /api/v1/auth/login` с body `{email, password}`.
-3. На бэкенде:
-   - `select(User).where(User.email == ...)` → если нет → 401.
-   - `verify_password(plain, hashed)` → `bcrypt.checkpw(sha256(plain), hashed)`. Если неверно → 401.
-   - Если `not user.is_active` → 403.
-   - Возвращает пару токенов.
-4. Frontend сохраняет токены в localStorage, дёргает `/auth/me`, кладёт user в `useState`.
+1. Форма [pages/login.vue](../frontend/src/pages/login.vue) → submit → `useAuthStore.login(email, password, rememberMe)`.
+2. `POST /api/v1/auth/login` с body `{email, password, remember_me}` (лимит 5/min).
+3. На бэкенде (`AuthService.login`):
+   - `select(User).where(User.email == ...)` → если нет/`verify_password` неверен → **401**.
+   - `not user.is_active` → 403.
+   - Создаётся refresh-семейство (uuid) в Redis, минтится пара токенов; `remember_me` выбирает
+     sliding-окно (14 дн vs 1 дн).
+   - Сервер **выставляет три httpOnly/csrf-куки** (`_set_auth_cookies`) и отдаёт `{}`.
+4. Frontend токены **не видит и не хранит** — куки httpOnly. Он лишь дёргает `/auth/me` и кладёт
+   профиль в `useAuthStore.user`. CSRF-токен (`csrf_token`, non-httpOnly) `useApi` будет автоматически
+   слать в `X-CSRF-Token` на мутациях.
 
 ---
 

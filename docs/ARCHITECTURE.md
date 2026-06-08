@@ -23,7 +23,10 @@
 | **Alembic** | миграции схемы. Запускаются автоматически в `lifespan` при старте FastAPI (см. `app/main.py:_ensure_schema_at_head`). |
 | **Celery 5.6 + Redis 7** | долгие фоновые задачи. Генерация видео занимает 1-5 минут — нельзя держать HTTP-запрос открытым всё это время. Celery даёт стандартный паттерн «положил в очередь → воркер обработал → клиент опросил статус». |
 | **Pydantic v2** | валидация request/response. Автоматически интегрируется с FastAPI и генерирует OpenAPI-схемы. |
-| **PyJWT (HS256) + bcrypt** | stateless-аутентификация. См. [AUTH_FLOW.md](AUTH_FLOW.md). |
+| **PyJWT (HS256) + Argon2id** | аутентификация на httpOnly-куках + double-submit CSRF, ротация refresh-семейств в Redis. Пароли — Argon2id (`argon2-cffi`). См. [AUTH_FLOW.md](AUTH_FLOW.md). |
+| **slowapi** | per-route rate limiting (`limiter.py`); 429-handler в `main.py`. |
+| **Resend + itsdangerous** | транзакционные письма (верификация, «видео готово») через провайдер Resend; подписанные stateless-токены верификации. |
+| **Sentry + Prometheus + structlog** | наблюдаемость: трейсы/ошибки (Sentry), метрики (`prometheus-fastapi-instrumentator` + Celery-сигналы), структурные JSON-логи с `request_id`. |
 | **OpenAI SDK** | универсальный клиент к LLM. Ollama и YandexGPT эмулируют OpenAI API → один и тот же код работает для обоих провайдеров. |
 | **Silero TTS** | бесплатный OSS-TTS для русского. Запускается отдельным docker-контейнером (`navatusein/silero-tts-service`) и общается по HTTP. |
 | **LibreOffice headless** | единственный надёжный способ конвертировать PPTX в PDF без потери шрифтов и эмодзи. Альтернатив на Python нет. |
@@ -38,7 +41,9 @@
 | **Tailwind CSS 3.4** | utility-first CSS — UI пишется быстро без отдельных `.css` файлов. |
 | **lucide-vue-next** | современная библиотека SVG-иконок. |
 
-**Никакого Pinia / Vuex.** Глобальное состояние (текущий пользователь, выбранный режим создания) хранится через встроенный `useState('key', factory)` Nuxt — это рантайм-синглтон, расшаренный между компонентами.
+| **Pinia 2** | канонический слой состояния. Сторы: `auth`, `billing`, `comments`, `student` (`frontend/src/stores/`). |
+
+**State теперь на Pinia, а не на `useState`.** Раньше глобальное состояние держали в `useState('key', factory)` — сейчас канонический слой это **Pinia** (`useAuthStore` и др.). `composables/useCreationMode.ts` — это *не* стор, а модуль констант. Новое shared-состояние добавляем стором, а не `useState`-синглтоном.
 
 ### Инфраструктура
 
@@ -55,29 +60,33 @@
 │                       Browser (студент или teacher)              │
 │                       Nuxt SPA — :3000                           │
 └──────────────────────────────┬──────────────────────────────────┘
-                               │ HTTP + JSON + Bearer JWT
+                               │ HTTP + JSON · httpOnly-cookie + CSRF
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    FastAPI Backend — :8000                       │
-│   middleware:  CORS → log_and_catch → ExceptionMiddleware       │
-│   routers:     auth · courses · lessons · slides · uploads      │
-│                · students                                        │
-│   services:    auth · llm · tts · storage · video · vision      │
-│   tasks:       video_pipeline · vision_pipeline (Celery)        │
+│   middleware:  CORS → request_id → log_and_catch → Prometheus   │
+│   routers:     auth · courses · lessons · slides · uploads ·    │
+│                students · quiz_teacher · quiz_student · comments │
+│                · gradebook · analytics · billing · files        │
+│   services:    auth · llm · tts · storage · video · vision ·    │
+│                quiz · grading · gradebook · comment · billing · │
+│                email · email_token · signed_url · analytics     │
+│   tasks (Celery): video · vision · quiz · email · purge          │
 └──────┬──────────────────────────────────┬───────────────────────┘
        │                                  │
        ▼                                  ▼
 ┌─────────────┐                   ┌──────────────┐
 │ PostgreSQL  │                   │    Redis     │ — broker + result
-│ users       │                   │ celery queue │   backend для Celery
-│ courses     │                   └──────┬───────┘
-│ modules     │                          │
-│ lessons     │                          ▼
+│ users       │                   │ celery queue │   backend + auth-state
+│ courses     │                   │ + auth/csrf  │   (refresh-семейства,
+│ modules     │                   └──────┬───────┘    blacklist, cooldown)
+│ lessons     │                          │
 │ slide_texts │       ┌────────────────────────────────────────┐
-│ enrollments │       │       Celery Worker (prefork, c=2)      │
-│ progress    │       │  app.tasks.video_pipeline               │
-│ quizzes     │       │  app.tasks.vision_pipeline              │
-└─────────────┘       │                                         │
+│ enroll/quiz │       │  Celery workers (prefork, по очередям): │
+│ credits     │       │   video (c=2)  → video_pipeline         │
+│ comments    │       │   vision (c=1) → vision_pipeline        │
+│ …           │       │   quiz (c=2,+beat) → quiz / purge       │
+└─────────────┘       │   email (c=2)  → email_pipeline         │
        ▲              │  Внешние вызовы:                        │
        │              │   • LibreOffice (PPTX→PDF)              │
        └──────────────┤   • pdftoppm    (PDF→PNG)               │
@@ -108,13 +117,24 @@
 | Контейнер | Образ | Порт | Зачем |
 |---|---|---|---|
 | `postgres` | postgres:17-alpine | 5432 | основная БД |
-| `redis` | redis:8-alpine | 6379 | брокер Celery + result backend (с паролем) |
+| `redis` | redis:8-alpine | 6379 | брокер Celery + result backend + auth-state (с паролем) |
 | `silero-tts` | navatusein/silero-tts-service | 9898 | внешний TTS-сервис, отдельный контейнер |
 | `backend` | (build ./backend) | 8000 | FastAPI с uvicorn `--reload` |
-| `celery_worker` | тот же образ что backend | — | `celery -A app.celery_app worker --pool=prefork -c 2` |
+| `celery_video` | образ backend | — | queue `video`, `-c 2` — PPTX→MP4 пайплайн |
+| `celery_vision` | образ backend | — | queue `vision`, `-c 1` — vision-LLM анализ слайдов |
+| `celery_quiz` | образ backend | — | queue `quiz`, `-c 2`, **`--beat`** — генерация/проверка тестов + суточный `purge_soft_deleted` |
+| `celery_email_worker` | образ backend | — | queue `celery_email`, `-c 2` — транзакционные письма |
+| `prometheus` | prom/prometheus | 9090 | сбор метрик с backend |
+| `grafana` | grafana/grafana | 3001 | дашборды поверх Prometheus |
+| `flower` | образ backend | 5555 | мониторинг Celery (basic-auth) |
 | `frontend` | (build ./frontend) | 3000 | Nuxt dev server (`nuxt dev --host 0.0.0.0`) |
 
-Все в общей сети `edu-network` — общаются по DNS-именам контейнеров (`backend → postgres:5432`, `celery_worker → silero-tts:9898`, и т.д.).
+Все в общей сети `edu-network` — общаются по DNS-именам контейнеров (`backend → postgres:5432`, `celery_video → silero-tts:9898`, и т.д.).
+
+> **Важно про очереди:** каждый воркер слушает свою очередь (`--queues=…`). Новая Celery-задача
+> попадёт к воркеру, только если её зароутить в правильную очередь — иначе её никто не возьмёт.
+> **Beat-планировщик** встроен ровно в один воркер (`celery_quiz --beat`); в кластере он должен быть
+> единственным. См. [DECISIONS.md](DECISIONS.md) и [docker-compose.yml](../docker-compose.yml).
 
 ---
 
@@ -152,13 +172,19 @@ frontend/src/
 ├── layouts/
 │   ├── default.vue          ← AppHeader + контейнер
 │   └── bare.vue             ← без header (лендинг, dashboard)
+├── stores/                  ← Pinia (канонический state)
+│   ├── auth.ts              ← useAuthStore: user/isAuthenticated/login/logout
+│   ├── billing.ts · comments.ts · student.ts
 ├── middleware/
-│   ├── auth.ts              ← редирект на /login если не авторизован
+│   ├── auth.ts              ← opt-in на странице: редирект на /login (не глобальный)
+│   ├── guest.ts             ← уводит залогиненных с /login,/register
 │   └── teacher.ts           ← студентов отправляет в /student/dashboard
 ├── composables/
-│   ├── useApi.ts            ← API-клиент с Bearer и авто-логаутом на 401
-│   ├── useAuth.ts           ← login/register/logout + useState user
-│   └── useCreationMode.ts   ← 4 режима создания урока
+│   ├── useApi.ts            ← API-клиент: cookie-auth (credentials:include),
+│   │                          double-submit CSRF, реактивный refresh на 401
+│   ├── useProgressStream.ts ← SSE-подписка на прогресс Celery-задачи
+│   ├── useAiGuard.ts        ← открывает «подтвердите email» на AI-действиях
+│   └── useCreationMode.ts   ← режимы создания урока (модуль констант, не стор)
 ├── pages/                   ← file-based routing
 │   ├── index.vue            ← лендинг
 │   ├── login.vue / register.vue
@@ -184,7 +210,11 @@ frontend/src/
 
 ## 7. Data flow одной строкой
 
-> Browser (Vue) → `/api/v1/*` → FastAPI router → Pydantic-валидация → service / async SQLAlchemy → PostgreSQL · если задача долгая, в `Celery.delay()` → Redis → Celery worker → внешние сервисы (LLM/TTS/FFmpeg) → результат в storage + БД → frontend поллит `/task-status/{id}` каждые 2-3 сек.
+> Browser (Vue) → `/api/v1/*` → FastAPI router → Pydantic-валидация → service / async SQLAlchemy → PostgreSQL · если задача долгая, в `Celery.delay()` → Redis → нужный Celery-воркер → внешние сервисы (LLM/TTS/FFmpeg) → результат в storage + БД → фронт получает прогресс по **SSE** (`/lessons/{id}/progress-stream`) с поллингом `/task-status/{id}` как fallback.
+
+> ⚠️ **Обновление:** прогресс долгих задач теперь стримится через **SSE** (`sse-starlette` +
+> `EventSource`), а не только поллится. См. `routers/lessons.py:progress_stream` и
+> `composables/useProgressStream.ts`. Это делает решение «polling вместо SSE» в [DECISIONS.md](DECISIONS.md) §26 устаревшим.
 
 Подробные пошаговые сценарии — в [DATA_FLOW.md](DATA_FLOW.md).
 
@@ -204,10 +234,14 @@ frontend/src/
 - **Почему:** MVP-скорость. `storage_service` уже абстрагирован, чтобы при необходимости подменить бекенд на S3.
 - **Trade-off:** не масштабируется на горизонталь (несколько backend-инстансов не увидят файлов друг друга), нет CDN, потеря контейнера = потеря всего контента.
 
-### 8.3 Один Celery worker на все типы задач
-- **Решение:** одна очередь, одна команда воркера (`-c 2`).
-- **Почему:** проще операционно — одна команда поднимает всё.
-- **Trade-off:** vision-анализ (медленный, GPU-bound через Ollama) и encoding (CPU-bound) конкурируют за слоты. На практике — анализ блокирует генерацию видео для других уроков и наоборот.
+### 8.3 Несколько Celery-воркеров по очередям
+- **Решение (обновлено):** раньше был один воркер на всё. Сейчас — **отдельный воркер на очередь**:
+  `video` (c=2), `vision` (c=1), `quiz` (c=2, +beat), `celery_email` (c=2).
+- **Почему:** изолирует ресурсы — медленный GPU-bound vision-анализ больше не конкурирует за слоты
+  с CPU-bound encoding'ом, а транзакционные письма не ждут за пайплайном.
+- **Trade-off:** больше контейнеров и `--queues`-маршрутизации; новую задачу надо явно зароутить в
+  нужную очередь, иначе её никто не возьмёт. Beat встроен в один воркер (`celery_quiz`) — он должен
+  быть единственным в кластере.
 
 ### 8.4 Vision LLM (Ollama qwen2.5vl:7b) вместо OCR
 - **Решение:** для генерации текста по слайдам используется vision-модель, а не tesseract/paddleocr.
@@ -234,15 +268,20 @@ frontend/src/
 - **Почему:** проще деплой (один HTML + JS), не нужен Node-сервер в продакшене. SEO для лендинга не критичен (B2B-продукт).
 - **Trade-off:** медленнее «первый показ контента», нет server-side персонализации.
 
-### 8.9 `useState` Nuxt вместо Pinia
-- **Решение:** глобальный state хранится через встроенный `useState('key', factory)` Nuxt.
-- **Почему:** проект пока маленький, объём global state — текущий пользователь и выбранный режим. Pinia — overkill.
-- **Trade-off:** при росте сложности придётся мигрировать. Пока — нет.
+### 8.9 Pinia как слой состояния (мигрировали с `useState`)
+- **Решение (обновлено):** глобальный state — на **Pinia** (`stores/auth.ts` и др.). Раньше был
+  `useState('key', factory)`.
+- **Почему:** с ростом приложения (auth, billing, comments, student) понадобились явные сторы с
+  геттерами/экшенами вместо рантайм-синглтонов.
+- **Trade-off:** одна зависимость. `composables/useCreationMode.ts` остался модулем констант, а не стором.
 
-### 8.10 JWT в localStorage
-- **Решение:** оба токена (access + refresh) хранятся в `localStorage`.
-- **Почему:** простой клиентский код, работает без cookies + CSRF.
-- **Trade-off:** XSS-уязвимо. Для прода стоит мигрировать на httpOnly cookie. См. [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md).
+### 8.10 Аутентификация на httpOnly-куках + CSRF (мигрировали с localStorage)
+- **Решение (обновлено):** токены живут в **httpOnly-куках**, защита от CSRF — double-submit
+  (`csrf_token` non-httpOnly + заголовок `X-CSRF-Token`). Refresh ротируется семействами в Redis с
+  детектом повторного использования.
+- **Почему:** httpOnly недостижим для XSS-скрипта; раньше токены лежали в `localStorage` (XSS-уязвимо).
+- **Trade-off:** нужен CSRF-механизм и аккуратные `path`/`samesite` у кук. Полная картина — в
+  [AUTH_FLOW.md](AUTH_FLOW.md).
 
 ### 8.11 Auto-applied миграции в `lifespan`
 - **Решение:** `app/main.py:_ensure_schema_at_head` запускает `alembic upgrade head` на старте.
@@ -261,6 +300,24 @@ frontend/src/
 6. **Vision-LLM качается вручную** на хост: `ollama pull qwen2.5vl:7b`.
 7. **CORS-порядок middleware** в `main.py` — CORS должен быть зарегистрирован *последним*, чтобы оказаться снаружи `log_and_catch` (см. длинный комментарий в файле).
 8. **`__mapper_args__ = {"eager_defaults": True}`** на моделях с `onupdate=func.now()` — без этого `MissingGreenlet` при сериализации после `UPDATE`.
+
+---
+
+## 9b. Подсистемы, добавленные после MVP
+
+Картинка выше — ядро. Поверх него выросли подсистемы, которых не было в первой версии этого
+документа. Кратко (детали — в [DECISIONS.md](DECISIONS.md)):
+
+| Подсистема | Где код | Суть |
+|---|---|---|
+| **Тесты/квизы** | `models/quiz.py`, `services/quiz_service.py`, `grading_service.py`, `routers/quiz_*` | Polymorphic-вопросы в JSONB, версионирование `quiz_questions` + pointer-snapshot в попытке, hybrid grading (детерминированный для closed + LLM для open). AI-генерация и AI-review вопросов. |
+| **Биллинг/кредиты** | `models/credit.py`, `services/billing_service.py`, `routers/billing.py`, `constants.py` (`CREDIT_WEIGHTS`, `PLAN_CONFIGS`) | Кредитный счёт на пользователя: `balance` + `reserved`. Генерация резервирует кредиты (`RESERVE`) и списывает/возвращает по факту (`RELEASE`). Планы free/starter/pro/school, топапы. Админ-эндпоинты за `X-Admin-Token`. |
+| **Email** | `services/email_service.py`, `email_token_service.py`, `tasks/email_pipeline.py`, `templates/email/` | Транзакционные письма (верификация, «видео готово») через Resend в отдельном воркере. Подписанные stateless-токены + одноразовое потребление через Redis. |
+| **Soft-delete** | глоб. фильтр для `User`/`Lesson`, явный для `Course`; `tasks/purge_pipeline.py` | Архивация вместо `DELETE`; суточный `purge_soft_deleted` (beat в `celery_quiz`) физически удаляет строки и файлы спустя `SOFT_DELETE_PURGE_DAYS`. |
+| **Комментарии** | `models/comment.py`, `services/comment_service.py`, `routers/comments.py` | Треды комментариев к урокам. |
+| **Журнал оценок / аналитика** | `services/gradebook_service.py`, `analytics_service.py`, `routers/gradebook.py`, `analytics.py` | Сводки по курсу/уроку, ручные override оценок, аналитика по квизам. |
+| **S3-бэкенд хранилища** | `services/storage_service.py`, `signed_url_service.py`, `config.py` (`STORAGE_BACKEND`) | Хранилище переключается `local`↔`s3` (Yandex Object Storage/совместимое). При `local` отдаётся через `/files/*` с HMAC-подписанными URL; `files`-роутер регистрируется только в `local`-режиме. |
+| **Наблюдаемость** | `main.py`, `celery_app.py`, `logging_config.py`, `monitoring/` | Sentry (FastAPI+Celery+SQLAlchemy), Prometheus-метрики (HTTP + Celery-сигналы) → Grafana, Flower для Celery, structlog с `request_id`. |
 
 ---
 
