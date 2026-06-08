@@ -40,7 +40,7 @@ const nav = {
               <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-60"></span>
               <span class="relative inline-flex h-2 w-2 rounded-full bg-red-500"></span>
             </span>
-            Работает на ИИ Yandex и SpeechKit
+            Работает на Yandex SpeechKit
           </div>
         </div>
 
