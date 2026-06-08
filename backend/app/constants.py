@@ -7,6 +7,8 @@ SLIDE_DPI: int = 150  # indistinguishable from 300 DPI on 1080p, 4× smaller PNG
 
 # Upload limits
 MAX_SCRIPT_BYTES: int = 10 * 1024 * 1024  # 10 MB
+# Ready-made video uploaded directly to a lesson (no generation pipeline).
+MAX_VIDEO_UPLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
 
 # Soft delete
 # How long a soft-deleted (archived) record lingers before the daily

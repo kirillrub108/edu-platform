@@ -98,19 +98,36 @@ async def test_verify_email_invalid_token_redirects_not_500(client: AsyncClient)
     assert "reason=invalid" in resp.headers["location"]
 
 
-# ── Content gate ──────────────────────────────────────────────────────────────
+# ── Structural CRUD is open to unverified teachers ──────────────────────────────
+# Creating course/module/lesson structure no longer requires a verified email;
+# only AI operations stay gated (see test_verify_email_post.py).
 
-async def test_unverified_teacher_cannot_create_course(
+async def test_unverified_teacher_can_create_structure(
     client: AsyncClient, db_session: Any
 ) -> None:
     user = await _make_unverified_teacher(db_session)
-    resp = await client.post(
-        "/api/v1/courses/",
-        json={"title": "Blocked course"},
-        cookies=_cookies(user),
+    cookies = _cookies(user)
+
+    course = await client.post(
+        "/api/v1/courses/", json={"title": "Open course"}, cookies=cookies
     )
-    assert resp.status_code == 403
-    assert "not verified" in resp.json()["detail"].lower()
+    assert course.status_code == 201
+    course_id = course.json()["id"]
+
+    module = await client.post(
+        f"/api/v1/courses/{course_id}/modules",
+        json={"title": "Module 1", "order": 0},
+        cookies=cookies,
+    )
+    assert module.status_code == 201
+    module_id = module.json()["id"]
+
+    lesson = await client.post(
+        "/api/v1/lessons/",
+        json={"title": "Lesson 1", "module_id": module_id},
+        cookies=cookies,
+    )
+    assert lesson.status_code == 201
 
 
 async def test_unverified_teacher_can_still_read(client: AsyncClient, db_session: Any) -> None:

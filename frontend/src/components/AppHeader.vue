@@ -1,12 +1,23 @@
 <script setup lang="ts">
-import { GraduationCap, LogOut, Menu, MailWarning } from 'lucide-vue-next'
+import { GraduationCap, LogOut, Menu, MailWarning, Coins } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const { user, isAuthenticated, isEmailVerified } = storeToRefs(auth)
 const { logout, openVerifyPrompt } = auth
 
-onMounted(() => {
-  if (!user.value) auth.fetchMe()
+const billing = useBillingStore()
+const { available } = storeToRefs(billing)
+const isTeacher = computed(() => user.value?.role === 'teacher')
+
+onMounted(async () => {
+  if (!user.value) await auth.fetchMe()
+  if (isTeacher.value) billing.fetchBalance()
+})
+
+// Refresh the balance whenever a teacher session appears (login, reload),
+// so the header counter is always current without polling.
+watch(() => user.value?.role, (role) => {
+  if (role === 'teacher') billing.fetchBalance()
 })
 
 const initials = computed(() =>
@@ -32,6 +43,15 @@ const dashboardLink = computed(() =>
       </NuxtLink>
 
 <div v-if="isAuthenticated" class="hidden md:flex items-center gap-3">
+        <NuxtLink
+          v-if="isTeacher"
+          to="/billing"
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-100 hover:bg-violet-100 transition tabular-nums"
+          title="Баланс кредитов"
+        >
+          <Coins class="w-3.5 h-3.5" />
+          {{ available }}
+        </NuxtLink>
         <button
           v-if="user && !isEmailVerified"
           type="button"

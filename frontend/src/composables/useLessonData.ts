@@ -52,6 +52,10 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
   const uploadingScript = ref(false)
   const scriptUploadError = ref('')
 
+  const videoFile = ref<File | null>(null)
+  const uploadingVideo = ref(false)
+  const videoUploadError = ref('')
+
   const load = async () => {
     loading.value = true
     error.value = ''
@@ -123,6 +127,26 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
     }
   }
 
+  const uploadVideo = async () => {
+    if (!videoFile.value) return
+    uploadingVideo.value = true
+    videoUploadError.value = ''
+    try {
+      const form = new FormData()
+      form.append('file', videoFile.value)
+      const updated = await apiFetch<any>(`/lessons/${lessonId.value}/upload-video`, {
+        method: 'POST',
+        body: form,
+      })
+      lesson.value = updated
+      videoFile.value = null
+    } catch (e: any) {
+      videoUploadError.value = e?.data?.detail ?? 'Не удалось загрузить видео'
+    } finally {
+      uploadingVideo.value = false
+    }
+  }
+
   // Clears the pending debounce, marks dirty, and saves — used by video generation
   // to flush any in-flight script edits before starting the pipeline.
   const flushScript = async () => {
@@ -145,13 +169,15 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
 
   const isAuto = computed(() => mode.value === CreationMode.PRESENTATION_AUTO)
   const isManual = computed(() => mode.value === CreationMode.PRESENTATION_AND_TEXT)
+  const isVideoUpload = computed(() => mode.value === CreationMode.VIDEO_UPLOAD)
 
   return {
     lesson, loading, error, mode,
     script, scriptSaveStatus,
     pptxFile, uploading, uploadError,
     scriptFile, uploadingScript, scriptUploadError,
-    isAuto, isManual,
-    load, onModeSelect, uploadPptx, uploadScriptFile, flushScript,
+    videoFile, uploadingVideo, videoUploadError,
+    isAuto, isManual, isVideoUpload,
+    load, onModeSelect, uploadPptx, uploadScriptFile, uploadVideo, flushScript,
   }
 }

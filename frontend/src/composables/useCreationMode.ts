@@ -3,6 +3,7 @@ export const CreationMode = {
   PRESENTATION_AUTO: 'presentation_auto',
   TEXT_ONLY: 'text_only',
   PROMPT: 'prompt',
+  VIDEO_UPLOAD: 'video_upload',
 } as const
 
 export type CreationModeValue = typeof CreationMode[keyof typeof CreationMode]
@@ -48,6 +49,14 @@ export const CREATION_MODE_CARDS: CreationModeCard[] = [
     description: 'Кратко опишите тему, LLM подготовит структуру, слайды, текст и озвучку.',
     emoji: '💬',
     available: false,
+  },
+  {
+    value: CreationMode.VIDEO_UPLOAD,
+    title: 'Загрузить готовое видео',
+    subtitle: 'Своё видео — без генерации',
+    description: 'Загрузите готовый видеофайл (MP4, WebM, MOV, MKV). Урок сразу публикуется, без AI и пайплайна.',
+    emoji: '🎬',
+    available: true,
   },
 ]
 

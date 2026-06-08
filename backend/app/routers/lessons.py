@@ -1,9 +1,10 @@
 import asyncio
 import json
+import os
 from uuid import UUID
 
 from celery.result import AsyncResult
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from redis.asyncio import Redis
 from sqlalchemy import desc, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +36,7 @@ from app.schemas.lesson import (
 )
 from app.limiter import limiter
 from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
-from app.constants import CREDIT_WEIGHTS
+from app.constants import CREDIT_WEIGHTS, MAX_VIDEO_UPLOAD_BYTES
 from app.services import billing_service
 from app.services.storage_service import storage_service
 from app.tasks.video_pipeline import generate_video_lesson
@@ -62,7 +63,7 @@ router = APIRouter(prefix="/api/v1/lessons", tags=["lessons"])
 @router.post("/", response_model=LessonOut, status_code=status.HTTP_201_CREATED)
 async def create_lesson(
     data: LessonCreate,
-    user: User = Depends(require_verified_teacher),
+    user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
     module = await db.get(Module, data.module_id)
@@ -136,6 +137,65 @@ async def update_script(
     db: AsyncSession = Depends(get_db),
 ):
     lesson.script = data.script
+    await db.commit()
+    await db.refresh(lesson)
+    return _lesson_out(lesson, str(user.id))
+
+
+_VIDEO_EXTS = {".mp4", ".webm", ".mov", ".mkv"}
+_VIDEO_CONTENT_TYPES = {"video/mp4", "video/webm", "video/quicktime", "video/x-matroska"}
+
+
+def _looks_like_video(head: bytes, ext: str) -> bool:
+    """Cheap magic-byte sniff on the first 16 bytes to reject empty/corrupt files."""
+    if ext in (".mp4", ".mov"):
+        # ISO Base Media File Format: a top-level box type at offset 4.
+        return head[4:8] in (b"ftyp", b"moov", b"mdat", b"free", b"skip", b"wide")
+    if ext in (".webm", ".mkv"):
+        return head[:4] == b"\x1a\x45\xdf\xa3"  # EBML / Matroska header
+    return False
+
+
+@router.post("/{lesson_id}/upload-video", response_model=LessonOut)
+async def upload_lesson_video(
+    file: UploadFile,
+    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    """Attach a ready-made video file to a lesson — no generation pipeline, no AI.
+
+    Replaces any existing video and publishes the lesson. Validates format by both
+    extension and content-type, sniffs magic bytes, and caps size at
+    MAX_VIDEO_UPLOAD_BYTES.
+    """
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in _VIDEO_EXTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Допустимые форматы: {', '.join(sorted(_VIDEO_EXTS))}",
+        )
+    if file.content_type not in _VIDEO_CONTENT_TYPES:
+        raise HTTPException(status_code=400, detail="Неверный тип содержимого видео")
+
+    if file.size is not None:
+        if file.size == 0:
+            raise HTTPException(status_code=400, detail="Пустой файл")
+        if file.size > MAX_VIDEO_UPLOAD_BYTES:
+            gb = MAX_VIDEO_UPLOAD_BYTES // (1024 * 1024 * 1024)
+            raise HTTPException(
+                status_code=413, detail=f"Файл слишком большой (максимум {gb} ГБ)"
+            )
+
+    head = await file.read(16)
+    await file.seek(0)
+    if not _looks_like_video(head, ext):
+        raise HTTPException(status_code=400, detail="Файл повреждён или не является видео")
+
+    relative = await storage_service.save_upload(file, "videos")
+    lesson.video_url = storage_service.get_url(relative, str(user.id))
+    lesson.creation_mode = CreationMode.video_upload
+    lesson.status = LessonStatus.published
     await db.commit()
     await db.refresh(lesson)
     return _lesson_out(lesson, str(user.id))

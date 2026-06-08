@@ -24,7 +24,9 @@ const visionPanelRef = ref<{
 const {
   lesson, loading, error, mode, script, scriptSaveStatus,
   pptxFile, uploading, uploadError, scriptFile, uploadingScript, scriptUploadError,
-  isAuto, isManual, load, onModeSelect, uploadPptx, uploadScriptFile, flushScript,
+  videoFile, uploadingVideo, videoUploadError,
+  isAuto, isManual, isVideoUpload,
+  load, onModeSelect, uploadPptx, uploadScriptFile, uploadVideo, flushScript,
 } = useLessonData(lessonId)
 
 const {
@@ -229,6 +231,16 @@ watch(lessonId, (newId, oldId) => {
       <section class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
         <CreationModeChooser :model-value="mode" @update:model-value="onModeSelect" />
       </section>
+
+      <LessonVideoUploadSection
+        v-if="isVideoUpload"
+        :video-url="lesson.video_url ?? null"
+        :selected-file="videoFile"
+        :uploading="uploadingVideo"
+        :upload-error="videoUploadError"
+        @file-change="videoFile = $event; videoUploadError = ''"
+        @upload="uploadVideo"
+      />
 
       <LessonUploadSection
         v-if="isManual || isAuto"

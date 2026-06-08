@@ -30,6 +30,7 @@ class CreationMode(str, enum.Enum):
     presentation_auto = "presentation_auto"
     text_only = "text_only"
     prompt = "prompt"
+    video_upload = "video_upload"
 
 
 class Module(Base):

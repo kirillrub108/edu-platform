@@ -31,6 +31,9 @@ export function useVideoGeneration(
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let statusPollTimer: ReturnType<typeof setInterval> | null = null
+  // One-shot guard: refresh the balance once the task starts reporting progress,
+  // which is when the credit RESERVE has landed.
+  let reserveReflected = false
 
   const stopPollTimer = () => {
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
@@ -45,6 +48,7 @@ export function useVideoGeneration(
     if (data.step !== undefined) {
       taskMeta.value = { step: data.step, done: data.done ?? 0, total: data.total ?? 1 }
       taskStatus.value = 'PROGRESS'
+      if (!reserveReflected) { reserveReflected = true; void billing.fetchBalance() }
     } else if (data.status === 'published') {
       progressStream.stop()
       generating.value = false
@@ -134,6 +138,7 @@ export function useVideoGeneration(
     taskError.value = ''
     taskMeta.value = null
     generating.value = true
+    reserveReflected = false
     stopPolling()
     if (mode.value === CreationMode.PRESENTATION_AND_TEXT) {
       await flushScript()

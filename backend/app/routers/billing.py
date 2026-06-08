@@ -49,7 +49,17 @@ async def admin_grant_credits(
     data: GrantRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    return await billing_service.grant_credits(db, data.user_id, data.amount, data.description)
+    tx = await billing_service.grant_credits(db, data.user_id, data.amount, data.description)
+    bal = await billing_service.get_balance(db, data.user_id)
+    return GrantOut(
+        id=tx.id,
+        account_id=tx.account_id,
+        delta=tx.delta,
+        created_at=tx.created_at,
+        balance=bal["balance"],
+        reserved=bal["reserved"],
+        available=bal["available"],
+    )
 
 
 @router.post(

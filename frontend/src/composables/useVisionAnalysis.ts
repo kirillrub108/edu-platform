@@ -24,6 +24,9 @@ export function useVisionAnalysis(
 
   let analyzeTimer: ReturnType<typeof setInterval> | null = null
   let statusPollTimer: ReturnType<typeof setInterval> | null = null
+  // One-shot guard: refresh the balance once analysis starts reporting progress,
+  // which is when the credit RESERVE has landed.
+  let reserveReflected = false
 
   const stopAnalyzePolling = () => {
     if (analyzeTimer) { clearInterval(analyzeTimer); analyzeTimer = null }
@@ -38,6 +41,7 @@ export function useVisionAnalysis(
     if (data.step !== undefined) {
       analyzeMeta.value = { step: data.step, done: data.done, total: data.total }
       analyzeStatus.value = 'PROGRESS'
+      if (!reserveReflected) { reserveReflected = true; void billing.fetchBalance() }
     } else if (data.status === 'ready_for_edit') {
       progressStream.stop()
       analyzing.value = false
@@ -125,6 +129,7 @@ export function useVisionAnalysis(
     analyzeError.value = ''
     analyzeMeta.value = null
     analyzing.value = true
+    reserveReflected = false
     stopPolling()
     try {
       const res = await apiFetch<any>(`/lessons/${lessonId.value}/analyze`, { method: 'POST' })

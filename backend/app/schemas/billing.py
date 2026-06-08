@@ -43,6 +43,10 @@ class GrantOut(BaseModel):
     account_id: UUID
     delta: int
     created_at: datetime
+    # Post-grant balance so callers (top-up flow) can update without a refetch.
+    balance: int
+    reserved: int
+    available: int
 
 
 class RenewalOut(BaseModel):
