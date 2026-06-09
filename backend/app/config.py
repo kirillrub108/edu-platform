@@ -52,6 +52,11 @@ class Settings(BaseSettings):
     VISION_MODEL: str = "qwen2-vl:7b"
     VISION_OLLAMA_BASE_URL: str = "http://host.docker.internal:11434/v1"
     VISION_API_KEY: str = "ollama"
+    # Suppress hidden chain-of-thought on reasoning-capable models (Qwen 3.6 etc.)
+    # via the OpenRouter-style `reasoning: {enabled: false}` body param. Off by
+    # default: the param is not part of the core OpenAI schema, so it is only
+    # sent when explicitly enabled for a provider that understands it (Polza).
+    VISION_REASONING_DISABLED: bool = False
 
     # Yandex Vision (prod)
     YANDEX_VISION_MODEL: str = "yandexgpt-pro"

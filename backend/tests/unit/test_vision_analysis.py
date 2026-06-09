@@ -124,7 +124,11 @@ async def test_call_ollama_payload_has_no_ollama_only_fields(
     monkeypatch: pytest.MonkeyPatch, slide_png: Path
 ) -> None:
     """The generic OpenAI branch must NOT leak Ollama-only fields (options /
-    keep_alive / num_ctx / num_predict) — Polza & Yandex AI Studio 400 on them."""
+    keep_alive / num_ctx / num_predict) — Polza & Yandex AI Studio 400 on them.
+    Reasoning flag pinned off: this is the clean-baseline payload check."""
+    from app.services.vision_analysis import settings as vis_settings
+
+    monkeypatch.setattr(vis_settings, "VISION_REASONING_DISABLED", False)
     svc = VisionAnalysisService()
     captured: dict[str, Any] = {}
 
@@ -150,6 +154,42 @@ async def test_call_ollama_payload_has_no_ollama_only_fields(
     assert set(captured) <= {"model", "messages", "temperature", "max_tokens"}
     for banned in ("options", "keep_alive", "num_ctx", "num_predict", "raw"):
         assert banned not in captured
+
+
+async def test_call_ollama_reasoning_flag_adds_extra_body(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path
+) -> None:
+    """VISION_REASONING_DISABLED=True must send the OpenRouter-style switch;
+    False (default, Ollama/Yandex) must not send the field at all."""
+    from app.services.vision_analysis import settings as vis_settings
+
+    svc = VisionAnalysisService()
+    captured: dict[str, Any] = {}
+
+    async def _create(**kwargs: Any) -> SimpleNamespace:
+        captured.clear()
+        captured.update(kwargs)
+        return _llm_response("narration")
+
+    monkeypatch.setattr(
+        svc,
+        "_ollama_client",
+        SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
+        ),
+    )
+
+    monkeypatch.setattr(vis_settings, "VISION_REASONING_DISABLED", True)
+    await svc.analyze_slide(
+        slide_image_path=str(slide_png), slide_number=1, total_slides=1, course_title="C"
+    )
+    assert captured["extra_body"] == {"reasoning": {"enabled": False}}
+
+    monkeypatch.setattr(vis_settings, "VISION_REASONING_DISABLED", False)
+    await svc.analyze_slide(
+        slide_image_path=str(slide_png), slide_number=1, total_slides=1, course_title="C"
+    )
+    assert "extra_body" not in captured
 
 
 def test_vision_client_uses_cloud_retry_tuning() -> None:

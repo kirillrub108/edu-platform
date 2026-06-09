@@ -358,6 +358,12 @@ class VisionAnalysisService:
         system: str = VISION_SYSTEM_PROMPT,
     ) -> str:
         assert self._ollama_client is not None
+        kwargs: dict[str, Any] = {}
+        if settings.VISION_REASONING_DISABLED:
+            # Polza/OpenRouter switch: skip hidden reasoning tokens (billed as
+            # completion and ~halving per-slide latency). Sent only when the
+            # flag is on — plain Ollama/Yandex must not receive unknown fields.
+            kwargs["extra_body"] = {"reasoning": {"enabled": False}}
         resp = await self._ollama_client.chat.completions.create(
             model=self._model,
             messages=[
@@ -366,6 +372,7 @@ class VisionAnalysisService:
             ],
             temperature=settings.LLM_TEMPERATURE,
             max_tokens=settings.LLM_MAX_TOKENS,
+            **kwargs,
         )
         return (resp.choices[0].message.content or "").strip()
 
