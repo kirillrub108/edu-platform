@@ -99,7 +99,10 @@ def get_storage_backend() -> StorageBackend:
                 raise ValueError("S3_BUCKET_NAME must be set when STORAGE_BACKEND=s3")
             _backend_instance = S3Backend()
         else:
-            _backend_instance = LocalBackend(settings.STORAGE_PATH, settings.BASE_URL)
+            # Signed /files/* links point at the public files host (nginx/CDN
+            # domain) in prod; fall back to BASE_URL in dev.
+            files_base_url = settings.PUBLIC_FILES_BASE_URL or settings.BASE_URL
+            _backend_instance = LocalBackend(settings.STORAGE_PATH, files_base_url)
     return _backend_instance
 
 

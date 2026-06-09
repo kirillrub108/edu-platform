@@ -771,6 +771,18 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## Раздача `/files/*` через nginx + `auth_request` (не `secure_link`)
+
+**Контекст.** В prod статику (PPTX/PNG/MP4) нужно отдавать напрямую с диска (sendfile) и кешировать на CDN, а не гонять через FastAPI StaticFiles. Подписанные URL остаются обязательными.
+
+**Решение.** nginx (`nginx/default.conf`) отдаёт `/files/*` через `alias` из `./backend/storage` (`:ro`), а подпись проверяет `auth_request` → внутренний эндпоинт бэка `GET /internal/files/verify` (`routers/files.py:internal_router`), который переиспользует `verify_signed_url` без изменений. Эндпоинт возвращает остаток жизни подписи в `X-Signed-TTL`; nginx через `auth_request_set` превращает его в `Cache-Control: max-age=<ttl>`, так что CDN не кеширует файл дольше валидности подписи.
+
+**Почему не `secure_link`.** Модуль `ngx_http_secure_link_module` умеет только plain **MD5 (base64url)**. Текущая подпись — **HMAC-SHA256/hex**. Совместимость потребовала бы даунгрейда до неусиленного MD5 (уязвим к length-extension) и дублирования/переписывания логики подписи. `auth_request` сохраняет HMAC-SHA256 и переиспользует сервис как есть; цена — хит в origin на cache-miss (на cache-hit CDN отдаёт сам).
+
+**dev vs prod.** Флаг `SERVE_STATIC_VIA_NGINX` (`config.py`): `false` (dev) — FastAPI регистрирует `files.router` и отдаёт `/files/*` сам, nginx простаивает на `:8080`; `true` (prod) — регистрируется только `files.internal_router`, файлы отдаёт nginx. Публичный домен ссылок — `PUBLIC_FILES_BASE_URL` (пусто → `BASE_URL`).
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.

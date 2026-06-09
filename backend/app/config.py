@@ -75,6 +75,15 @@ class Settings(BaseSettings):
     BASE_URL: str = "http://localhost:8000"
     STORAGE_BACKEND: Literal["local", "s3"] = "local"
 
+    # Static file delivery (local backend only).
+    # False (dev): FastAPI serves /files/* itself (StaticFiles-equivalent).
+    # True  (prod): nginx serves /files/* directly from disk; FastAPI only
+    #   exposes the internal auth_request verify endpoint.
+    SERVE_STATIC_VIA_NGINX: bool = False
+    # Public base URL signed /files/* links point at — the nginx/CDN domain in
+    # prod. Empty falls back to BASE_URL so dev links keep working unchanged.
+    PUBLIC_FILES_BASE_URL: str = ""
+
     # S3-compatible storage (Yandex Object Storage, AWS S3, MinIO, …)
     S3_ENDPOINT_URL: str = "https://storage.yandexcloud.net"
     S3_BUCKET_NAME: str = ""

@@ -248,7 +248,11 @@ app.include_router(quiz_student.router)
 app.include_router(uploads.router)
 app.include_router(students.router)
 if settings.STORAGE_BACKEND == "local":
-    app.include_router(files.router)
+    if settings.SERVE_STATIC_VIA_NGINX:
+        # nginx serves /files/* directly from disk; FastAPI only verifies sigs.
+        app.include_router(files.internal_router)
+    else:
+        app.include_router(files.router)
 app.include_router(analytics.router)
 app.include_router(analytics.lesson_results_router)
 app.include_router(comments.router)

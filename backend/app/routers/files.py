@@ -1,9 +1,11 @@
 import structlog
 import mimetypes
+import time
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 
 import aiofiles
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from app.config import settings
@@ -11,6 +13,8 @@ from app.services.signed_url_service import verify_signed_url
 
 logger = structlog.get_logger()
 router = APIRouter(tags=["files"])
+# Internal-only routes (called by nginx auth_request, not browsers).
+internal_router = APIRouter(tags=["files"])
 
 CHUNK_SIZE = 1024 * 1024  # 1 MB
 
@@ -96,3 +100,35 @@ async def serve_file(
             "Content-Length": str(chunk_size),
         },
     )
+
+
+@internal_router.get("/internal/files/verify")
+async def verify_file_signature(request: Request) -> Response:
+    """auth_request target for nginx (prod static delivery).
+
+    nginx forwards the original request line in `X-Original-URI`; we re-run the
+    existing HMAC check via `verify_signed_url` and, on success, return the
+    remaining signature lifetime in `X-Signed-TTL` so nginx can cap
+    `Cache-Control: max-age` to it (an expired URL can't linger in the CDN).
+    Returns 200 to let nginx serve the file, 403 otherwise — auth_request maps
+    any other status to 500, so only these two are ever returned.
+    """
+    original = request.headers.get("X-Original-URI", "")
+    parsed = urlparse(original)
+    if not parsed.path.startswith("/files/"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    file_path = unquote(parsed.path[len("/files/"):])
+    params = parse_qs(parsed.query)
+    uid = (params.get("uid") or [""])[0]
+    sig = (params.get("sig") or [""])[0]
+    try:
+        expires = int((params.get("expires") or ["0"])[0])
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    if not uid or not sig or not verify_signed_url(file_path, uid, expires, sig):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    ttl = max(expires - int(time.time()), 0)
+    return Response(status_code=200, headers={"X-Signed-TTL": str(ttl)})

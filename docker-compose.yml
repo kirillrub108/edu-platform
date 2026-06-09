@@ -210,6 +210,22 @@ services:
     networks:
       - edu-network
 
+  nginx:
+    image: nginx:1.27-alpine
+    # Direct /files/* delivery (sendfile) from the same storage volume the
+    # backend writes to, mounted read-only. Active in prod when
+    # SERVE_STATIC_VIA_NGINX=true; in dev it sits idle on :8080 while FastAPI
+    # keeps serving /files/* on :8000 — `docker-compose up` needs no extra step.
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./backend/storage:/var/www/storage:ro
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    networks:
+      - edu-network
+
   prometheus:
     image: prom/prometheus:latest
     ports:
