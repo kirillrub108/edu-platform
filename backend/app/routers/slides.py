@@ -19,8 +19,9 @@ from app.limiter import limiter
 from app.models.credit import CreditOperation
 from app.models.lesson import CreationMode, Lesson, LessonStatus
 from app.models.slide_text import SlideText
+from app.models.usage_counter import UsageResource
 from app.models.user import User
-from app.services import billing_service
+from app.services import billing_service, quota_service
 from app.schemas.slide import (
     AnalyzeStatusResponse,
     SlideListResponse,
@@ -61,7 +62,7 @@ def _row_to_out(row: SlideText, user_id: str) -> SlideTextOut:
 async def analyze_lesson_slides(
     request: Request,
     lesson_id: UUID,
-    _verified: User = Depends(require_verified_teacher),
+    user: User = Depends(require_verified_teacher),
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
@@ -71,13 +72,28 @@ async def analyze_lesson_slides(
             detail="Загрузите PPTX перед анализом презентации",
         )
 
+    # Tier gate (concurrency + atomic monthly quota) BEFORE we flip the lesson to
+    # `analyzing`, so the current lesson isn't counted against its own concurrency
+    # limit. Raises 429 / 402 with a machine-readable detail on rejection.
+    priority = await quota_service.reserve(db, user.id, UsageResource.vision)
+
     lesson.creation_mode = CreationMode.presentation_auto
     lesson.status = LessonStatus.analyzing
     await db.commit()
 
-    task = analyze_presentation_task.apply_async(
-        args=[str(lesson.id), lesson.pptx_path], queue="vision"
-    )
+    try:
+        task = analyze_presentation_task.apply_async(
+            args=[str(lesson.id), lesson.pptx_path], queue="vision", priority=priority
+        )
+    except Exception:
+        # Enqueue failed: undo the status flip and compensate the reservation.
+        lesson.status = LessonStatus.draft
+        await db.commit()
+        await quota_service.release(db, user.id, UsageResource.vision)
+        raise HTTPException(
+            status_code=503, detail="Не удалось поставить задачу в очередь, попробуйте позже"
+        )
+
     lesson.analyze_task_id = task.id
     await db.commit()
     return {"task_id": task.id, "lesson_id": str(lesson.id), "status": "analyzing"}

@@ -63,6 +63,26 @@ export function isInsufficientCredits(raw?: string | null): boolean {
   return !!raw && (raw === 'insufficient_credits' || /недостаточно кредит/i.test(raw))
 }
 
+// Translate a thrown apiFetch error into a friendly Russian message. Handles the
+// structured tier-quota detail ({code, ...}) the backend returns on 402/429, the
+// plain-string detail used elsewhere, and falls back to null when unclassifiable.
+export function friendlyApiError(err: any): string | null {
+  const detail = err?.data?.detail
+  if (detail && typeof detail === 'object') {
+    if (detail.code === 'quota_exceeded') {
+      const what = detail.resource === 'vision' ? 'анализов презентаций' : 'генераций видео'
+      return `Исчерпана месячная квота ${what} (использовано ${detail.used} из ${detail.limit}). `
+        + 'Лимит обновится в начале следующего месяца.'
+    }
+    if (detail.code === 'concurrency_limit') {
+      return `Слишком много одновременных задач (активно ${detail.active} из ${detail.limit}). `
+        + 'Дождитесь завершения текущих и попробуйте снова.'
+    }
+  }
+  if (typeof detail === 'string') return detail
+  return null
+}
+
 export function formatRub(n: number): string {
   return new Intl.NumberFormat('ru-RU').format(n) + ' ₽'
 }

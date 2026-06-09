@@ -783,6 +783,28 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## Тарифные квоты и приоритет Celery-задач
+
+**Контекст.** Платные пользователи должны получать приоритет на постановке дорогих AI-задач (видео, vision), плюс месячные квоты на эти операции и лимит одновременных джобов.
+
+**Решение.**
+- **Tier выводится из биллингового `CreditAccount.plan`**, отдельной колонки нет (`PLAN_TIER_MAP` в `constants.py`: free→free, starter/pro/school→paid). Один источник истины «плана», без второй сущности. `enterprise` — задел: наивысший приоритет и почти безлимитные квоты, но ни один текущий план в него не маппится (без отдельной логики/UI). Промоут школьного плана в enterprise — одна строка в `PLAN_TIER_MAP`.
+- **Источник истины квот — Postgres `usage_counters(user_id, period_key, resource, count)`**, не Redis. `period_key="YYYY-MM"` → смена месяца = новые строки, счётчики обнуляются естественно. Резервирование — атомарный UPSERT `INSERT … ON CONFLICT DO UPDATE … WHERE count < :limit RETURNING count`: нет строки в результате → квота исчерпана. Гонка за последний слот сериализуется row-lock'ом — проходит ровно один. (Redis-инкремент быстрее, но это эфемерное состояние без аудита и с риском рассинхрона при потере ключей; квоты — биллингоподобные, им нужен durable-счётчик.)
+- **Concurrency — счётом активных уроков** (`status in (analyzing, processing)` по курсам юзера), а не отдельным счётчиком: статусы уже ведутся пайплайнами и сбрасываются на финише, так что счёт самокорректируется и не дрейфует. Это best-effort soft-limit (узкое TOCTOU-окно); жёсткая гарантия — только у месячной квоты (атомарный UPSERT).
+- **Приоритет — `apply_async(priority=TIER_PRIORITY[tier])`** с сохранением маршрутизации (`queue="video"/"vision"`), а не отдельные очереди на тариф (иначе воркеры/маршрутизация дублируются на каждый тариф). В Redis-брокере **меньшее число = выше приоритет** (0 берётся первым, 9 последним — обратно RabbitMQ; сверено с доками Celery). Поэтому `enterprise=0, paid=3, free=9`. В `celery_app.py`: `broker_transport_options={priority_steps: 0..9, sep: ":", queue_order_strategy: "priority"}` + `worker_prefetch_multiplier=1` (иначе prefork-воркер префетчит низкоприоритетную задачу раньше и приоритет не работает).
+- **Порядок в роутере:** concurrency (read) → проверка кредитов (read) → атомарный reserve квоты (write) → `apply_async`. На сбое enqueue — best-effort `quota_service.release` (декремент) и 503; для analyze дополнительно откатывается флип статуса в `analyzing`. Reserve идёт после read-only проверок, чтобы не инкрементить счётчик зря.
+- Вся логика — `services/quota_service.py` (async, AsyncSession); роутеры остаются тонкими (один `reserve(...)` + проброс priority). 402 (квота) и 429 (concurrency, с `Retry-After`) несут машиночитаемый `detail` `{code, limit, used/active}`; фронт переводит его через `useBillingMeta.friendlyApiError`. GET `/api/v1/quota` отдаёт снимок (`QuotaStatusRead`).
+
+**Trade-offs:**
+
+- + Один источник «плана» (CreditPlan), durable-квоты с аудит-следом, приоритет без дублирования очередей.
+- + Concurrency без нового состояния — переиспользует статусы уроков.
+- − Concurrency — soft-limit (узкая гонка двух параллельных запросов возможна); месячная квота — жёсткая.
+- − `school` и `starter` пока в одном tier (paid): три tier'а на четыре плана; enterprise зарезервирован под будущее.
+- − `worker_prefetch_multiplier=1` чуть снижает throughput на мелких задачах ради корректного приоритета (видео/vision долгие — некритично).
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.

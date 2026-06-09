@@ -19,6 +19,7 @@ from app.models.quiz import (
     QuizStatus,
 )
 from app.models.slide_text import SlideText
+from app.models.usage_counter import UsageCounter, UsageResource
 from app.models.user import User, UserRole
 
 __all__ = [
@@ -47,4 +48,6 @@ __all__ = [
     "CreditTransaction",
     "CreditPlan",
     "CreditOperation",
+    "UsageCounter",
+    "UsageResource",
 ]

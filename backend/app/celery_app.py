@@ -81,6 +81,23 @@ celery_app.conf.update(
     ),
     task_default_queue="video",
     task_default_routing_key="video",
+    # ── Tier priority on the Redis broker ────────────────────────────────────
+    # Redis has no native priorities; kombu fans each queue out into per-priority
+    # sub-queues ("video", "video:1", … "video:9") and the worker drains the
+    # LOWER number first — so 0 = highest priority, 9 = lowest (the REVERSE of
+    # RabbitMQ). `queue_order_strategy='priority'` is what makes apply_async's
+    # priority kwarg take effect; without it the value is ignored. priority_steps
+    # is the set of valid buckets — TIER_PRIORITY values must fall inside it.
+    broker_transport_options={
+        "priority_steps": list(range(10)),
+        "sep": ":",
+        "queue_order_strategy": "priority",
+    },
+    # On prefork a worker prefetching >1 message can grab a low-priority task
+    # before a later high-priority one is even seen, defeating prioritization.
+    # Pin to 1 so each child holds exactly one unacked task at a time. Works with
+    # task_acks_late (already set) so an unfinished task is re-queued on crash.
+    worker_prefetch_multiplier=1,
     # Test-only knobs: when set to "1" in pytest, .delay()/.apply_async()
     # run synchronously in-process. Defaults to off, so production is
     # untouched.

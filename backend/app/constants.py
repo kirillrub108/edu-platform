@@ -57,6 +57,46 @@ TOPUP_PACKS: list[dict[str, int]] = [
 
 CREDIT_CARRYOVER_RATIO: float = 0.5  # до 50% месячного объёма переносится на след. месяц
 
+# ── Tier quotas & Celery scheduling priority ─────────────────────────────────
+# A "tier" (free|paid|enterprise) is DERIVED from the billing CreditPlan via
+# PLAN_TIER_MAP — there is no separate tier column. It drives two things:
+#   1. месячные квоты на дорогие AI-операции + лимит одновременных джобов
+#   2. приоритет постановки Celery-задач (платные выше бесплатных)
+# enterprise is groundwork: it has the highest priority and effectively-unlimited
+# quotas, but no current CreditPlan maps to it (no separate logic/UI yet).
+
+# CreditPlan value → tier. Keys match CreditPlan/PLAN_CONFIGS; unknown → "free".
+PLAN_TIER_MAP: dict[str, str] = {
+    "free":    "free",
+    "starter": "paid",
+    "pro":     "paid",
+    "school":  "paid",
+}
+
+# Monthly caps on metered AI ops + max simultaneously-active jobs, per tier.
+# monthly_<resource> keys match UsageResource values (see _RESOURCE_QUOTA_KEY).
+TIER_QUOTAS: dict[str, dict[str, int]] = {
+    "free":       {"monthly_video": 5, "monthly_vision": 10, "max_concurrent_jobs": 1},
+    "paid":       {"monthly_video": 100, "monthly_vision": 200, "max_concurrent_jobs": 3},
+    "enterprise": {"monthly_video": 1_000_000, "monthly_vision": 1_000_000, "max_concurrent_jobs": 50},  # noqa: E501
+}
+
+# Celery scheduling priority per tier (passed to apply_async(priority=...)).
+# IMPORTANT — Redis broker semantics: a LOWER number is HIGHER priority (0 is
+# drained first, 9 last). This is the REVERSE of RabbitMQ. Verified against the
+# Celery routing docs ("In Redis, priority 0 is considered the highest priority,
+# while priority 9 is the lowest"). Hence enterprise=0 (highest), free=9 (lowest).
+# Values must fall inside broker_transport_options["priority_steps"] in
+# app/celery_app.py (currently 0..9).
+TIER_PRIORITY: dict[str, int] = {
+    "free":       9,
+    "paid":       3,
+    "enterprise": 0,
+}
+
+# Retry-After (seconds) returned with the 429 when a user hits max_concurrent_jobs.
+CONCURRENCY_RETRY_AFTER_SECONDS: int = 30
+
 # Default question-type distribution for quiz generation.
 # Keys match the type strings used in generate_quiz_v2 / _parse_payload_v2.
 # Fractions must sum to 1.0; short_answer absorbs rounding remainders.

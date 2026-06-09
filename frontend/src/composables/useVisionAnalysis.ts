@@ -1,4 +1,4 @@
-import { friendlyTaskError } from '~/composables/useBillingMeta'
+import { friendlyApiError, friendlyTaskError } from '~/composables/useBillingMeta'
 
 interface SnapshotPanel {
   takeSnapshot(): void
@@ -142,7 +142,7 @@ export function useVisionAnalysis(
       }
     } catch (e: any) {
       analyzing.value = false
-      analyzeError.value = e?.data?.detail ?? 'Не удалось запустить анализ'
+      analyzeError.value = friendlyApiError(e) ?? 'Не удалось запустить анализ'
     }
   }
 
