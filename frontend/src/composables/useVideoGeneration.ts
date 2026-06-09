@@ -28,6 +28,7 @@ export function useVideoGeneration(
   const taskError = ref('')
   const generating = ref(false)
   const cancellingVideo = ref(false)
+  const pipelineDone = ref(false)
 
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let statusPollTimer: ReturnType<typeof setInterval> | null = null
@@ -56,6 +57,8 @@ export function useVideoGeneration(
         lesson.value = d
         if (d.status === 'error') {
           taskError.value = friendlyTaskError(d.last_warning) ?? 'Ошибка генерации видео.'
+        } else {
+          pipelineDone.value = true
         }
       })
       void billing.refresh()
@@ -91,6 +94,8 @@ export function useVideoGeneration(
         lesson.value = data
         if (data.status === 'error') {
           taskError.value = friendlyTaskError(data.last_warning) ?? 'Ошибка генерации видео.'
+        } else {
+          pipelineDone.value = true
         }
         void billing.refresh()
       }
@@ -115,6 +120,8 @@ export function useVideoGeneration(
         // (lesson.status=error + last_warning), so surface that here.
         if (data.status === 'error') {
           taskError.value = friendlyTaskError(data.last_warning) ?? 'Ошибка генерации видео.'
+        } else {
+          pipelineDone.value = true
         }
         void billing.refresh()
       } else if (res.status === 'FAILURE') {
@@ -137,6 +144,7 @@ export function useVideoGeneration(
     }
     taskError.value = ''
     taskMeta.value = null
+    pipelineDone.value = false
     generating.value = true
     reserveReflected = false
     stopPolling()
@@ -221,6 +229,7 @@ export function useVideoGeneration(
   })
 
   const currentStageIdx = computed(() => {
+    if (pipelineDone.value) return stages.value.length
     if (!taskMeta.value) return 0
     const idx = stages.value.findIndex(s => s.key === taskMeta.value!.step)
     return idx < 0 ? 0 : idx
