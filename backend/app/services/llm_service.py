@@ -3,11 +3,12 @@ import structlog
 import re
 from typing import Any, Awaitable, Callable
 
-import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
 from app.constants import (
+    LLM_MAX_RETRIES,
+    LLM_REQUEST_TIMEOUT_SECONDS,
     QUIZ_LLM_OPEN_MAX_TOKENS,
     QUIZ_LLM_TEMPERATURE,
     QUIZ_MIN_FOR_DISTRIBUTION,
@@ -120,13 +121,26 @@ class LLMService:
         self.client = AsyncOpenAI(
             base_url=settings.LLM_BASE_URL,
             api_key=settings.LLM_API_KEY,
-            timeout=httpx.Timeout(None),
+            timeout=LLM_REQUEST_TIMEOUT_SECONDS,
+            max_retries=LLM_MAX_RETRIES,
         )
         self.model = settings.LLM_MODEL
 
     @staticmethod
     def _strip_think(text: str) -> str:
         return re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+
+    @staticmethod
+    def _strip_code_fences(text: str) -> str:
+        """Remove a wrapping markdown code fence (```json … ```) that some cloud
+        models emit around JSON despite response_format=json_object. Local Ollama
+        never does this, so the strip is a no-op for it. <think> blocks are
+        already removed upstream in _chat."""
+        t = text.strip()
+        if t.startswith("```"):
+            t = re.sub(r"^```[A-Za-z0-9]*\s*", "", t)
+            t = re.sub(r"\s*```$", "", t)
+        return t.strip()
 
     async def _chat(
         self,
@@ -172,7 +186,7 @@ class LLMService:
         for attempt in range(2):
             raw = await self._chat(system, user, json_mode=True, temperature=temperature)
             try:
-                data = json.loads(raw)
+                data = json.loads(self._strip_code_fences(raw))
                 return validator(data)
             except (json.JSONDecodeError, ValueError) as exc:
                 last_error = str(exc)
@@ -217,7 +231,7 @@ class LLMService:
         )
         raw = await self._chat(_SSML_SYSTEM, user, json_mode=True)
         try:
-            data = json.loads(raw)
+            data = json.loads(self._strip_code_fences(raw))
             chunks = data.get("chunks", [])
             if len(chunks) == slides_count and all(chunks):
                 return [str(c) for c in chunks], None

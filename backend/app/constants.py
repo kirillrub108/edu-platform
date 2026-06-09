@@ -19,6 +19,22 @@ SOFT_DELETE_PURGE_DAYS: int = 30
 TTS_WORKERS: int = 4     # matches NUMBER_OF_THREADS in silero-tts docker-compose service
 ENCODE_WORKERS: int = 3  # concurrent FFmpeg processes; leaves headroom for LO and TTS threads
 
+# ── LLM / vision provider request tuning ─────────────────────────────────────
+# Cloud providers (Polza AI, Yandex AI Studio) add network latency and enforce
+# rate limits, unlike a local Ollama pinned to the host CPU. Give requests a
+# finite wall clock and let the OpenAI SDK retry transient failures with its
+# built-in exponential backoff: it retries 429/408/409/>=500/timeout and honours
+# Retry-After. 401/403 (bad key) are NOT retried by the SDK — they fail fast and
+# surface to the per-slide handler, which logs and (when every slide fails) marks
+# the lesson `error`.
+LLM_REQUEST_TIMEOUT_SECONDS: float = 120.0
+LLM_MAX_RETRIES: int = 3
+VISION_REQUEST_TIMEOUT_SECONDS: float = 180.0  # base64 images → heavier requests
+VISION_MAX_RETRIES: int = 3
+# Parallel vision-summary calls (the alignment-hint pass). Bounded to stay under
+# provider rate limits.
+VISION_SUMMARY_CONCURRENCY: int = 4
+
 # Quiz
 QUIZ_PASS_THRESHOLD: float = 0.6  # default for new quizzes; per-quiz override in Quiz.pass_threshold
 QUIZ_NUM_QUESTIONS: int = 5

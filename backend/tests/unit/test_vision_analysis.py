@@ -120,6 +120,47 @@ async def test_summarize_presentation_cache_miss_writes_cache_file(
     assert cache_files[0].read_text(encoding="utf-8") == "written text"
 
 
+async def test_call_ollama_payload_has_no_ollama_only_fields(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path
+) -> None:
+    """The generic OpenAI branch must NOT leak Ollama-only fields (options /
+    keep_alive / num_ctx / num_predict) — Polza & Yandex AI Studio 400 on them."""
+    svc = VisionAnalysisService()
+    captured: dict[str, Any] = {}
+
+    async def _create(**kwargs: Any) -> SimpleNamespace:
+        captured.update(kwargs)
+        return _llm_response("narration")
+
+    monkeypatch.setattr(
+        svc,
+        "_ollama_client",
+        SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
+        ),
+    )
+
+    await svc.analyze_slide(
+        slide_image_path=str(slide_png),
+        slide_number=1,
+        total_slides=1,
+        course_title="Course",
+    )
+
+    assert set(captured) <= {"model", "messages", "temperature", "max_tokens"}
+    for banned in ("options", "keep_alive", "num_ctx", "num_predict", "raw"):
+        assert banned not in captured
+
+
+def test_vision_client_uses_cloud_retry_tuning() -> None:
+    from app.constants import VISION_MAX_RETRIES
+
+    svc = VisionAnalysisService()
+    assert svc.provider == "ollama"  # default branch under test
+    assert svc._ollama_client is not None
+    assert svc._ollama_client.max_retries == VISION_MAX_RETRIES
+
+
 async def test_summarize_presentation_uses_disk_cache(
     monkeypatch: pytest.MonkeyPatch, slide_png: Path, tmp_path: Path
 ) -> None:

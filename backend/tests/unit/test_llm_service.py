@@ -119,3 +119,35 @@ def test_fallback_ssml_with_empty_script_uses_placeholder() -> None:
 def test_strip_think_removes_think_block() -> None:
     raw = "<think>internal</think>visible text"
     assert llm_service._strip_think(raw) == "visible text"
+
+
+def test_strip_code_fences_removes_json_fence() -> None:
+    raw = '```json\n{"a": 1}\n```'
+    assert llm_service._strip_code_fences(raw) == '{"a": 1}'
+
+
+def test_strip_code_fences_noop_on_plain_json() -> None:
+    assert llm_service._strip_code_fences('{"a": 1}') == '{"a": 1}'
+
+
+async def test_split_and_annotate_strips_json_code_fence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Cloud models may wrap the JSON in a ```json fence despite json_object
+    mode — it must be stripped before json.loads, not dropped to the fallback."""
+    fenced = "```json\n" + json.dumps({"chunks": ["<p>a</p>", "<p>b</p>"]}) + "\n```"
+    monkeypatch.setattr(llm_service, "client", _make_completions_stub(fenced))
+
+    chunks, warning = await llm_service.split_and_annotate_ssml(
+        script="A. B.", slides_count=2
+    )
+    # Exact match proves the fence was stripped: the fallback path would instead
+    # mechanically split the raw (fenced) text, never yielding these exact chunks.
+    assert chunks == ["<p>a</p>", "<p>b</p>"]
+    assert warning is None
+
+
+def test_llm_client_uses_cloud_retry_tuning() -> None:
+    from app.constants import LLM_MAX_RETRIES
+
+    assert llm_service.client.max_retries == LLM_MAX_RETRIES

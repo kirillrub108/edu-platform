@@ -155,8 +155,9 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             if empty_count == total:
                 raise RuntimeError(
                     f"Vision LLM returned no text for any of the {total} slides. "
-                    f"Check that model '{settings.VISION_MODEL}' is available in Ollama "
-                    f"(run: ollama pull {settings.VISION_MODEL})."
+                    f"Every request to {settings.VISION_OLLAMA_BASE_URL} failed — check "
+                    f"VISION_API_KEY (auth) and that model '{settings.VISION_MODEL}' exists "
+                    f"at that endpoint. See the per-slide errors above for the exact cause."
                 )
 
             _set_status(session, lesson_uuid, LessonStatus.ready_for_edit)

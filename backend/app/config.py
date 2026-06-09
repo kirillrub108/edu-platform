@@ -35,7 +35,12 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "qwen3:8b"
     LLM_API_KEY: str = "ollama"
     LLM_TEMPERATURE: float = 0.7
-    LLM_MAX_TOKENS: int = 2048
+    # Cap for enhance_lecture_text and the vision narration calls. Raised for the
+    # cloud move so a long enhanced lecture / 150-300-word slide narration is not
+    # truncated. It's a ceiling, not a target — no cost increase unless the model
+    # actually emits more. The SSML split (_chat) sets no max_tokens on purpose,
+    # so a many-slide chunk array can't be truncated by this setting.
+    LLM_MAX_TOKENS: int = 4096
 
     # Model used to refine vision output during single-slide regeneration.
     # Defaults to the same text LLM as LLM_MODEL; set independently if you

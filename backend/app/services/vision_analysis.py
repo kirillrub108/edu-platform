@@ -9,12 +9,16 @@ import httpx
 from openai import AsyncOpenAI
 
 from app.config import settings
+from app.constants import (
+    VISION_MAX_RETRIES,
+    VISION_REQUEST_TIMEOUT_SECONDS,
+    VISION_SUMMARY_CONCURRENCY,
+)
 
 logger = structlog.get_logger()
 
 
 SUMMARY_CACHE_DIR = os.path.join(settings.STORAGE_PATH, "summaries_cache")
-_SUMMARY_CONCURRENCY = 4
 
 
 SLIDE_SUMMARY_SYSTEM_PROMPT = """\
@@ -151,6 +155,8 @@ class VisionAnalysisService:
             self._ollama_client = AsyncOpenAI(
                 base_url=settings.VISION_OLLAMA_BASE_URL,
                 api_key=settings.VISION_API_KEY,
+                timeout=VISION_REQUEST_TIMEOUT_SECONDS,
+                max_retries=VISION_MAX_RETRIES,
             )
             self._model = settings.VISION_MODEL
         elif self.provider == "yandex":
@@ -280,7 +286,7 @@ class VisionAnalysisService:
         if not pending:
             return results
 
-        sem = asyncio.Semaphore(_SUMMARY_CONCURRENCY)
+        sem = asyncio.Semaphore(VISION_SUMMARY_CONCURRENCY)
         progress_lock = asyncio.Lock()
 
         async def _one(idx: int) -> None:
