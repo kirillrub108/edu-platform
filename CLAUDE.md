@@ -29,13 +29,19 @@ docker-compose up --build
 docker-compose exec backend alembic revision --autogenerate -m "describe change"
 docker-compose exec backend alembic upgrade head     # usually unnecessary, see "Migrations" below
 
-# Backend tests — run inside the backend image. Suite is split into
-# tests/unit/ (pure-function / service tests) and tests/integration/ (route tests
-# using the conftest async client + factories).
-docker-compose exec backend pytest                            # all
+# Backend tests — run inside the backend image (testcontainers starts a sibling
+# Postgres via the host Docker socket; details in backend/tests/README.md). Suite is
+# split into tests/unit/ (pure-function / service tests) and tests/integration/
+# (route tests using the conftest async client + factories).
+docker-compose exec backend pytest -m "not slow"              # canonical full run
 docker-compose exec backend pytest tests/unit                 # unit only
 docker-compose exec backend pytest tests/integration          # routes only
 docker-compose exec backend pytest tests/unit/test_tts_service.py::test_name   # single
+docker-compose exec backend pytest                            # adds `slow` tier — needs real Ollama/Silero up
+
+# Frontend tests (vitest + happy-dom, frontend/tests/) — run inside the frontend
+# container, calling the binary directly (npm itself is banned, see above):
+docker-compose exec frontend node_modules/.bin/vitest run
 
 # Frontend dev server runs in its container on :3000. To run locally instead:
 cd frontend && npm install && npm run dev
@@ -82,6 +88,9 @@ Auth runs on **httpOnly cookies + double-submit CSRF**, not `Authorization: Bear
 
 ### AI-operation gating (CI-enforced)
 Every endpoint that triggers an LLM / vision / TTS call **must** sit behind `require_verified_email` or `require_verified_teacher` (email-verified users only) **and** be listed in `AI_GATED_ENDPOINTS` in `dependencies.py`. The guard test `tests/integration/test_ai_gating_guard.py` fails if you add such a route without doing both. Video/vision generation also reserves credits up front (`RESERVE`) and releases/charges on completion — see `services/billing_service.py` and `CREDIT_WEIGHTS` in `constants.py`.
+
+### Direct video upload (no-AI lessons)
+`POST /api/v1/lessons/{id}/upload-video` (`routers/lessons.py`) attaches a ready-made MP4/WebM/MOV/MKV to a lesson and publishes it immediately — no pipeline, no credits, `CreationMode.video_upload`. Validation = extension + content-type + 16-byte magic sniff, size capped by `MAX_VIDEO_UPLOAD_BYTES` (2 GB, `constants.py`). It deliberately sits behind plain `require_teacher` (lesson create too) — only AI-triggering endpoints need a verified email, so don't "tighten" these to `require_verified_teacher`. Frontend entry: the `video_upload` card in `CREATION_MODE_CARDS` + `components/LessonVideoUploadSection.vue`.
 
 ### Rate limiting
 `slowapi` is wired in `app/limiter.py` and registered on `app.state.limiter` in `main.py`, with a dedicated 429 handler. Per-route limits use the `@limiter.limit(...)` decorator (see `routers/auth.py`). Tests that hit limited endpoints in a loop will start 429-ing — use distinct client IPs or reset the limiter in fixtures.
