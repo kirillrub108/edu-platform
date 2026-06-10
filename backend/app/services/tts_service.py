@@ -13,8 +13,10 @@ import numpy as np
 from app.config import settings
 from app.constants import (
     POLZA_MAX_CHARS,
+    POLZA_OPENAI_DEFAULT_VOICE,
     POLZA_TTS_MAX_RETRIES,
     POLZA_VOICE_MAP,
+    POLZA_VOICE_MAP_OPENAI,
     SILERO_MAX_CHARS,
 )
 
@@ -282,8 +284,15 @@ class TTSService:
         if len(chunks) > 1:
             logger.info("tts_splitting", chars=len(plain), chunks=len(chunks))
 
-        polza_voice = POLZA_VOICE_MAP.get(voice, settings.POLZA_DEFAULT_VOICE)
-        if voice not in POLZA_VOICE_MAP:
+        # OpenAI and ElevenLabs models on polza have disjoint voice catalogs —
+        # resolve the frontend (Silero) voice name against the active model's map.
+        if settings.POLZA_TTS_MODEL.startswith("openai/"):
+            voice_map = POLZA_VOICE_MAP_OPENAI
+            polza_voice = voice_map.get(voice, POLZA_OPENAI_DEFAULT_VOICE)
+        else:
+            voice_map = POLZA_VOICE_MAP
+            polza_voice = voice_map.get(voice, settings.POLZA_DEFAULT_VOICE)
+        if voice not in voice_map:
             logger.info("tts_polza_voice_fallback", requested=voice, used=polza_voice)
 
         tmp_paths: list[str] = []
@@ -312,13 +321,25 @@ class TTSService:
         """
         url = f"{settings.POLZA_BASE_URL}/audio/speech"
         headers = {"Authorization": f"Bearer {settings.POLZA_API_KEY}"}
-        body: dict[str, str] = {
+        body: dict[str, str | float] = {
             "model": settings.POLZA_TTS_MODEL,
             "input": chunk,
             "voice": polza_voice,
         }
-        if settings.POLZA_LANGUAGE_CODE:
-            body["language_code"] = settings.POLZA_LANGUAGE_CODE
+        # language_code and the tuning sliders are ElevenLabs-only params —
+        # OpenAI models on polza reject unknown fields with 400.
+        if not settings.POLZA_TTS_MODEL.startswith("openai/"):
+            if settings.POLZA_LANGUAGE_CODE:
+                body["language_code"] = settings.POLZA_LANGUAGE_CODE
+            # Optional ElevenLabs voice tuning — sent only when set in .env.
+            for key, value in (
+                ("speed", settings.POLZA_TTS_SPEED),
+                ("stability", settings.POLZA_TTS_STABILITY),
+                ("similarity_boost", settings.POLZA_TTS_SIMILARITY),
+                ("style", settings.POLZA_TTS_STYLE),
+            ):
+                if value is not None:
+                    body[key] = value
 
         last_error = ""
         for attempt in range(POLZA_TTS_MAX_RETRIES + 1):

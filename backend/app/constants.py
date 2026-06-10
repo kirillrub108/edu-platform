@@ -16,6 +16,16 @@ POLZA_VOICE_MAP: dict[str, str] = {
     "aidar": "Daniel",       # муж.
     "eugene": "George",      # муж.
 }
+# OpenAI TTS models on polza (openai/tts-1, openai/gpt-4o-mini-tts, …) have a
+# disjoint voice catalog — ElevenLabs names like "Sarah" are rejected with 400.
+POLZA_VOICE_MAP_OPENAI: dict[str, str] = {
+    "xenia": "nova",      # жен.
+    "baya": "shimmer",    # жен.
+    "kseniya": "coral",   # жен.
+    "aidar": "onyx",      # муж.
+    "eugene": "echo",     # муж.
+}
+POLZA_OPENAI_DEFAULT_VOICE: str = "alloy"
 TTS_CACHE_TTL_DAYS: int = 7
 
 # Slide rendering

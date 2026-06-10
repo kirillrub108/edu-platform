@@ -272,6 +272,10 @@ _FAKE_MP3 = b"\xff\xfbFAKE_MP3_PAYLOAD"
 def polza_provider(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(tts_mod.settings, "TTS_PROVIDER", "polza")
     monkeypatch.setattr(tts_mod.settings, "POLZA_API_KEY", "test-key")
+    # Pin the model family: tests must not depend on the deployment's .env value.
+    monkeypatch.setattr(
+        tts_mod.settings, "POLZA_TTS_MODEL", "elevenlabs/text-to-speech-turbo-2-5"
+    )
 
 
 def _install_fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
@@ -461,6 +465,89 @@ def test_polza_unknown_voice_uses_default(
 
     tts_service.synthesize("Привет", str(tmp_path / "out.wav"), voice="nonexistent")
     assert captured["voice"] == tts_mod.settings.POLZA_DEFAULT_VOICE
+
+
+def test_polza_voice_tuning_forwarded_when_set(
+    polza_provider: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _install_fake_ffmpeg(monkeypatch)
+    monkeypatch.setattr(tts_mod.settings, "POLZA_TTS_SPEED", 1.1)
+    monkeypatch.setattr(tts_mod.settings, "POLZA_TTS_STABILITY", 0.7)
+    monkeypatch.setattr(tts_mod.settings, "POLZA_TTS_SIMILARITY", 0.6)
+    monkeypatch.setattr(tts_mod.settings, "POLZA_TTS_STYLE", 0.3)
+    captured: dict[str, Any] = {}
+
+    def _fake_post(
+        url: str,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 0,
+    ) -> _PolzaResp:
+        captured.update(json or {})
+        return _PolzaResp(payload={"audio": base64.b64encode(_FAKE_MP3).decode()})
+
+    monkeypatch.setattr(tts_mod.httpx, "post", _fake_post)
+
+    tts_service.synthesize("Привет", str(tmp_path / "out.wav"))
+    assert captured["speed"] == 1.1
+    assert captured["stability"] == 0.7
+    assert captured["similarity_boost"] == 0.6
+    assert captured["style"] == 0.3
+
+
+def test_polza_voice_tuning_absent_by_default(
+    polza_provider: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Unset tuning params must not appear in the request body at all."""
+    _install_fake_ffmpeg(monkeypatch)
+    captured: dict[str, Any] = {}
+
+    def _fake_post(
+        url: str,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 0,
+    ) -> _PolzaResp:
+        captured.update(json or {})
+        return _PolzaResp(payload={"audio": base64.b64encode(_FAKE_MP3).decode()})
+
+    monkeypatch.setattr(tts_mod.httpx, "post", _fake_post)
+
+    tts_service.synthesize("Привет", str(tmp_path / "out.wav"))
+    for param in ("speed", "stability", "similarity_boost", "style"):
+        assert param not in captured
+
+
+def test_polza_openai_model_uses_openai_voice_catalog(
+    polza_provider: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """openai/* models reject ElevenLabs voice names and ElevenLabs-only params
+    (language_code, stability, …) with 400 — none of them may be sent."""
+    _install_fake_ffmpeg(monkeypatch)
+    monkeypatch.setattr(tts_mod.settings, "POLZA_TTS_MODEL", "openai/gpt-4o-mini-tts")
+    monkeypatch.setattr(tts_mod.settings, "POLZA_TTS_STABILITY", 0.7)
+    captured: dict[str, Any] = {}
+
+    def _fake_post(
+        url: str,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 0,
+    ) -> _PolzaResp:
+        captured.update(json or {})
+        return _PolzaResp(payload={"audio": base64.b64encode(_FAKE_MP3).decode()})
+
+    monkeypatch.setattr(tts_mod.httpx, "post", _fake_post)
+
+    tts_service.synthesize("Привет", str(tmp_path / "out.wav"), voice="xenia")
+    assert captured["voice"] == "nova"  # not the ElevenLabs "Sarah"
+    for param in ("language_code", "stability", "speed", "similarity_boost", "style"):
+        assert param not in captured
+
+    # Unknown frontend voice falls back to the OpenAI default, not Rachel.
+    captured.clear()
+    tts_service.synthesize("Привет", str(tmp_path / "out2.wav"), voice="nonexistent")
+    assert captured["voice"] == "alloy"
 
 
 def test_polza_long_text_chunks_and_concats(

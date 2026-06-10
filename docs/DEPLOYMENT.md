@@ -305,6 +305,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `POLZA_TTS_MODEL` | `elevenlabs/text-to-speech-turbo-2-5` | slug TTS-модели в каталоге polza |
 | `POLZA_DEFAULT_VOICE` | Rachel | ElevenLabs-голос для имён вне `POLZA_VOICE_MAP` (constants.py) |
 | `POLZA_LANGUAGE_CODE` | ru | подсказка произношения ISO 639-1 (Turbo v2.5); пусто = автоопределение |
+| `POLZA_TTS_SPEED` | (не задано) | скорость речи 0.7–1.2; не задано = дефолт провайдера |
+| `POLZA_TTS_STABILITY` | (не задано) | стабильность голоса 0–1; не задано = дефолт провайдера |
+| `POLZA_TTS_SIMILARITY` | (не задано) | схожесть голоса 0–1; не задано = дефолт провайдера |
+| `POLZA_TTS_STYLE` | (не задано) | экспрессия стиля 0–1; не задано = дефолт провайдера |
 | `POLZA_TIMEOUT` | 120.0 | таймаут HTTP-запроса синтеза, сек |
 | `POLZA_TTS_WORKERS` | 4 | размер TTS-пула пайплайна при `TTS_PROVIDER=polza` |
 

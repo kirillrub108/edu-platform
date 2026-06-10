@@ -88,6 +88,14 @@ class Settings(BaseSettings):
     POLZA_DEFAULT_VOICE: str = "Rachel"
     # ISO 639-1 pronunciation hint (Turbo v2.5 only). Empty = model autodetect.
     POLZA_LANGUAGE_CODE: str = "ru"
+    # Optional ElevenLabs voice tuning (ползунки в кабинете polza: скорость /
+    # стабильность / схожесть / экспрессия). None = параметр не отправляется,
+    # действуют дефолты провайдера. Диапазоны по докам polza:
+    # speed 0.7–1.2, остальные 0.0–1.0.
+    POLZA_TTS_SPEED: float | None = None
+    POLZA_TTS_STABILITY: float | None = None
+    POLZA_TTS_SIMILARITY: float | None = None
+    POLZA_TTS_STYLE: float | None = None
     POLZA_TIMEOUT: float = 120.0
     # TTS thread-pool size when TTS_PROVIDER=polza. Silero's TTS_WORKERS=4 is
     # tied to the local container's thread count; the cloud gateway is bounded
