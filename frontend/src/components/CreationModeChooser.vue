@@ -33,6 +33,7 @@ const choose = (mode: CreationModeValue, available: boolean) => {
         :disabled="!card.available"
         :class="[
           'relative text-left p-5 rounded-2xl border-2 transition-all duration-150 ease-out',
+          card.value === 'video_upload' ? 'col-span-full' : '',
           card.available
             ? 'cursor-pointer'
             : 'opacity-60 cursor-not-allowed',

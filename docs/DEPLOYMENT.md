@@ -297,9 +297,16 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 | Переменная | Дефолт | Использование |
 |---|---|---|
-| `TTS_PROVIDER` | silero | пока поддерживается только silero |
+| `TTS_PROVIDER` | silero | `silero` (локальный контейнер) или `polza` (облачный шлюз polza.ai) |
 | `SILERO_TTS_URL` | `http://silero-tts:9898` | endpoint TTS-сервиса |
 | `SILERO_TTS_VOICE` | xenia | дефолтный голос; в API можно переопределить |
+| `POLZA_API_KEY` | (пусто) | Bearer-токен polza.ai; обязателен при `TTS_PROVIDER=polza` |
+| `POLZA_BASE_URL` | `https://polza.ai/api/v1` | база OpenAI-совместимого API polza |
+| `POLZA_TTS_MODEL` | `elevenlabs/text-to-speech-turbo-2-5` | slug TTS-модели в каталоге polza |
+| `POLZA_DEFAULT_VOICE` | Rachel | ElevenLabs-голос для имён вне `POLZA_VOICE_MAP` (constants.py) |
+| `POLZA_LANGUAGE_CODE` | ru | подсказка произношения ISO 639-1 (Turbo v2.5); пусто = автоопределение |
+| `POLZA_TIMEOUT` | 120.0 | таймаут HTTP-запроса синтеза, сек |
+| `POLZA_TTS_WORKERS` | 4 | размер TTS-пула пайплайна при `TTS_PROVIDER=polza` |
 
 ### Storage / URL
 

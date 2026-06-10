@@ -65,7 +65,12 @@ def _publish(lesson_id: str, payload: dict) -> None:
         pass
 
 
-_TTS_WORKERS = TTS_WORKERS
+# TTS_WORKERS=4 is tied to the Silero container's thread count; the polza cloud
+# gateway is bounded by its own rate limits instead, so its pool size is
+# deployment-tunable via POLZA_TTS_WORKERS.
+_TTS_WORKERS = (
+    settings.POLZA_TTS_WORKERS if settings.TTS_PROVIDER == "polza" else TTS_WORKERS
+)
 _ENCODE_WORKERS = ENCODE_WORKERS
 
 
@@ -111,7 +116,11 @@ def _tts_cache_path(ssml: str, voice: str) -> str | None:
         h = hashlib.sha256(ssml.encode()).hexdigest()
         cache_dir = os.path.join(settings.STORAGE_PATH, "tts_cache", h[:2])
         os.makedirs(cache_dir, exist_ok=True)
-        return os.path.join(cache_dir, f"{h}.{voice}.wav")
+        # Non-default providers get a provider-qualified filename so the same
+        # ssml+voice key never returns audio synthesised by another provider.
+        # Silero keeps the legacy unqualified name — existing caches stay valid.
+        suffix = "" if settings.TTS_PROVIDER == "silero" else f".{settings.TTS_PROVIDER}"
+        return os.path.join(cache_dir, f"{h}.{voice}{suffix}.wav")
     except Exception:
         return None
 

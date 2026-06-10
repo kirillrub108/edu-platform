@@ -35,10 +35,9 @@ from app.schemas.lesson import (
     VideoGenerateRequest,
 )
 from app.limiter import limiter
-from app.models.usage_counter import UsageResource
 from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
 from app.constants import CREDIT_WEIGHTS, MAX_VIDEO_UPLOAD_BYTES
-from app.services import billing_service, quota_service
+from app.services import billing_service, tier_service
 from app.services.storage_service import storage_service
 from app.tasks.video_pipeline import generate_video_lesson
 
@@ -231,20 +230,11 @@ async def generate_video(
     if balance["available"] < CREDIT_WEIGHTS[cost_key]:
         raise HTTPException(status_code=402, detail="Недостаточно кредитов для генерации видео")
 
-    # Tier gate: concurrency + atomic monthly quota. Raises 429 / 402 (with a
-    # machine-readable detail) on rejection, before anything is enqueued. Returns
-    # the Celery priority for the user's tier.
-    priority = await quota_service.reserve(db, user.id, UsageResource.video)
-    try:
-        task = generate_video_lesson.apply_async(
-            args=[str(lesson.id), pptx_path, data.voice], queue="video", priority=priority
-        )
-    except Exception:
-        # Compensate the reservation so a broker hiccup doesn't burn quota.
-        await quota_service.release(db, user.id, UsageResource.video)
-        raise HTTPException(
-            status_code=503, detail="Не удалось поставить задачу в очередь, попробуйте позже"
-        )
+    # Schedule paid tiers ahead of free ones (priority derived from the plan).
+    priority = await tier_service.priority_for_user(db, user.id)
+    task = generate_video_lesson.apply_async(
+        args=[str(lesson.id), pptx_path, data.voice], queue="video", priority=priority
+    )
     lesson.video_task_id = task.id
     await db.commit()
     return {"task_id": task.id, "lesson_id": str(lesson.id)}

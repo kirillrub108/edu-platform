@@ -76,6 +76,24 @@ class Settings(BaseSettings):
     SILERO_TTS_URL: str = "http://silero-tts:9898"
     SILERO_TTS_VOICE: str = "xenia"
 
+    # polza.ai TTS gateway (OpenAI-compatible POST /audio/speech, ElevenLabs
+    # models) — active when TTS_PROVIDER=polza. The endpoint returns JSON with
+    # base64 audio or a CDN URL; ElevenLabs models have no output-format
+    # control (mp3 only), so tts_service transcodes to WAV via ffmpeg.
+    POLZA_API_KEY: str = ""
+    POLZA_BASE_URL: str = "https://polza.ai/api/v1"
+    POLZA_TTS_MODEL: str = "elevenlabs/text-to-speech-turbo-2-5"
+    # ElevenLabs premade voice name used when the requested voice has no
+    # POLZA_VOICE_MAP entry (constants.py).
+    POLZA_DEFAULT_VOICE: str = "Rachel"
+    # ISO 639-1 pronunciation hint (Turbo v2.5 only). Empty = model autodetect.
+    POLZA_LANGUAGE_CODE: str = "ru"
+    POLZA_TIMEOUT: float = 120.0
+    # TTS thread-pool size when TTS_PROVIDER=polza. Silero's TTS_WORKERS=4 is
+    # tied to the local container's thread count; the cloud gateway is bounded
+    # by its own rate limits instead, so the pool is tunable per deployment.
+    POLZA_TTS_WORKERS: int = 4
+
     # Billing admin — shared secret for /api/v1/billing/admin/* endpoints,
     # checked against the X-Admin-Token header. Empty disables admin access.
     ADMIN_API_TOKEN: str = ""

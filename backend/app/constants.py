@@ -1,5 +1,21 @@
 # TTS
 SILERO_MAX_CHARS: int = 800  # conservative limit: Silero returns 500 on very long inputs
+# polza.ai /audio/speech hard-caps `input` at 5000 chars; stay under with margin.
+# Deliberately much higher than Silero's limit: fewer chunks → fewer audible seams.
+POLZA_MAX_CHARS: int = 4500
+# Transient polza failures (429/5xx/timeout) are retried with exponential backoff;
+# other 4xx (bad key, bad voice) fail fast. Mirrors LLM_MAX_RETRIES below.
+POLZA_TTS_MAX_RETRIES: int = 3
+# Frontend voice values (Silero names) → ElevenLabs premade voice names on polza
+# (polza addresses voices by name, not voice_id). Unknown names fall back to
+# settings.POLZA_DEFAULT_VOICE.
+POLZA_VOICE_MAP: dict[str, str] = {
+    "xenia": "Sarah",        # жен.
+    "baya": "Alice",         # жен.
+    "kseniya": "Charlotte",  # жен.
+    "aidar": "Daniel",       # муж.
+    "eugene": "George",      # муж.
+}
 TTS_CACHE_TTL_DAYS: int = 7
 
 # Slide rendering
@@ -73,13 +89,12 @@ TOPUP_PACKS: list[dict[str, int]] = [
 
 CREDIT_CARRYOVER_RATIO: float = 0.5  # до 50% месячного объёма переносится на след. месяц
 
-# ── Tier quotas & Celery scheduling priority ─────────────────────────────────
+# ── Celery scheduling priority by tier ───────────────────────────────────────
 # A "tier" (free|paid|enterprise) is DERIVED from the billing CreditPlan via
-# PLAN_TIER_MAP — there is no separate tier column. It drives two things:
-#   1. месячные квоты на дорогие AI-операции + лимит одновременных джобов
-#   2. приоритет постановки Celery-задач (платные выше бесплатных)
-# enterprise is groundwork: it has the highest priority and effectively-unlimited
-# quotas, but no current CreditPlan maps to it (no separate logic/UI yet).
+# PLAN_TIER_MAP — there is no separate tier column. Its only role is the priority
+# at which a user's Celery jobs are scheduled (paid ahead of free). Spend itself
+# is governed by credits, not quotas. enterprise is groundwork: highest priority,
+# but no current CreditPlan maps to it (no separate logic/UI yet).
 
 # CreditPlan value → tier. Keys match CreditPlan/PLAN_CONFIGS; unknown → "free".
 PLAN_TIER_MAP: dict[str, str] = {
@@ -87,14 +102,6 @@ PLAN_TIER_MAP: dict[str, str] = {
     "starter": "paid",
     "pro":     "paid",
     "school":  "paid",
-}
-
-# Monthly caps on metered AI ops + max simultaneously-active jobs, per tier.
-# monthly_<resource> keys match UsageResource values (see _RESOURCE_QUOTA_KEY).
-TIER_QUOTAS: dict[str, dict[str, int]] = {
-    "free":       {"monthly_video": 5, "monthly_vision": 10, "max_concurrent_jobs": 1},
-    "paid":       {"monthly_video": 100, "monthly_vision": 200, "max_concurrent_jobs": 3},
-    "enterprise": {"monthly_video": 1_000_000, "monthly_vision": 1_000_000, "max_concurrent_jobs": 50},  # noqa: E501
 }
 
 # Celery scheduling priority per tier (passed to apply_async(priority=...)).
@@ -109,9 +116,6 @@ TIER_PRIORITY: dict[str, int] = {
     "paid":       3,
     "enterprise": 0,
 }
-
-# Retry-After (seconds) returned with the 429 when a user hits max_concurrent_jobs.
-CONCURRENCY_RETRY_AFTER_SECONDS: int = 30
 
 # Default question-type distribution for quiz generation.
 # Keys match the type strings used in generate_quiz_v2 / _parse_payload_v2.

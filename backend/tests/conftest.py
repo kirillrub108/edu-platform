@@ -559,26 +559,34 @@ def mock_subprocess(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[list[str]
 
 
 # ── 7. Preserve pytest-asyncio's session loop across `asyncio.run` callers ─
-# Celery pipelines call `asyncio.run(...)` inside eager-mode tasks
-# (video_pipeline._split_and_annotate). asyncio.run's finally-clause does
-# `set_event_loop(None)`, which wipes the thread's current loop and leaves
+# Two things call `asyncio.run(...)` mid-session, and its cleanup does
+# `set_event_loop(None)`, wiping the thread's current loop:
+#   • Celery pipelines inside eager-mode tasks
+#     (video_pipeline._split_and_annotate) — i.e. during the test body;
+#   • alembic/env.py (module level), triggered by the session-scoped
+#     _alembic_upgraded fixture the first time a DB-backed test runs —
+#     i.e. during fixture SETUP.
+# pytest-asyncio runs every async test on the thread's CURRENT loop and only
+# sets it when its scoped loop fixture is first created, so one wipe leaves
 # every async test that runs after with "no current event loop in
-# 'MainThread'". Snapshot before each test and restore on teardown so
-# pytest-asyncio's session-scoped loop survives.
+# 'MainThread'". A sync snapshot/restore fixture can't fix this: it runs
+# after session fixtures (missing the alembic wipe), and its snapshot may
+# auto-create a stray loop that is NOT the loop async fixtures run on.
+# Being async, this fixture executes ON pytest-asyncio's (session-scoped)
+# loop itself, so it re-asserts that exact loop as the thread's current loop
+# both before and after each test.
 
-@pytest.fixture(autouse=True)
-def _preserve_thread_event_loop() -> Iterator[None]:
+@pytest_asyncio.fixture(autouse=True)
+async def _preserve_thread_event_loop() -> AsyncIterator[None]:
     import asyncio
 
-    try:
-        saved = asyncio.get_event_loop_policy().get_event_loop()
-    except RuntimeError:
-        saved = None
+    loop = asyncio.get_running_loop()
+    asyncio.set_event_loop(loop)
     try:
         yield
     finally:
-        if saved is not None and not saved.is_closed():
-            asyncio.set_event_loop(saved)
+        if not loop.is_closed():
+            asyncio.set_event_loop(loop)
 
 
 # ── 8. Disable rate limit for unit-style fixtures (autouse safety net) ──────

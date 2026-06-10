@@ -33,7 +33,6 @@ from app.routers import (
     lessons,
     quiz_student,
     quiz_teacher,
-    quota,
     slides,
     students,
     uploads,
@@ -258,7 +257,6 @@ app.include_router(analytics.router)
 app.include_router(analytics.lesson_results_router)
 app.include_router(comments.router)
 app.include_router(billing.router)
-app.include_router(quota.router)
 
 
 @app.get("/", tags=["meta"])

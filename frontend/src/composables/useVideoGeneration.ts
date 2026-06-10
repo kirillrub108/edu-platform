@@ -1,5 +1,5 @@
 import { CreationMode, type CreationModeValue } from '~/composables/useCreationMode'
-import { friendlyApiError, friendlyTaskError } from '~/composables/useBillingMeta'
+import { friendlyTaskError } from '~/composables/useBillingMeta'
 
 export function useVideoGeneration(
   lessonId: Readonly<Ref<string>>,
@@ -165,7 +165,7 @@ export function useVideoGeneration(
       }
     } catch (e: any) {
       generating.value = false
-      taskError.value = friendlyApiError(e) ?? 'Не удалось запустить генерацию'
+      taskError.value = e?.data?.detail ?? 'Не удалось запустить генерацию'
     }
   }
 
