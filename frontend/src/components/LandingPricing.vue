@@ -108,7 +108,7 @@ const { packs, operationCosts, videoPricing, creditFacts, trial } = useLandingPr
       </div>
 
       <p class="try-line reveal">
-        Готовы попробовать? <NuxtLink to="/register">Создать аккаунт →</NuxtLink>
+        Готовы попробовать? <NuxtLink to="/register">Создать аккаунт</NuxtLink>
       </p>
     </div>
   </section>

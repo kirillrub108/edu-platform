@@ -4,14 +4,14 @@
 <template>
   <section class="section-pad" style="padding-top: 0">
     <div class="wrap">
-      <div class="final reveal">
+      <div class="final reveal" style="text-align: center">
         <h2 class="h2">Превратите презентацию в видеокурс<br />уже сегодня</h2>
-        <p class="sub center" style="text-align: center">
+        <p class="sub center" style="text-align: center; margin-left: auto; margin-right: auto">
           Загрузите PPTX и получите озвученную видеолекцию — ИИ соберёт её без съёмок и монтажа.
         </p>
         <div class="hero-cta">
           <span class="cta-pulse">
-            <NuxtLink class="btn btn-primary" to="/register">Создать аккаунт <span class="arrow">→</span></NuxtLink>
+            <NuxtLink class="btn btn-primary" to="/register">Создать аккаунт</NuxtLink>
           </span>
           <NuxtLink class="btn btn-ghost" to="/login">Войти</NuxtLink>
         </div>

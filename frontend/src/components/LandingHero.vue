@@ -17,7 +17,7 @@ const waveBars = 46
       </p>
       <div class="hero-cta reveal">
         <span class="cta-pulse">
-          <NuxtLink class="btn btn-primary" to="/register">Создать аккаунт <span class="arrow">→</span></NuxtLink>
+          <NuxtLink class="btn btn-primary" to="/register">Создать аккаунт</NuxtLink>
         </span>
         <NuxtLink class="btn btn-ghost" to="/login">
           <svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
