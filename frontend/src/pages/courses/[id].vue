@@ -488,55 +488,11 @@ onMounted(async () => {
         Курс не опубликован — ученики не смогут записаться, пока вы его не опубликуете.
       </p>
 
-      <!-- Mode toggle -->
-      <div class="mb-6">
-        <p class="text-sm font-medium text-gray-700 mb-3">Способ записи</p>
-        <div class="flex gap-2">
-          <button
-            class="px-4 py-2 rounded-lg border text-sm font-medium transition"
-            :class="course.access_mode === 'link'
-              ? 'bg-brand text-white border-brand'
-              : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'"
-            :disabled="accessLoading"
-            @click="setMode('link')"
-          >
-            По ссылке
-          </button>
-          <button
-            class="px-4 py-2 rounded-lg border text-sm font-medium transition"
-            :class="course.access_mode === 'code'
-              ? 'bg-brand text-white border-brand'
-              : 'bg-white text-gray-600 border-gray-200 hover:border-gray-300'"
-            :disabled="accessLoading"
-            @click="setMode('code')"
-          >
-            По коду
-          </button>
-        </div>
-      </div>
-
       <p v-if="accessError" class="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
         {{ accessError }}
       </p>
 
-      <!-- Link mode -->
-      <div v-if="course.access_mode === 'link'" class="space-y-2">
-        <p class="text-sm text-gray-600">Ссылка для записи — поделитесь ей с учениками:</p>
-        <div class="flex gap-2">
-          <code class="flex-1 bg-gray-50 border rounded-lg px-3 py-2 text-sm font-mono text-gray-700 truncate">
-            {{ joinLinkUrl }}
-          </code>
-          <button
-            class="px-3 py-2 border rounded-lg text-sm text-gray-600 hover:bg-gray-50 transition whitespace-nowrap"
-            @click="copyLink(joinLinkUrl)"
-          >
-            {{ copiedLink ? '✓ Скопировано' : 'Копировать' }}
-          </button>
-        </div>
-      </div>
-
-      <!-- Code mode -->
-      <div v-else-if="course.access_mode === 'code'" class="space-y-5">
+      <div class="space-y-5">
         <div>
           <p class="text-sm text-gray-600 mb-2">Код доступа — продиктуйте или отправьте ученикам:</p>
           <div class="flex gap-2 items-center">
