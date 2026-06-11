@@ -95,7 +95,7 @@ const enroll = async () => {
       </div>
 
       <div v-else-if="preview" class="bg-white rounded-xl border shadow-sm p-8">
-        <p class="text-xs text-gray-400 uppercase tracking-wide mb-1">Приглашение на курс</p>
+        <p class="text-xs text-gray-500 uppercase tracking-wide mb-1">Приглашение на курс</p>
         <h1 class="text-xl font-semibold text-gray-900 mb-2">{{ preview.title }}</h1>
         <p v-if="preview.description" class="text-sm text-gray-500 mb-8">{{ preview.description }}</p>
         <div v-else class="mb-8" />
@@ -134,7 +134,7 @@ const enroll = async () => {
           >
             Войти
           </NuxtLink>
-          <p class="text-center text-sm text-gray-400 mt-3">
+          <p class="text-center text-sm text-gray-500 mt-3">
             Нет аккаунта?
             <NuxtLink to="/register" class="text-brand hover:underline">Зарегистрироваться</NuxtLink>
           </p>

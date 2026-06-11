@@ -209,7 +209,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
         </span>
         <span
           v-if="gradingPending"
-          class="text-xs text-gray-400"
+          class="text-xs text-gray-500"
         >ИИ оценивает развёрнутые ответы…</span>
       </div>
 
@@ -259,7 +259,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
 
     <!-- Active attempt -->
     <template v-else-if="attemptId && questions.length > 0">
-      <div class="text-xs text-gray-400">
+      <div class="text-xs text-gray-500">
         <span v-if="saveStatus === 'saving'">сохраняется…</span>
         <span v-else-if="saveStatus === 'saved'">сохранено</span>
         <span v-else-if="saveStatus === 'error'" class="text-rose-500">ошибка автосохранения</span>
@@ -357,7 +357,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
               :key="`${q.id}-${item.idx}`"
               class="flex items-center gap-2 text-sm"
             >
-              <span class="text-xs text-gray-400 w-4">{{ i + 1 }}.</span>
+              <span class="text-xs text-gray-500 w-4">{{ i + 1 }}.</span>
               <span class="flex-1">{{ item.text }}</span>
               <button type="button" class="text-xs" :disabled="i === 0" @click="moveOrdering(q, i, -1)">↑</button>
               <button type="button" class="text-xs" :disabled="i === q.payload.items.length - 1" @click="moveOrdering(q, i, 1)">↓</button>
@@ -371,7 +371,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
               :key="i"
               class="flex items-center gap-2 text-sm"
             >
-              <span class="text-xs text-gray-400 w-6">{{ i }}.</span>
+              <span class="text-xs text-gray-500 w-6">{{ i }}.</span>
               <input
                 :value="blanksValue(q, i - 1)"
                 class="flex-1 rounded-lg border border-gray-200 px-2 py-1"
@@ -391,7 +391,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
         >
           {{ submitting ? '…' : 'Отправить ответы' }}
         </button>
-        <span v-if="!allAnswered" class="text-xs text-gray-400">
+        <span v-if="!allAnswered" class="text-xs text-gray-500">
           Можно отправить и без всех ответов — пустые засчитаются как неверные.
         </span>
       </div>
@@ -476,7 +476,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
           <td class="py-2 text-center">
             <span v-if="a.passed === true" title="Сдан">✓</span>
             <span v-else-if="a.passed === false" class="text-red-500" title="Не сдан">✗</span>
-            <span v-else class="text-gray-400 text-xs">проверка…</span>
+            <span v-else class="text-gray-500 text-xs">проверка…</span>
           </td>
         </tr>
       </tbody>

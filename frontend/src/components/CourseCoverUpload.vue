@@ -140,7 +140,7 @@ function removeCover() {
           <ImageIcon class="w-7 h-7 text-violet-500" />
         </div>
         <p class="text-sm font-semibold text-violet-700 mb-1">Перетащите изображение</p>
-        <p class="text-xs text-gray-400 mb-3">или нажмите для выбора файла</p>
+        <p class="text-xs text-gray-500 mb-3">или нажмите для выбора файла</p>
         <span class="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-600">
           JPEG · PNG · WebP · до 5 МБ
         </span>

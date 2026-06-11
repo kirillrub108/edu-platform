@@ -73,8 +73,8 @@ const confirmDelete = () => {
         >
           Преподаватель
         </span>
-        <span class="text-gray-400">{{ relativeTime(comment.created_at) }}</span>
-        <span v-if="comment.is_edited" class="text-gray-400">· изменено</span>
+        <span class="text-gray-500">{{ relativeTime(comment.created_at) }}</span>
+        <span v-if="comment.is_edited" class="text-gray-500">· изменено</span>
       </div>
 
       <div v-if="!isEditing" class="text-sm text-gray-800 whitespace-pre-wrap break-words">

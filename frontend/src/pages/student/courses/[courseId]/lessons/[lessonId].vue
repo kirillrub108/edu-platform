@@ -99,7 +99,7 @@ onMounted(loadLesson)
     >
       <!-- Center column: video + meta + quiz -->
       <div class="space-y-5 min-w-0">
-        <nav class="text-sm text-gray-400 flex items-center gap-1.5 flex-wrap">
+        <nav class="text-sm text-gray-500 flex items-center gap-1.5 flex-wrap">
           <span>{{ studentStore.activeCourse?.title }}</span>
           <template v-if="activeModule">
             <span class="text-gray-300">›</span>

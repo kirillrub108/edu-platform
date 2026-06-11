@@ -219,11 +219,11 @@ onMounted(load)
       </p>
     </div>
 
-    <div v-if="!quizLessons.length" class="text-sm text-gray-500 bg-gray-50 border rounded-xl p-6 text-center">
+    <div v-if="!quizLessons.length" class="text-sm text-gray-500 bg-white border rounded-xl p-6 text-center">
       В курсе ещё нет уроков-квизов. Журнал отобразится после их добавления.
     </div>
 
-    <div v-else-if="!gradebook.students.length" class="text-sm text-gray-500 bg-gray-50 border rounded-xl p-6 text-center">
+    <div v-else-if="!gradebook.students.length" class="text-sm text-gray-500 bg-white border rounded-xl p-6 text-center">
       На курс ещё никто не записался.
     </div>
 
@@ -269,7 +269,7 @@ onMounted(load)
               class="sticky left-0 z-10 bg-inherit border-b border-r border-gray-100 px-4 py-2 text-left whitespace-nowrap"
             >
               <div class="font-medium text-gray-900">{{ row.student_name }}</div>
-              <div class="text-xs text-gray-400">{{ row.student_email }}</div>
+              <div class="text-xs text-gray-500">{{ row.student_email }}</div>
             </th>
 
             <td
@@ -360,7 +360,7 @@ onMounted(load)
             <span class="text-xs text-gray-400">/ 100</span>
             <span
               v-if="editingCell.quiz_score !== null"
-              class="ml-auto text-xs text-gray-400"
+              class="ml-auto text-xs text-gray-500"
             >
               авто: {{ editingCell.quiz_score.toFixed(1) }}
             </span>

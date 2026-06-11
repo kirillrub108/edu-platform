@@ -24,5 +24,5 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="p-6 text-gray-400 text-sm">Перенаправление…</div>
+  <div class="p-6 text-gray-500 text-sm">Перенаправление…</div>
 </template>

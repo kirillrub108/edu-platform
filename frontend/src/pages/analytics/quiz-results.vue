@@ -241,7 +241,7 @@ onMounted(async () => {
             >
               {{ pct(r.score) }}
             </div>
-            <div class="text-xs text-gray-400 w-20 text-right">{{ fmtDate(r.completed_at) }}</div>
+            <div class="text-xs text-gray-500 w-20 text-right">{{ fmtDate(r.completed_at) }}</div>
           </li>
         </ul>
       </section>

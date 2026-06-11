@@ -399,7 +399,7 @@ onMounted(async () => {
 
     <!-- Tab: Содержание -->
     <section v-if="activeTab === 'content'">
-      <div v-if="!course.modules?.length" class="text-sm text-gray-400 italic mb-4 px-1">
+      <div v-if="!course.modules?.length" class="text-sm text-gray-500 italic mb-4 px-1">
         Добавьте первый модуль чтобы начать создавать уроки
       </div>
 
@@ -442,7 +442,7 @@ onMounted(async () => {
                 <Trash2 class="w-4 h-4" />
               </button>
             </li>
-            <li v-if="!m.lessons?.length" class="text-sm text-gray-400 italic px-3 py-1">
+            <li v-if="!m.lessons?.length" class="text-sm text-gray-500 italic px-3 py-1">
               нет уроков
             </li>
           </ul>
@@ -507,9 +507,9 @@ onMounted(async () => {
             </button>
           </div>
           <div class="flex items-center justify-end gap-2 mt-2">
-            <p class="text-xs text-gray-400 flex-1">После обновления старые ссылки перестанут работать.</p>
+            <p class="text-xs text-gray-500 flex-1">После обновления старые ссылки перестанут работать.</p>
             <button
-              class="text-xs text-gray-400 hover:text-gray-600 underline underline-offset-2 transition disabled:opacity-50"
+              class="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 transition disabled:opacity-50"
               :disabled="accessLoading"
               @click="regenerateCode"
             >

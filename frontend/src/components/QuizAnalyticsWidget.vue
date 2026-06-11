@@ -101,7 +101,7 @@ const hasData = computed(() => !!data.value && data.value.total_attempts > 0)
           >
             {{ pct(r.score) }}
           </div>
-          <div class="text-xs text-gray-400 w-10 text-right">{{ fmtDate(r.completed_at) }}</div>
+          <div class="text-xs text-gray-500 w-10 text-right">{{ fmtDate(r.completed_at) }}</div>
         </li>
       </ul>
     </template>

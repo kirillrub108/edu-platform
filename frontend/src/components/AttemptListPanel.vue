@@ -108,7 +108,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         </header>
 
         <div class="flex-1 overflow-y-auto p-5">
-          <h4 class="text-xs uppercase tracking-wide text-gray-400 mb-3">Попытки</h4>
+          <h4 class="text-xs uppercase tracking-wide text-gray-500 mb-3">Попытки</h4>
 
           <div v-if="loading" class="space-y-3">
             <div v-for="i in 3" :key="i" class="h-16 rounded-xl bg-gray-200/60 animate-pulse" />

@@ -128,7 +128,7 @@ const removeOrderingItem = (idx: number) => {
     <!-- single_choice -->
     <template v-if="type === 'single_choice'">
       <div class="space-y-1">
-        <p class="text-xs text-gray-400">Нажмите на строку, чтобы отметить правильный ответ</p>
+        <p class="text-xs text-gray-500">Нажмите на строку, чтобы отметить правильный ответ</p>
         <div
           v-for="(opt, i) in local.options ?? []"
           :key="i"
@@ -162,7 +162,7 @@ const removeOrderingItem = (idx: number) => {
     <!-- multiple_choice -->
     <template v-if="type === 'multiple_choice'">
       <div class="space-y-1">
-        <p class="text-xs text-gray-400">Нажмите на строку, чтобы отметить правильные ответы</p>
+        <p class="text-xs text-gray-500">Нажмите на строку, чтобы отметить правильные ответы</p>
         <div
           v-for="(opt, i) in local.options ?? []"
           :key="i"
@@ -283,7 +283,7 @@ const removeOrderingItem = (idx: number) => {
           <button type="button" class="text-xs text-red-500" @click="removeMatchingPair(i)">✕</button>
         </div>
         <button type="button" class="text-xs text-violet-600" @click="addMatchingPair">+ пара</button>
-        <p class="text-xs text-gray-400">Студент увидит обе колонки в перемешанном порядке.</p>
+        <p class="text-xs text-gray-500">Студент увидит обе колонки в перемешанном порядке.</p>
       </div>
     </template>
 
@@ -295,7 +295,7 @@ const removeOrderingItem = (idx: number) => {
           :key="i"
           class="flex items-center gap-2"
         >
-          <span class="text-xs text-gray-400 w-4">{{ i + 1 }}.</span>
+          <span class="text-xs text-gray-500 w-4">{{ i + 1 }}.</span>
           <input
             v-model="local.items[i]"
             class="flex-1 rounded-lg border border-gray-200 px-2 py-1 text-sm"
@@ -312,13 +312,13 @@ const removeOrderingItem = (idx: number) => {
           <button type="button" class="text-xs text-red-500" @click="removeOrderingItem(i)">✕</button>
         </div>
         <button type="button" class="text-xs text-violet-600" @click="addOrderingItem">+ шаг</button>
-        <p class="text-xs text-gray-400">Порядок выше = правильный.</p>
+        <p class="text-xs text-gray-500">Порядок выше = правильный.</p>
       </div>
     </template>
 
     <!-- fill_blank -->
     <template v-if="type === 'fill_blank'">
-      <p class="text-xs text-gray-400">В формулировке используйте маркер <code>___</code> для каждого пропуска.</p>
+      <p class="text-xs text-gray-500">В формулировке используйте маркер <code>___</code> для каждого пропуска.</p>
       <div
         v-for="(alts, bi) in local.blanks ?? []"
         :key="bi"

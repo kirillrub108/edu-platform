@@ -48,6 +48,12 @@
   --font: "Manrope", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 
   position: relative;
+  /* Own stacking context: keeps the z-index:-2/-1 background layers (.bg / .grain)
+     painted *inside* the landing — above .ldg's lavender base, below the content —
+     instead of escaping to the root context where the app shell's opaque wrapper
+     background paints over them and hides them. Without this the aurora / rays /
+     grid / grain are invisible (or only faintly bleed through a translucent shell). */
+  isolation: isolate;
   overflow-x: clip;
   font-family: var(--font);
   color: var(--ink);

@@ -115,10 +115,10 @@ onBeforeUnmount(() => {
     </form>
 
     <div class="flex-1 overflow-y-auto p-4 space-y-4">
-      <p v-if="state.loading && !state.items.length" class="text-sm text-gray-400">
+      <p v-if="state.loading && !state.items.length" class="text-sm text-gray-500">
         Загрузка…
       </p>
-      <p v-else-if="!state.items.length" class="text-sm text-gray-400 text-center py-6">
+      <p v-else-if="!state.items.length" class="text-sm text-gray-500 text-center py-6">
         Будьте первым, кто оставит комментарий
       </p>
       <CommentItem

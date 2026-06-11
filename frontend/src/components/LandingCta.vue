@@ -6,7 +6,7 @@
     <div class="wrap">
       <div class="final reveal">
         <h2 class="h2">Превратите презентацию в видеокурс<br />уже сегодня</h2>
-        <p class="sub center">
+        <p class="sub center" style="text-align: center">
           Загрузите PPTX и получите озвученную видеолекцию — ИИ соберёт её без съёмок и монтажа.
         </p>
         <div class="hero-cta">

@@ -64,7 +64,7 @@ const onScriptFileChange = (e: Event) => {
         >
           Извлечь текст
         </UiButton>
-        <span class="text-xs text-gray-400">TXT, MD, PDF, DOCX, DOC, RTF, ODT, HTML</span>
+        <span class="text-xs text-gray-500">TXT, MD, PDF, DOCX, DOC, RTF, ODT, HTML</span>
       </div>
       <p v-if="scriptUploadError" class="mb-2 text-sm text-rose-600">{{ scriptUploadError }}</p>
 
@@ -79,7 +79,7 @@ const onScriptFileChange = (e: Event) => {
         <span class="text-xs text-gray-500">{{ wordCount }} слов</span>
         <span
           v-if="saveStatus === 'saving'"
-          class="text-xs text-gray-400"
+          class="text-xs text-gray-500"
         >Сохранение…</span>
         <span
           v-else-if="saveStatus === 'saved'"

@@ -40,8 +40,11 @@
             <div class="stat">
               <div class="sic">
                 <svg class="icon" viewBox="0 0 24 24" fill="none">
-                  <path d="M5 4v3m0 13v-3m0 0a5 5 0 0 0 5-5m9-3v3m0 13v-3M14 7a5 5 0 0 1 5 5" stroke="#fff" stroke-width="2" stroke-linecap="round" />
-                  <path d="M5 14a3 3 0 0 1 0-6m14 8a3 3 0 0 0 0-6" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+                  <path d="M4 9a8 8 0 0 1 13.5-3" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+                  <path d="M20 15a8 8 0 0 1-13.5 3" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+                  <path d="M17.5 6V3M17.5 6h-3" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M6.5 18v3M6.5 18h3" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  <path d="M10 9.5 14.5 12 10 14.5z" fill="#fff" stroke="#fff" stroke-width="1.4" stroke-linejoin="round" />
                 </svg>
               </div>
               <div class="big" style="font-size: clamp(24px, 2.7vw, 34px)">PPTX → MP4</div>

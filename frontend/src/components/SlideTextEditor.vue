@@ -301,7 +301,7 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
                 :alt="`Слайд ${current.slide_number}`"
                 class="w-full h-full object-contain bg-white"
               />
-              <span v-else class="text-xs text-gray-400">Изображение недоступно</span>
+              <span v-else class="text-xs text-gray-500">Изображение недоступно</span>
             </div>
           </div>
 

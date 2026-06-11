@@ -178,7 +178,7 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
         :class="{
           'text-emerald-700 bg-emerald-50 border-emerald-200': paymentBanner.kind === 'success',
           'text-rose-700 bg-rose-50 border-rose-200': paymentBanner.kind === 'fail',
-          'text-gray-600 bg-gray-50 border-gray-200': paymentBanner.kind === 'pending',
+          'text-gray-600 bg-white border-gray-200': paymentBanner.kind === 'pending',
         }"
       >
         <Check v-if="paymentBanner.kind === 'success'" class="w-4 h-4 shrink-0 mt-0.5" />
@@ -330,7 +330,7 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
                 >
                   <div class="min-w-0 flex-1">
                     <div class="text-sm font-medium text-gray-800">{{ p.credits }} кр.</div>
-                    <div class="text-xs text-gray-400">{{ formatDateTime(p.created_at) }}</div>
+                    <div class="text-xs text-gray-500">{{ formatDateTime(p.created_at) }}</div>
                   </div>
                   <span class="text-sm text-gray-600 tabular-nums shrink-0">
                     {{ formatRub(Number(p.amount_rub)) }}
@@ -387,7 +387,7 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
                     <div class="text-sm font-medium text-gray-800 truncate">
                       {{ operationLabel(tx.operation) }}
                     </div>
-                    <div class="text-xs text-gray-400 truncate">
+                    <div class="text-xs text-gray-500 truncate">
                       {{ formatDateTime(tx.created_at) }}
                       <template v-if="tx.description"> · {{ tx.description }}</template>
                     </div>

@@ -132,7 +132,7 @@ onMounted(async () => {
                   {{ c.title }}
                 </div>
                 <template v-if="studentStore.courseStats[c.id]">
-                  <div class="text-xs text-gray-400 mt-0.5">
+                  <div class="text-xs text-gray-500 mt-0.5">
                     {{ studentStore.courseStats[c.id].completed }}/{{ studentStore.courseStats[c.id].total }} уроков
                   </div>
                   <div v-if="studentStore.courseStats[c.id].total" class="mt-1.5 h-1 bg-gray-100 rounded-full overflow-hidden">
@@ -145,7 +145,7 @@ onMounted(async () => {
               </div>
             </div>
 
-            <p v-if="!studentStore.courses.length" class="text-sm text-gray-400 text-center py-6">
+            <p v-if="!studentStore.courses.length" class="text-sm text-gray-500 text-center py-6">
               Нет записей
             </p>
           </template>
@@ -170,7 +170,7 @@ onMounted(async () => {
                 :key="mod.id"
                 class="mb-3"
               >
-                <div class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2 mb-1">
+                <div class="text-xs font-semibold text-gray-500 uppercase tracking-wide px-2 mb-1">
                   {{ mod.title }}
                 </div>
                 <ul class="space-y-0.5">
@@ -194,11 +194,11 @@ onMounted(async () => {
                 </ul>
               </div>
 
-              <p v-if="!studentStore.activeCourse.modules?.length" class="text-sm text-gray-400 text-center py-6">
+              <p v-if="!studentStore.activeCourse.modules?.length" class="text-sm text-gray-500 text-center py-6">
                 Уроков пока нет
               </p>
             </template>
-            <div v-else class="text-sm text-gray-400 text-center py-6">Загрузка…</div>
+            <div v-else class="text-sm text-gray-500 text-center py-6">Загрузка…</div>
           </template>
 
         </div>

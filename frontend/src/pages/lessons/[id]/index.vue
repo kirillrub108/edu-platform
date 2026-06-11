@@ -381,7 +381,7 @@ watch(lessonId, (newId, oldId) => {
               {{ formatDate(video.created_at) }}
             </span>
             <span class="text-sm text-gray-700">{{ voiceLabel(video.voice) }}</span>
-            <span class="text-sm text-gray-400">{{ modeLabels[video.creation_mode] ?? video.creation_mode }}</span>
+            <span class="text-sm text-gray-500">{{ modeLabels[video.creation_mode] ?? video.creation_mode }}</span>
             <span
               v-if="video.is_published"
               class="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium"

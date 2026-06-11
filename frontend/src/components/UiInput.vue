@@ -33,6 +33,6 @@ defineEmits(['update:modelValue', 'blur'])
       @blur="$emit('blur')"
     />
     <p v-if="error" class="text-xs text-rose-600">{{ error }}</p>
-    <p v-else-if="hint" class="text-xs text-gray-400">{{ hint }}</p>
+    <p v-else-if="hint" class="text-xs text-gray-500">{{ hint }}</p>
   </div>
 </template>

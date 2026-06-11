@@ -168,7 +168,7 @@ const hint = computed(() => {
           </template>
         </template>
       </div>
-      <p v-if="!canGenerateVideo && !isProcessing && hint" class="mt-2 text-xs text-gray-400">
+      <p v-if="!canGenerateVideo && !isProcessing && hint" class="mt-2 text-xs text-gray-500">
         {{ hint }}
       </p>
     </section>
