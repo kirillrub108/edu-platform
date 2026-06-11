@@ -46,10 +46,18 @@ const bars = [40, 70, 95, 60, 85, 45, 75, 100, 55, 80, 35, 65]
         class="scene-stage relative aspect-[16/10] sm:aspect-[16/9]"
         :style="{ transform: `rotateX(${tiltX}deg) rotateY(${tiltY}deg)` }"
       >
-        <!-- under-glow -->
+        <!-- under-glow (breathes) + soft contact shadow + faint glass shelf for depth -->
         <div
-          class="pointer-events-none absolute inset-x-8 bottom-2 h-24 rounded-full bg-violet-500/30 blur-3xl"
+          class="under-glow pointer-events-none absolute inset-x-8 bottom-2 h-24 rounded-full bg-violet-500/30 blur-3xl"
           style="transform: translateZ(-60px)"
+        ></div>
+        <div
+          class="pointer-events-none absolute inset-x-12 -bottom-2 h-8 rounded-[50%] bg-violet-900/20 blur-2xl"
+          style="transform: translateZ(-20px)"
+        ></div>
+        <div
+          class="pointer-events-none absolute inset-x-6 bottom-0 hidden h-5 rounded-2xl border border-white/50 bg-white/30 backdrop-blur-sm lg:block"
+          style="transform: translateZ(-30px) translateY(8px)"
         ></div>
 
         <!-- main app window -->
@@ -71,7 +79,7 @@ const bars = [40, 70, 95, 60, 85, 45, 75, 100, 55, 80, 35, 65]
 
           <!-- slide preview -->
           <div class="grid h-[calc(100%-2.75rem)] grid-cols-[1.6fr_1fr] gap-3 p-4">
-            <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 p-4 text-white">
+            <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-violet-500 to-indigo-500 p-4 text-white">
               <div class="text-[11px] font-medium uppercase tracking-wider text-white/70">Лекция · слайд 07</div>
               <div class="mt-2 h-2.5 w-3/4 rounded-full bg-white/80"></div>
               <div class="mt-1.5 h-2.5 w-1/2 rounded-full bg-white/50"></div>
@@ -176,18 +184,28 @@ const bars = [40, 70, 95, 60, 85, 45, 75, 100, 55, 80, 35, 65]
 .animate-float-slow { animation: float 8s ease-in-out infinite; }
 
 @keyframes wave {
-  0%, 100% { transform: scaleY(0.4); }
-  50% { transform: scaleY(1); }
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1.05); }
 }
 .wave-bar {
   transform-origin: bottom;
-  animation: wave 1.1s ease-in-out infinite;
+  animation: wave 1s ease-in-out infinite;
+}
+
+/* the under-glow gently breathes so the fallback hero feels alive too */
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.7; transform: translateZ(-60px) scale(1); }
+  50% { opacity: 1; transform: translateZ(-60px) scale(1.08); }
+}
+.under-glow {
+  animation: glow-pulse 7s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .scene-stage { transition: none; }
   .animate-float,
   .animate-float-slow,
-  .wave-bar { animation: none; }
+  .wave-bar,
+  .under-glow { animation: none; }
 }
 </style>

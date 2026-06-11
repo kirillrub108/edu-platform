@@ -25,9 +25,9 @@ const features = [
         :key="i"
         v-reveal
         :data-reveal-delay="i * 60"
-        class="group flex gap-4 rounded-2xl border border-gray-100 bg-white p-6 shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft-hover"
+        class="group flex gap-4 rounded-2xl border border-gray-100 bg-white p-6 shadow-soft transition-all duration-200 hover:-translate-y-1 hover:border-violet-100 hover:shadow-[0_10px_34px_rgba(124,58,237,0.14)]"
       >
-        <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-100 text-violet-700 transition-colors group-hover:bg-violet-600 group-hover:text-white">
+        <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-100 text-violet-700 transition-all duration-200 group-hover:scale-105 group-hover:bg-violet-600 group-hover:text-white">
           <component :is="f.icon" class="h-5 w-5" />
         </div>
         <div>
