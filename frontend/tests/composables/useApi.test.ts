@@ -1,23 +1,31 @@
 /**
- * Unit tests for useApi composable — isolated, no component mounting.
+ * Unit tests for the cookie-based useApi composable — isolated, no component
+ * mounting.
+ *
+ * Auth is httpOnly-cookie + double-submit CSRF, NOT Authorization: Bearer (no
+ * token ever reaches JS). So these tests assert the cookie-model behaviour:
+ *   - state-changing requests ride credentials: 'include' and forward the
+ *     csrf_token cookie as X-CSRF-Token;
+ *   - a 401 triggers exactly one /auth/refresh (singleflight), then one retry of
+ *     the original request;
+ *   - if refresh fails, the session is cleared, we redirect to /login, and the
+ *     original 401 propagates.
  *
  * Strategy:
- * - Mock 'ofetch' so all network goes through a vi.fn we control.
- * - Re-stub Nuxt auto-imports (useAuthStore, useRuntimeConfig, navigateTo)
- *   per test with stateful fakes so we can observe token rotation.
+ * - Mock 'ofetch' so all network goes through a vi.fn we control. The client
+ *   sends no Authorization header to distinguish calls by, so a 401 is keyed off
+ *   request state (the cookie not yet refreshed) — mirroring the opaque,
+ *   server-set cookie of the real flow.
+ * - Re-stub Nuxt auto-imports (useAuthStore, useRuntimeConfig, navigateTo) per
+ *   test. The real store exposes only clearSession to useApi, so that's all the
+ *   stub provides.
  * - vi.resetModules() in beforeEach so useApi.ts re-evaluates and the
- *   module-private `refreshPromise` cache is fresh between tests. Without
- *   this, a lingering in-flight refresh from one test would short-circuit
- *   the singleflight check in the next.
+ *   module-private `refreshPromise` singleflight cache is fresh between tests.
+ *   Without this, a lingering in-flight refresh from one test would
+ *   short-circuit the singleflight check in the next.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-
-interface Tokens {
-  access_token: string
-  refresh_token: string
-  token_type: string
-}
 
 // Mutable fetch mock the tests reassign per scenario.
 const fetchMock = vi.fn()
@@ -26,39 +34,13 @@ vi.mock('ofetch', () => ({
   $fetch: (...args: unknown[]) => fetchMock(...args),
 }))
 
-// Stateful auth store with controllable tokens.
-let currentAccess: string | null = null
-let currentRefresh: string | null = null
-let clearedCount = 0
-
 const navigateToMock = vi.fn(async () => undefined)
+const clearSessionMock = vi.fn()
 
 const installGlobals = (): void => {
   vi.stubGlobal('useRuntimeConfig', () => ({ public: { apiBase: 'http://api.test' } }))
-  vi.stubGlobal('useAuthStore', () => ({
-    getAccessToken: () => currentAccess,
-    getRefreshToken: () => currentRefresh,
-    persistTokens: (t: Tokens) => {
-      currentAccess = t.access_token
-      currentRefresh = t.refresh_token
-    },
-    clearSession: () => {
-      currentAccess = null
-      currentRefresh = null
-      clearedCount += 1
-    },
-  }))
+  vi.stubGlobal('useAuthStore', () => ({ clearSession: clearSessionMock }))
   vi.stubGlobal('navigateTo', navigateToMock)
-}
-
-// Build a JWT-shaped token whose exp is comfortably in the future, so the
-// proactive-refresh check in useApi.ts treats it as still valid.
-const futureJwt = (id: string): string => {
-  const header = btoa(JSON.stringify({ alg: 'none', typ: 'JWT' }))
-  const payload = btoa(
-    JSON.stringify({ sub: id, exp: Math.floor(Date.now() / 1000) + 3600 }),
-  )
-  return `${header}.${payload}.sig`
 }
 
 const make401 = (): Error => {
@@ -76,9 +58,10 @@ beforeEach(() => {
   vi.resetModules()
   fetchMock.mockReset()
   navigateToMock.mockClear()
-  currentAccess = null
-  currentRefresh = null
-  clearedCount = 0
+  clearSessionMock.mockClear()
+  // Reset the cookie jar to a plain, writable string so getCsrfToken() reads a
+  // clean slate and a test can assign a single cookie deterministically.
+  Object.defineProperty(document, 'cookie', { value: '', writable: true, configurable: true })
   installGlobals()
 })
 
@@ -87,72 +70,71 @@ afterEach(() => {
 })
 
 describe('useApi.apiFetch', () => {
-  it('attaches Authorization: Bearer <access> when a token is present', async () => {
-    currentAccess = futureJwt('user-1')
-    currentRefresh = 'r-1'
+  it('forwards the csrf_token cookie as X-CSRF-Token on state-changing requests, with credentials included', async () => {
+    document.cookie = 'csrf_token=csrf-xyz'
     fetchMock.mockResolvedValueOnce({ ok: true })
 
     const useApi = await loadUseApi()
     const { apiFetch } = useApi()
-    const out = await apiFetch('/hello')
+    const out = await apiFetch('/lessons', { method: 'POST', body: { title: 'x' } })
 
     expect(out).toEqual({ ok: true })
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    const [, opts] = fetchMock.mock.calls[0]
-    expect((opts as { headers: Record<string, string> }).headers.Authorization).toBe(
-      `Bearer ${currentAccess}`,
-    )
+    const [path, opts] = fetchMock.mock.calls[0] as [
+      string,
+      { credentials?: string; headers: Record<string, string> },
+    ]
+    expect(path).toBe('/lessons')
+    expect(opts.credentials).toBe('include')
+    expect(opts.headers['X-CSRF-Token']).toBe('csrf-xyz')
   })
 
-  it('on 401: refreshes once, then retries the original request with the new token', async () => {
-    currentAccess = futureJwt('user-1')
-    currentRefresh = 'r-1'
-    // Capture the original token before persistTokens rotates currentAccess
-    // mid-test, so the 401 condition stays pinned to the pre-refresh value.
-    const original = currentAccess
-
-    fetchMock.mockImplementation(async (url: string, opts: { headers?: Record<string, string> }) => {
+  it('on 401: refreshes once, then retries the original request', async () => {
+    // The stale cookie 401s until /auth/refresh rotates it; the retry then
+    // succeeds. There's no Authorization header to key off — the server-set
+    // cookie is opaque to JS — so we model it with a `refreshed` flag.
+    let refreshed = false
+    fetchMock.mockImplementation(async (url: string) => {
       if (url === '/auth/refresh') {
-        return { access_token: futureJwt('user-1-new'), refresh_token: 'r-2', token_type: 'bearer' }
+        refreshed = true
+        return { ok: true }
       }
-      const bearer = opts.headers?.Authorization
-      if (bearer === `Bearer ${original}`) throw make401()
-      return { ok: true, who: bearer }
+      if (!refreshed) throw make401()
+      return { ok: true, fresh: true }
     })
 
     const useApi = await loadUseApi()
     const { apiFetch } = useApi()
-    const out = await apiFetch<{ ok: true; who: string }>('/protected')
+    const out = await apiFetch<{ ok: true; fresh: boolean }>('/protected')
 
     expect(out.ok).toBe(true)
+    expect(out.fresh).toBe(true)
     const refreshCalls = fetchMock.mock.calls.filter(([u]) => u === '/auth/refresh')
     expect(refreshCalls).toHaveLength(1)
-    expect(out.who).toBe(`Bearer ${currentAccess}`)
-    expect(out.who).not.toBe(`Bearer ${original}`)
+    // /protected hit twice: the initial 401, then the retry after refresh.
+    const protectedCalls = fetchMock.mock.calls.filter(([u]) => u === '/protected')
+    expect(protectedCalls).toHaveLength(2)
   })
 
   it('SINGLEFLIGHT: N parallel 401s trigger refresh exactly once', async () => {
-    currentAccess = futureJwt('user-1')
-    currentRefresh = 'r-1'
-    const original = currentAccess
-
-    let refreshResolve: ((v: Tokens) => void) | null = null
-    const refreshPending = new Promise<Tokens>(r => {
+    let refreshResolve: ((v: unknown) => void) | null = null
+    const refreshPending = new Promise<unknown>(r => {
       refreshResolve = r
     })
     let refreshHits = 0
+    let refreshed = false
 
-    fetchMock.mockImplementation(async (url: string, opts: { headers?: Record<string, string> }) => {
+    fetchMock.mockImplementation(async (url: string) => {
       if (url === '/auth/refresh') {
         refreshHits += 1
-        // Hold the refresh open until we explicitly resolve it. This widens
-        // the singleflight window so the test would actually FAIL if useApi
+        refreshed = true
+        // Hold the refresh open until we explicitly resolve it. This widens the
+        // singleflight window so the test would actually FAIL if useApi
         // double-fired the refresh — every concurrent 401 would race here.
         return refreshPending
       }
-      const bearer = opts.headers?.Authorization
-      if (bearer === `Bearer ${original}`) throw make401()
-      return { ok: true, who: bearer }
+      if (!refreshed) throw make401()
+      return { ok: true }
     })
 
     const useApi = await loadUseApi()
@@ -160,21 +142,17 @@ describe('useApi.apiFetch', () => {
 
     // Fire 5 parallel requests; all should 401 before any refresh resolves.
     const inFlight = Promise.all(
-      Array.from({ length: 5 }, (_, i) => apiFetch<{ ok: true; who: string }>(`/p${i}`)),
+      Array.from({ length: 5 }, (_, i) => apiFetch<{ ok: true }>(`/p${i}`)),
     )
 
-    // Let microtasks run so every 401 gets routed into the refresh branch
-    // and into tryRefresh (where singleflight either reuses or duplicates).
+    // Let microtasks run so every 401 gets routed into tryRefresh, where
+    // singleflight either reuses or duplicates the in-flight refresh.
     for (let i = 0; i < 20; i++) await Promise.resolve()
 
     expect(refreshHits).toBe(1)
 
     // Now resolve refresh so the 5 retries can land.
-    refreshResolve!({
-      access_token: futureJwt('user-1-new'),
-      refresh_token: 'r-2',
-      token_type: 'bearer',
-    })
+    refreshResolve!({ ok: true })
 
     const results = await inFlight
     expect(results).toHaveLength(5)
@@ -184,20 +162,14 @@ describe('useApi.apiFetch', () => {
   })
 
   it('on failed refresh: clears session, navigates to /login, propagates the error', async () => {
-    currentAccess = futureJwt('user-1')
-    currentRefresh = 'r-bad'
-    const original = currentAccess
-
-    fetchMock.mockImplementation(async (url: string, opts: { headers?: Record<string, string> }) => {
+    fetchMock.mockImplementation(async (url: string) => {
       if (url === '/auth/refresh') {
         // Refresh itself rejects — simulates an invalid/expired refresh token.
-        // useApi catches inside tryRefresh and resolves to null; the outer
-        // 401 handler then clears session + redirects.
+        // tryRefresh catches and resolves to false; the outer 401 handler then
+        // clears session + redirects and rethrows the original 401.
         throw new Error('refresh denied')
       }
-      const bearer = opts.headers?.Authorization
-      if (bearer === `Bearer ${original}`) throw make401()
-      return { ok: true }
+      throw make401()
     })
 
     const useApi = await loadUseApi()
@@ -207,9 +179,7 @@ describe('useApi.apiFetch', () => {
       response: { status: 401 },
     })
 
-    expect(clearedCount).toBeGreaterThanOrEqual(1)
+    expect(clearSessionMock).toHaveBeenCalled()
     expect(navigateToMock).toHaveBeenCalledWith('/login')
-    expect(currentAccess).toBeNull()
-    expect(currentRefresh).toBeNull()
   })
 })

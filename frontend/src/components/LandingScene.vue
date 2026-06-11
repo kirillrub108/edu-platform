@@ -5,14 +5,18 @@ import { FileText, Volume2, Video, Sparkles } from 'lucide-vue-next'
 // pointer over the scene nudges it. Disabled on coarse pointers (touch).
 const tiltX = ref(7)
 const tiltY = ref(-11)
-let coarse = false
+// Hold the rest pose for touch (coarse) pointers and for users who prefer
+// reduced motion — no pointer-driven tilt for either.
+let still = false
 
 onMounted(() => {
-  coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false
+  still =
+    (window.matchMedia?.('(pointer: coarse)').matches ?? false) ||
+    (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
 })
 
 const onMove = (e: PointerEvent) => {
-  if (coarse) return
+  if (still) return
   const el = e.currentTarget as HTMLElement
   const r = el.getBoundingClientRect()
   const px = (e.clientX - r.left) / r.width - 0.5
@@ -67,7 +71,7 @@ const bars = [40, 70, 95, 60, 85, 45, 75, 100, 55, 80, 35, 65]
 
           <!-- slide preview -->
           <div class="grid h-[calc(100%-2.75rem)] grid-cols-[1.6fr_1fr] gap-3 p-4">
-            <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-violet-600 via-purple-500 to-fuchsia-500 p-4 text-white">
+            <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-violet-600 to-indigo-600 p-4 text-white">
               <div class="text-[11px] font-medium uppercase tracking-wider text-white/70">Лекция · слайд 07</div>
               <div class="mt-2 h-2.5 w-3/4 rounded-full bg-white/80"></div>
               <div class="mt-1.5 h-2.5 w-1/2 rounded-full bg-white/50"></div>
@@ -105,21 +109,21 @@ const bars = [40, 70, 95, 60, 85, 45, 75, 100, 55, 80, 35, 65]
           </div>
         </div>
 
-        <!-- floating chip: SpeechKit waveform -->
+        <!-- floating chip: voice waveform -->
         <div class="float-layer absolute -left-8 bottom-4 hidden lg:block" style="transform: translateZ(115px)">
           <div class="chip animate-float-slow" style="animation-delay: -2s">
-            <div class="grid h-7 w-7 place-items-center rounded-lg bg-red-50 text-red-500">
+            <div class="grid h-7 w-7 place-items-center rounded-lg bg-amber-50 text-amber-600">
               <Volume2 class="h-3.5 w-3.5" />
             </div>
             <div class="flex items-end gap-[3px]">
               <span
                 v-for="(h, i) in bars"
                 :key="i"
-                class="wave-bar w-[3px] rounded-full bg-gradient-to-t from-violet-500 to-fuchsia-400"
+                class="wave-bar w-[3px] rounded-full bg-gradient-to-t from-amber-500 to-amber-400"
                 :style="{ height: h * 0.22 + 'px', animationDelay: i * 90 + 'ms' }"
               ></span>
             </div>
-            <div class="text-[10px] font-medium text-gray-500">SpeechKit</div>
+            <div class="text-[10px] font-medium text-gray-500">озвучка</div>
           </div>
         </div>
 

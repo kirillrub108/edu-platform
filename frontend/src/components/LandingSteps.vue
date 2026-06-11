@@ -1,18 +1,21 @@
 <script setup lang="ts">
-import { Upload, Brain, Volume2, Video, ArrowRight } from 'lucide-vue-next'
+import { Upload, Brain, Volume2, GraduationCap, ArrowRight } from 'lucide-vue-next'
+
+const vReveal = useScrollReveal()
 
 const steps = [
   { icon: Upload, title: 'Загрузите PPTX', desc: 'Презентация и текст доклада. Никаких шаблонов и ручных настроек.' },
-  { icon: Brain, title: 'ИИ-анализ слайдов', desc: 'Vision-модель Yandex распознаёт и осмысляет каждый слайд, готовит скрипт.' },
-  { icon: Volume2, title: 'Озвучка Yandex SpeechKit', desc: 'Нейросетевой синтез речи проговаривает скрипт естественным голосом.' },
-  { icon: Video, title: 'Готовое MP4', desc: 'Слайды и озвучка собираются в видеолекцию автоматически.' },
+  { icon: Brain, title: 'ИИ-анализ слайдов', desc: 'ИИ распознаёт и осмысляет каждый слайд и готовит закадровый текст.' },
+  { icon: Volume2, title: 'Нейросетевая озвучка', desc: 'Синтез речи проговаривает текст естественным голосом — без диктора.' },
+  { icon: GraduationCap, title: 'Видеоурок студентам', desc: 'Готовое MP4 публикуется студентам — с тестами и автопроверкой.' },
 ]
 </script>
 
 <template>
   <section id="how" class="px-6 py-20 max-w-6xl mx-auto scroll-mt-20">
-    <div class="text-center max-w-2xl mx-auto">
-      <h2 class="text-2xl md:text-3xl font-semibold tracking-tight">Как это работает</h2>
+    <div v-reveal class="text-center max-w-2xl mx-auto">
+      <span class="text-xs font-semibold uppercase tracking-wider text-violet-600">Как это работает</span>
+      <h2 class="mt-2 text-2xl md:text-3xl font-semibold tracking-tight">От PPTX до видеоурока</h2>
       <p class="mt-3 text-gray-600">Четыре шага от файла презентации до опубликованной видеолекции.</p>
     </div>
 
@@ -20,6 +23,8 @@ const steps = [
       <li
         v-for="(s, i) in steps"
         :key="i"
+        v-reveal
+        :data-reveal-delay="i * 70"
         class="group relative rounded-2xl border border-violet-100 bg-white p-6 shadow-soft transition-all duration-200 hover:-translate-y-1 hover:shadow-soft-hover"
       >
         <div class="flex items-center justify-between">

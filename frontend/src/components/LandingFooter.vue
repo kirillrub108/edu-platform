@@ -6,7 +6,8 @@ const year = new Date().getFullYear()
 const nav = {
   product: [
     { label: 'Как это работает', href: '#how' },
-    { label: 'Возможности', href: '#features' },
+    { label: 'Зачем нужно', href: '#features' },
+    { label: 'Тарифы', href: '#pricing' },
   ],
   account: [
     { label: 'Создать аккаунт', to: '/register' },
@@ -33,15 +34,8 @@ const nav = {
             </span>
           </NuxtLink>
           <p class="mt-4 max-w-xs text-sm leading-relaxed text-gray-500">
-            Превращаем презентации в озвученные видеолекции автоматически — на нейросетях Yandex.
+            Превращаем презентации в озвученные видеолекции автоматически — ИИ-анализ слайдов и нейросетевая озвучка.
           </p>
-          <div class="mt-5 inline-flex items-center gap-2 rounded-full border border-violet-100 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 shadow-soft">
-            <span class="relative flex h-2 w-2">
-              <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-60"></span>
-              <span class="relative inline-flex h-2 w-2 rounded-full bg-red-500"></span>
-            </span>
-            Работает на Yandex SpeechKit
-          </div>
         </div>
 
         <!-- product nav -->
@@ -76,7 +70,7 @@ const nav = {
       <!-- bottom bar -->
       <div class="mt-12 flex flex-col items-center justify-between gap-3 border-t border-violet-100 pt-6 sm:flex-row">
         <p class="text-xs text-gray-400">© {{ year }} Edllm. Все права защищены.</p>
-        <p class="text-xs text-gray-400">PPTX → MP4 · нейросетевая озвучка Yandex SpeechKit</p>
+        <p class="text-xs text-gray-400">PPTX → MP4 · нейросетевая озвучка</p>
       </div>
     </div>
   </footer>

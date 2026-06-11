@@ -11,7 +11,7 @@ import { ArrowRight } from 'lucide-vue-next'
           Превратите презентацию в видеокурс уже сегодня
         </h2>
         <p class="mt-3 max-w-xl mx-auto text-gray-600">
-          Загрузите PPTX и получите озвученную видеолекцию на нейросетях Yandex — без съёмок и монтажа.
+          Загрузите PPTX и получите озвученную видеолекцию — ИИ соберёт её без съёмок и монтажа.
         </p>
         <div class="mt-8 flex flex-col sm:flex-row gap-3 justify-center">
           <NuxtLink to="/register">

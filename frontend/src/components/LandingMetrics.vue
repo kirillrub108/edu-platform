@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { Zap, Clock, Monitor, Sparkles } from 'lucide-vue-next'
 
+const vReveal = useScrollReveal()
+
 // Static placeholders describing the product capability — no client/usage claims.
 const metrics = [
   { icon: Clock, value: '2–5 мин', label: 'на сборку одной видеолекции' },
@@ -13,7 +15,8 @@ const metrics = [
 <template>
   <section class="px-6 py-12 max-w-5xl mx-auto">
     <div
-      class="rounded-3xl bg-gradient-to-br from-violet-700 via-violet-600 to-purple-500 p-8 md:p-10 text-white shadow-hero"
+      v-reveal
+      class="rounded-3xl bg-gradient-to-br from-violet-700 via-violet-600 to-indigo-600 p-8 md:p-10 text-white shadow-hero"
     >
       <p class="text-center text-sm font-medium text-white/70">
         Создано для преподавателей, методистов и онлайн-школ

@@ -2,12 +2,12 @@
 definePageMeta({ layout: 'bare', middleware: ['guest'] })
 
 useSeoMeta({
-  title: 'Edllm — Видеолекции из презентаций на нейросетях Yandex',
+  title: 'Edllm — Видеолекции из презентаций за минуты',
   description:
-    'Загрузите PPTX — ИИ-модели Yandex проанализируют слайды, напишут скрипт и озвучат его синтезом речи Yandex SpeechKit. Готовое MP4 без съёмок и монтажа за минуты.',
-  ogTitle: 'Edllm — Видеолекции из презентаций на ИИ Yandex',
+    'Загрузите PPTX — ИИ проанализирует слайды, напишет закадровый текст и озвучит его нейросетевым синтезом речи. Готовое MP4 без съёмок и монтажа за минуты.',
+  ogTitle: 'Edllm — Видеолекции из презентаций на ИИ',
   ogDescription:
-    'PPTX → ИИ-анализ слайдов → озвучка Yandex SpeechKit → готовое MP4. Без студии и монтажа.',
+    'PPTX → ИИ-анализ слайдов → нейросетевая озвучка → готовое MP4. Без студии и монтажа.',
   twitterCard: 'summary',
 })
 
@@ -19,22 +19,39 @@ onMounted(restoreScroll)
 
 <template>
   <div class="relative">
-    <!-- decorative background -->
-    <div class="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
-      <div class="absolute -top-40 -left-40 h-[480px] w-[480px] rounded-full bg-violet-200/40 blur-3xl"></div>
-      <div class="absolute top-20 -right-32 h-[420px] w-[420px] rounded-full bg-fuchsia-200/40 blur-3xl"></div>
-      <div
-        class="absolute inset-0"
-        style="background-image: radial-gradient(rgba(109,40,217,0.07) 1px, transparent 1px); background-size: 28px 28px;"
-      ></div>
-    </div>
+    <LandingBackdrop />
 
     <LandingHero />
-    <LandingScene />
+    <LandingHeroVisual />
     <LandingSteps />
     <LandingFeatures />
     <LandingMetrics />
+    <LandingPricing />
     <LandingCta />
     <LandingFooter />
   </div>
 </template>
+
+<style>
+/* Scroll-reveal for below-the-fold sections. The class is added by the
+   `v-reveal` directive (client only, skipped under reduced-motion); the media
+   query is a fallback so motion is never forced. */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
+    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.reveal-in {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
+</style>

@@ -7,9 +7,6 @@ import { vi } from 'vitest'
 
 vi.stubGlobal('useRuntimeConfig', () => ({ public: { apiBase: 'http://api.test' } }))
 vi.stubGlobal('useAuthStore', () => ({
-  getAccessToken: () => null,
-  getRefreshToken: () => null,
-  persistTokens: () => undefined,
   clearSession: () => undefined,
 }))
 vi.stubGlobal('navigateTo', vi.fn(async () => undefined))

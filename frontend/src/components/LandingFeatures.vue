@@ -1,25 +1,30 @@
 <script setup lang="ts">
-import { Zap, Volume2, Sparkles, Monitor } from 'lucide-vue-next'
+import { Clock, Library, Volume2, FileText } from 'lucide-vue-next'
+
+const vReveal = useScrollReveal()
 
 const features = [
-  { icon: Zap, title: 'В 10× быстрее', desc: 'Одна лекция — за 2–5 минут вместо 4–8 часов студийной записи и перезаписей.' },
-  { icon: Volume2, title: 'Озвучка Yandex SpeechKit', desc: 'Нейросетевой синтез речи с естественными интонациями — без диктора и микрофона.' },
-  { icon: Sparkles, title: 'Новейшие модели Yandex', desc: 'Анализ слайдов и генерация скрипта работают на актуальных ИИ-моделях Yandex.' },
-  { icon: Monitor, title: 'Без студии и монтажа', desc: 'Ни камеры, ни видеоредактора — весь процесс происходит в браузере.' },
+  { icon: Clock, title: 'Экономит часы препода', desc: 'Одна лекция — за 2–5 минут вместо 4–8 часов записи и бесконечных перезаписей.' },
+  { icon: Library, title: 'Единый формат курса', desc: 'Все лекции выглядят и звучат одинаково — без разнобоя записей с разных микрофонов.' },
+  { icon: FileText, title: 'Авто-текст по слайдам', desc: 'ИИ сам пишет закадровый текст по содержанию каждого слайда — или берёт ваш сценарий.' },
+  { icon: Volume2, title: 'Авто-озвучка голосом', desc: 'Закадровый текст синтезируется естественным голосом — без диктора, студии и микрофона.' },
 ]
 </script>
 
 <template>
   <section id="features" class="px-6 py-20 max-w-6xl mx-auto scroll-mt-20">
-    <div class="text-center max-w-2xl mx-auto">
-      <h2 class="text-2xl md:text-3xl font-semibold tracking-tight">Почему это работает быстрее</h2>
-      <p class="mt-3 text-gray-600">Рутину создания видеолекции берут на себя ИИ-модели и синтез речи Yandex.</p>
+    <div v-reveal class="text-center max-w-2xl mx-auto">
+      <span class="text-xs font-semibold uppercase tracking-wider text-violet-600">Зачем это нужно</span>
+      <h2 class="mt-2 text-2xl md:text-3xl font-semibold tracking-tight">Меньше рутины — больше курсов</h2>
+      <p class="mt-3 text-gray-600">Подготовку видеолекции берут на себя ИИ-анализ слайдов и нейросетевая озвучка.</p>
     </div>
 
     <div class="mt-12 grid grid-cols-1 md:grid-cols-2 gap-4">
       <div
         v-for="(f, i) in features"
         :key="i"
+        v-reveal
+        :data-reveal-delay="i * 60"
         class="group flex gap-4 rounded-2xl border border-gray-100 bg-white p-6 shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:shadow-soft-hover"
       >
         <div class="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-violet-100 text-violet-700 transition-colors group-hover:bg-violet-600 group-hover:text-white">
