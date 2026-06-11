@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { Coins, Sparkles } from 'lucide-vue-next'
-import { planLabel } from '~/composables/useBillingMeta'
 
 const props = withDefaults(defineProps<{ collapsed?: boolean }>(), { collapsed: false })
 
 const auth = useAuthStore()
 const { user } = storeToRefs(auth)
 const billing = useBillingStore()
-const { available, currentPlan, loadingBalance, balance } = storeToRefs(billing)
+const { available, loadingBalance, balance } = storeToRefs(billing)
 
 const isTeacher = computed(() => user.value?.role === 'teacher')
 
@@ -39,12 +38,9 @@ watch(isTeacher, (val) => {
       to="/billing"
       class="block p-4 rounded-2xl bg-gradient-to-br from-violet-600 to-purple-500 text-white hover:shadow-lg hover:shadow-violet-500/20 transition group"
     >
-      <div class="flex items-center justify-between">
+      <div class="flex items-center">
         <span class="text-xs opacity-80 inline-flex items-center gap-1.5">
           <Coins class="w-3.5 h-3.5" /> Доступно кредитов
-        </span>
-        <span class="text-[10px] uppercase tracking-wide bg-white/15 rounded-full px-2 py-0.5">
-          {{ planLabel(currentPlan) }}
         </span>
       </div>
       <div class="mt-1.5 flex items-baseline gap-1.5">
@@ -56,7 +52,7 @@ watch(isTeacher, (val) => {
         class="mt-3 inline-flex items-center gap-1 text-xs font-medium bg-white/15 group-hover:bg-white/25 rounded-lg px-2.5 py-1.5 transition"
       >
         <Sparkles class="w-3.5 h-3.5" />
-        Баланс и тарифы
+        Пополнить баланс
       </div>
     </NuxtLink>
   </template>

@@ -10,6 +10,7 @@ Async functions are used from FastAPI routers (AsyncSession); Celery tasks use
 the `sync_*` wrappers on their psycopg2 Session — never import the async
 functions into `app/tasks/*`.
 """
+from datetime import datetime, timezone
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -23,6 +24,21 @@ from app.models.usage_counter import UsageCounter
 LIFETIME_PERIOD = "lifetime"
 TRIAL_LECTURE = "trial_lecture"
 TRIAL_QUIZ = "trial_quiz"
+
+# Daily per-(student, quiz) cap on the free open-answer LLM grading. The day is
+# encoded in period_key, the quiz in resource, so the unique key already scopes
+# the counter per student/quiz/day.
+GRADING_ATTEMPT_PREFIX = "grading_attempt:"
+
+
+def grading_resource(quiz_id: UUID) -> str:
+    """usage_counters.resource for a quiz's daily student-grading cap."""
+    return f"{GRADING_ATTEMPT_PREFIX}{quiz_id}"
+
+
+def utc_day_key(now: datetime | None = None) -> str:
+    """Daily period_key (UTC) — a new calendar day yields a fresh counter."""
+    return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
 
 TRIAL_LIMITS: dict[str, int] = {
     TRIAL_LECTURE: TRIAL_LECTURES,

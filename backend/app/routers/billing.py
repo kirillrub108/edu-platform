@@ -6,7 +6,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.constants import CREDIT_PACKAGES, CREDIT_WEIGHTS, PLAN_CONFIGS
+from app.constants import (
+    AUTO_CHARS_PER_SLIDE,
+    CREDIT_PACKAGES,
+    CREDIT_WEIGHTS,
+    PLAN_CONFIGS,
+    TTS_CHARS_PER_CREDIT,
+    VIDEO_AUTO_BASE_CREDITS,
+    VIDEO_TEXT_BASE_CREDITS,
+)
 from app.database import get_db
 from app.dependencies import get_current_user, require_admin
 from app.limiter import limiter
@@ -22,8 +30,10 @@ from app.schemas.billing import (
     PlansOut,
     RenewalOut,
     TransactionOut,
+    TrialOut,
+    VideoPricingOut,
 )
-from app.services import billing_service, yookassa_service
+from app.services import billing_service, quota_service, yookassa_service
 
 logger = structlog.get_logger()
 
@@ -35,7 +45,9 @@ async def get_balance(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await billing_service.get_balance(db, user.id)
+    bal = await billing_service.get_balance(db, user.id)
+    trial = await quota_service.get_trial_state(db, user.id)
+    return BalanceOut(**bal, trial=TrialOut(**trial))
 
 
 @router.get("/transactions", response_model=list[TransactionOut])
@@ -49,7 +61,17 @@ async def list_transactions(
 
 @router.get("/plans", response_model=PlansOut)
 async def list_plans(_user: User = Depends(get_current_user)):
-    return PlansOut(weights=CREDIT_WEIGHTS, plans=PLAN_CONFIGS, packages=CREDIT_PACKAGES)
+    return PlansOut(
+        weights=CREDIT_WEIGHTS,
+        plans=PLAN_CONFIGS,
+        packages=CREDIT_PACKAGES,
+        video_pricing=VideoPricingOut(
+            text_base=VIDEO_TEXT_BASE_CREDITS,
+            auto_base=VIDEO_AUTO_BASE_CREDITS,
+            chars_per_credit=TTS_CHARS_PER_CREDIT,
+            auto_chars_per_slide=AUTO_CHARS_PER_SLIDE,
+        ),
+    )
 
 
 # ── YooKassa payments ─────────────────────────────────────────────────────────

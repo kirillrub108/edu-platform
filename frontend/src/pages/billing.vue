@@ -13,10 +13,7 @@ import {
 } from 'lucide-vue-next'
 import {
   COST_LABELS,
-  PLAN_META,
-  PLAN_ORDER,
   operationLabel,
-  planLabel,
   formatRub,
   formatDateTime,
 } from '~/composables/useBillingMeta'
@@ -28,8 +25,8 @@ const {
   balance,
   transactions,
   weights,
-  plans,
   packages,
+  videoPricing,
   payments,
   loadingBalance,
   loadingTx,
@@ -37,7 +34,6 @@ const {
   available,
   reserved,
   total,
-  currentPlan,
 } = storeToRefs(billing)
 
 const route = useRoute()
@@ -122,20 +118,45 @@ const PAYMENT_STATUS_META: Record<string, { label: string; chip: string }> = {
   canceled: { label: 'Отменён', chip: 'bg-gray-100 text-gray-500' },
 }
 
-const ACCENTS: Record<string, { ring: string; chip: string; price: string }> = {
-  gray: { ring: 'ring-gray-300', chip: 'bg-gray-100 text-gray-700', price: 'text-gray-900' },
-  violet: { ring: 'ring-violet-400', chip: 'bg-violet-100 text-violet-700', price: 'text-violet-700' },
-  fuchsia: { ring: 'ring-fuchsia-400', chip: 'bg-fuchsia-100 text-fuchsia-700', price: 'text-fuchsia-700' },
-  indigo: { ring: 'ring-indigo-400', chip: 'bg-indigo-100 text-indigo-700', price: 'text-indigo-700' },
-}
-const accentFor = (plan: string) => ACCENTS[PLAN_META[plan]?.accent ?? 'gray']!
-
 // CREDIT_WEIGHTS entries in a stable, readable order.
 const costRows = computed(() =>
   Object.entries(weights.value)
     .map(([key, cost]) => ({ key, cost, label: COST_LABELS[key] ?? key }))
     .sort((a, b) => b.cost - a.cost),
 )
+
+// ── Lifetime trial ─────────────────────────────────────────────────────────────
+const trial = computed(() => balance.value?.trial ?? null)
+const trialExhausted = computed(() => {
+  const t = trial.value
+  return (
+    !!t &&
+    t.lectures_used >= t.lectures_limit &&
+    t.quizzes_used >= t.quizzes_limit
+  )
+})
+// A paying user no longer needs the trial highlighted — render it muted.
+const hasPurchases = computed(() => payments.value.some(p => p.status === 'succeeded'))
+
+const scrollToPacks = () => {
+  document.getElementById('packs')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
+// ── Video cost examples computed from the backend formula params ────────────────
+// Range = text-mode (lower base) … auto-mode (higher base) for the same slide
+// count, using the auto narration norm for the per-character term.
+const videoExamples = computed(() => {
+  const vp = videoPricing.value
+  if (!vp) return []
+  return [10, 20].map((slides) => {
+    const tts = Math.ceil((slides * vp.auto_chars_per_slide) / vp.chars_per_credit)
+    return {
+      slides,
+      lo: vp.text_base + slides + tts,
+      hi: vp.auto_base + slides + tts,
+    }
+  })
+})
 
 const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
 </script>
@@ -147,7 +168,7 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
       <!-- Header -->
       <div class="mb-6">
         <div class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Преподаватель</div>
-        <h1 class="text-2xl font-semibold text-gray-900">Баланс и тарифы</h1>
+        <h1 class="text-2xl font-semibold text-gray-900">Баланс и кредиты</h1>
       </div>
 
       <!-- Payment result banner (return from YooKassa) -->
@@ -186,10 +207,6 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
               </span>
               <span class="text-lg opacity-70">кредитов</span>
             </div>
-            <div class="mt-3 inline-flex items-center gap-2 text-xs bg-white/15 rounded-full px-3 py-1">
-              <Sparkles class="w-3.5 h-3.5" />
-              Тариф: <span class="font-semibold">{{ planLabel(currentPlan) }}</span>
-            </div>
           </div>
 
           <!-- balance breakdown -->
@@ -215,81 +232,53 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
       </section>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- LEFT: plans + packs + history -->
+        <!-- LEFT: trial + packs + history -->
         <div class="lg:col-span-2 space-y-6">
-          <!-- Plans -->
-          <section>
-            <h2 class="text-base font-semibold text-gray-900 mb-3">Тарифы</h2>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div
-                v-for="plan in PLAN_ORDER"
-                :key="plan"
-                class="bg-white rounded-2xl border border-gray-100 p-5 shadow-soft flex flex-col"
-                :class="plan === currentPlan ? ['ring-2', accentFor(plan).ring] : ''"
-              >
-                <div class="flex items-center justify-between">
-                  <div>
-                    <div class="text-base font-semibold text-gray-900">{{ planLabel(plan) }}</div>
-                    <div class="text-xs text-gray-500">{{ PLAN_META[plan]?.tagline }}</div>
-                  </div>
-                  <span
-                    v-if="plan === currentPlan"
-                    class="text-[10px] uppercase tracking-wide rounded-full px-2 py-0.5"
-                    :class="accentFor(plan).chip"
-                  >
-                    Текущий
-                  </span>
-                </div>
-
-                <div class="mt-4 flex items-baseline gap-1">
-                  <span class="text-2xl font-semibold tabular-nums" :class="accentFor(plan).price">
-                    {{ plans[plan]?.price_rub ? formatRub(plans[plan]?.price_rub) : 'Бесплатно' }}
-                  </span>
-                  <span v-if="plans[plan]?.price_rub" class="text-xs text-gray-400">/ мес</span>
-                </div>
-
-                <ul class="mt-3 space-y-1.5 text-sm text-gray-600 flex-1">
-                  <li v-if="plans[plan]?.monthly_allowance" class="flex items-center gap-2">
-                    <Check class="w-4 h-4 text-emerald-500 shrink-0" />
-                    {{ plans[plan]?.monthly_allowance }} кредитов в месяц
-                  </li>
-                  <li v-if="plans[plan]?.onetime_credits" class="flex items-center gap-2">
-                    <Check class="w-4 h-4 text-emerald-500 shrink-0" />
-                    {{ plans[plan]?.onetime_credits }} кредитов при старте
-                  </li>
-                  <li
-                    v-if="!plans[plan]?.monthly_allowance && !plans[plan]?.onetime_credits"
-                    class="flex items-center gap-2 text-gray-400"
-                  >
-                    <Check class="w-4 h-4 shrink-0" /> Базовые возможности
-                  </li>
-                </ul>
-
-                <UiButton
-                  v-if="plan !== currentPlan"
-                  variant="secondary"
-                  size="sm"
-                  block
-                  disabled
-                  class="mt-4"
-                >
-                  Выбрать
-                </UiButton>
-                <div
-                  v-else
-                  class="mt-4 text-center text-xs text-gray-400 py-2"
-                >
-                  Активен
-                </div>
+          <!-- Lifetime free trial -->
+          <section v-if="trial">
+            <div
+              class="rounded-2xl border p-5 shadow-soft"
+              :class="hasPurchases
+                ? 'bg-white border-gray-100'
+                : 'bg-violet-50/60 border-violet-100'"
+            >
+              <div class="flex items-center gap-2 mb-2">
+                <Sparkles
+                  class="w-4 h-4 shrink-0"
+                  :class="hasPurchases ? 'text-gray-400' : 'text-violet-500'"
+                />
+                <h2 class="text-base font-semibold text-gray-900">Бесплатный триал</h2>
               </div>
+
+              <template v-if="!trialExhausted">
+                <p class="text-sm text-gray-700">
+                  Лекции:
+                  <span class="font-semibold tabular-nums">{{ trial.lectures_used }} из {{ trial.lectures_limit }}</span>
+                  · Тесты:
+                  <span class="font-semibold tabular-nums">{{ trial.quizzes_used }} из {{ trial.quizzes_limit }}</span>
+                </p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Доступен один раз — дальше операции оплачиваются кредитами.
+                </p>
+              </template>
+              <template v-else>
+                <p class="text-sm text-gray-600">Триал использован.</p>
+                <button
+                  type="button"
+                  class="mt-2 text-sm font-medium text-violet-700 hover:text-violet-800 transition"
+                  @click="scrollToPacks"
+                >
+                  Купить кредиты →
+                </button>
+              </template>
             </div>
           </section>
 
           <!-- Top-up packs -->
-          <section>
+          <section id="packs" class="scroll-mt-24">
             <h2 class="text-base font-semibold text-gray-900 mb-1">Разовое пополнение</h2>
             <p class="text-xs text-gray-500 mb-3">
-              Докупите кредиты сверх тарифа — они не сгорают при продлении.
+              Кредиты не сгорают.
             </p>
             <div
               v-if="payError"
@@ -423,10 +412,25 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
             </h2>
             <p class="text-xs text-gray-500 mb-4">Сколько кредитов списывается за каждое действие.</p>
 
-            <p class="text-xs text-gray-500 bg-violet-50/60 border border-violet-100 rounded-xl p-3 mb-4">
-              Видео: 2 CR + 1 CR за слайд + 1 CR за каждые 3000 символов озвучки
-              (авто-режим: 3 CR база, 600 симв/слайд).
-            </p>
+            <div
+              v-if="videoPricing"
+              class="text-xs text-gray-600 bg-violet-50/60 border border-violet-100 rounded-xl p-3 mb-4 space-y-1"
+            >
+              <div class="font-medium text-gray-700">Видеолекция</div>
+              <div>
+                Текст-режим: {{ videoPricing.text_base }} CR + 1 CR за слайд
+                + 1 CR за каждые {{ videoPricing.chars_per_credit }} символов озвучки.
+              </div>
+              <div>
+                Авто-режим: {{ videoPricing.auto_base }} CR + 1 CR за слайд
+                (≈ {{ videoPricing.auto_chars_per_slide }} символов на слайд).
+              </div>
+              <div class="text-gray-500 pt-0.5">
+                <template v-for="(ex, i) in videoExamples" :key="ex.slides">
+                  <span v-if="i"> · </span>{{ ex.slides }} слайдов ≈ {{ ex.lo }}–{{ ex.hi }} CR
+                </template>
+              </div>
+            </div>
 
             <ul class="space-y-2.5">
               <li

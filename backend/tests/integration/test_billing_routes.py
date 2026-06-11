@@ -24,7 +24,18 @@ async def test_balance_reflects_reservation(
     # former welcome grant.
     base = await client.get("/api/v1/billing/balance", cookies=teacher_token)
     assert base.status_code == 200
-    assert base.json() == {"balance": 0, "reserved": 0, "available": 0, "plan": "free"}
+    body = base.json()
+    assert body["balance"] == 0
+    assert body["reserved"] == 0
+    assert body["available"] == 0
+    assert body["plan"] == "free"
+    # Fresh account: full lifetime trial reported alongside the balance.
+    assert body["trial"] == {
+        "lectures_used": 0,
+        "lectures_limit": 2,
+        "quizzes_used": 0,
+        "quizzes_limit": 2,
+    }
 
     await billing_service.grant_credits(db_session, teacher_user.id, 50, "seed")
     await billing_service.reserve_credits(

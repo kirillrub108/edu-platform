@@ -60,6 +60,12 @@ QUIZ_LLM_OPEN_MAX_TOKENS: int = 400
 QUIZ_MAX_MATERIAL_CHARS: int = 12000
 # Parallel LLM-IO grading of open answers — bounded by upstream LLM throughput.
 QUIZ_GRADING_WORKERS: int = 4
+# Anti-abuse caps for the FREE LLM grading of students' open answers. Teachers
+# are never metered. An open answer longer than the char cap is rejected with a
+# 422 before any LLM call; more than N graded submissions per quiz per day per
+# student is a 429. Enforced in routers/quiz_student.submit_attempt.
+GRADING_MAX_ANSWER_CHARS: int = 2000
+GRADING_MAX_ATTEMPTS_PER_QUIZ_PER_DAY: int = 5
 
 # Billing / credits
 # Per-operation credit cost for FLAT-priced operations. Video generation is

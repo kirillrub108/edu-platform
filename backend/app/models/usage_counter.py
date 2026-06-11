@@ -33,7 +33,8 @@ class UsageCounter(Base):
         index=True,
     )
     period_key = Column(String(32), nullable=False)
-    resource = Column(String(32), nullable=False)
+    # 64, not 32: the daily grading cap stores 'grading_attempt:{quiz_uuid}' (52).
+    resource = Column(String(64), nullable=False)
     count = Column(Integer, nullable=False, default=0, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(

@@ -30,27 +30,8 @@ export const COST_LABELS: Record<string, string> = {
   quiz_grade: 'AI-проверка теста',
 }
 
-export interface PlanMeta {
-  label: string
-  tagline: string
-  accent: string // tailwind text/border accent for the plan card
-}
-
-export const PLAN_META: Record<string, PlanMeta> = {
-  free: { label: 'Free', tagline: 'Для знакомства', accent: 'gray' },
-  starter: { label: 'Starter', tagline: 'Для отдельных курсов', accent: 'violet' },
-  pro: { label: 'Pro', tagline: 'Для активных преподавателей', accent: 'fuchsia' },
-  school: { label: 'School', tagline: 'Для команд и учебных заведений', accent: 'indigo' },
-}
-
-export const PLAN_ORDER = ['free', 'starter', 'pro', 'school'] as const
-
 export function operationLabel(op: string): string {
   return OPERATION_LABELS[op] ?? op
-}
-
-export function planLabel(plan: string): string {
-  return PLAN_META[plan]?.label ?? plan
 }
 
 // Translate raw backend/task error strings into a friendly credits message.

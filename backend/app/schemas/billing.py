@@ -8,11 +8,19 @@ from app.models.credit import CreditOperation
 from app.models.payment import PaymentStatus
 
 
+class TrialOut(BaseModel):
+    lectures_used: int
+    lectures_limit: int
+    quizzes_used: int
+    quizzes_limit: int
+
+
 class BalanceOut(BaseModel):
     balance: int
     reserved: int
     available: int
     plan: str
+    trial: TrialOut
 
 
 class TransactionOut(BaseModel):
@@ -26,10 +34,21 @@ class TransactionOut(BaseModel):
     created_at: datetime
 
 
+class VideoPricingOut(BaseModel):
+    """Formula parameters for video generation — the frontend renders the
+    human-readable cost rule and examples from these instead of hardcoding."""
+
+    text_base: int
+    auto_base: int
+    chars_per_credit: int
+    auto_chars_per_slide: int
+
+
 class PlansOut(BaseModel):
     weights: dict[str, int]
     plans: dict[str, dict[str, int]]
     packages: dict[str, dict[str, int]]
+    video_pricing: VideoPricingOut
 
 
 class PaymentCreateRequest(BaseModel):

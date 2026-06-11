@@ -20,6 +20,10 @@ from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.constants import (
+    GRADING_MAX_ANSWER_CHARS,
+    GRADING_MAX_ATTEMPTS_PER_QUIZ_PER_DAY,
+)
 from app.database import get_db
 from app.dependencies import require_student
 from app.models.enrollment import Enrollment, LessonProgress
@@ -44,12 +48,14 @@ from app.schemas.quiz import (
     QuizSubmitResponse,
     to_student_payload,
 )
+from app.services import quota_service
 from app.services.grading_service import (
     ResolvedQuestion,
     aggregate_score,
     build_snapshot,
     grade_question,
     is_open_type,
+    open_answer_too_long,
     resolved_index,
 )
 from app.services.quiz_service import BrokenSnapshotError, resolve_snapshot
@@ -409,6 +415,49 @@ async def save_attempt_progress(
     return {"status": "saved"}
 
 
+def _reject_overlong_open_answers(
+    attempt: QuizAttempt, snap_idx: dict[UUID, ResolvedQuestion]
+) -> None:
+    """422 if any open answer exceeds the char cap — before any LLM call."""
+    for ans in attempt.answers:
+        q = snap_idx.get(ans.question_id)
+        if q is None or not is_open_type(q.type):
+            continue
+        text = str(ans.response.get("text", "")) if ans.response else ""
+        if open_answer_too_long(text):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "answer_too_long",
+                    "limit": GRADING_MAX_ANSWER_CHARS,
+                    "length": len(text),
+                },
+            )
+
+
+async def _reserve_grading_slot(
+    db: AsyncSession, student_id: UUID, quiz_id: UUID
+) -> None:
+    """Atomically take one daily grading slot for (student, quiz); 429 when the
+    day's cap is exhausted. A failed reservation is not refunded — a downstream
+    LLM failure must not hand the slot back (anti-abuse)."""
+    resource = quota_service.grading_resource(quiz_id)
+    period = quota_service.utc_day_key()
+    allowed = await quota_service.try_consume_slot(
+        db, student_id, resource, GRADING_MAX_ATTEMPTS_PER_QUIZ_PER_DAY, period
+    )
+    if not allowed:
+        used = await quota_service.get_usage(db, student_id, resource, period)
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "grading_rate_limited",
+                "limit": GRADING_MAX_ATTEMPTS_PER_QUIZ_PER_DAY,
+                "used": used,
+            },
+        )
+
+
 @router.post(
     "/{lesson_id}/quiz/attempts/{attempt_id}/submit",
     response_model=QuizSubmitResponse,
@@ -427,6 +476,14 @@ async def submit_attempt(
     snap_idx = resolved_index(resolved)
     by_qid = {a.question_id: a for a in attempt.answers}
     needs_open_grading = False
+
+    # Anti-abuse gates for the free open-answer LLM grading (students only,
+    # teachers never reach here). Both run before any mutation or LLM enqueue,
+    # and only when the attempt actually has open questions — purely closed
+    # submits are never metered and behave exactly as before.
+    if any(is_open_type(q.type) for q in resolved):
+        _reject_overlong_open_answers(attempt, snap_idx)
+        await _reserve_grading_slot(db, user.id, attempt.quiz_id)
 
     # 1. Ensure a QuizAnswer row exists for every snapshot question.
     for qid in snap_idx:

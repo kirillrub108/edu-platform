@@ -19,6 +19,8 @@ from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+from app.constants import GRADING_MAX_ANSWER_CHARS
+
 
 @dataclass(frozen=True)
 class GradingResult:
@@ -203,6 +205,11 @@ def grade_question(
 
 def is_open_type(question_type: str) -> bool:
     return question_type in ("short_answer", "essay")
+
+
+def open_answer_too_long(text: str) -> bool:
+    """True when a free-text open answer exceeds the anti-abuse cap."""
+    return len(text) > GRADING_MAX_ANSWER_CHARS
 
 
 # ── Attempt-level aggregation ───────────────────────────────────────────────

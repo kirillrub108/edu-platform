@@ -33,18 +33,19 @@ afterEach(() => {
 })
 
 describe('useBillingStore', () => {
-  it('fetchBalance кладёт balance, available считается из него', async () => {
-    fetchMock.mockResolvedValue({ balance: 100, reserved: 30, available: 70, plan: 'pro' })
+  it('fetchBalance кладёт balance с триалом, available считается из него', async () => {
+    const trial = { lectures_used: 1, lectures_limit: 2, quizzes_used: 0, quizzes_limit: 2 }
+    fetchMock.mockResolvedValue({ balance: 100, reserved: 30, available: 70, plan: 'pro', trial })
 
     const store = await loadStore()
     await store.fetchBalance()
 
     expect(fetchMock).toHaveBeenCalledWith('/billing/balance')
-    expect(store.balance).toEqual({ balance: 100, reserved: 30, available: 70, plan: 'pro' })
+    expect(store.balance).toEqual({ balance: 100, reserved: 30, available: 70, plan: 'pro', trial })
+    expect(store.balance?.trial).toEqual(trial)
     expect(store.available).toBe(70)
     expect(store.reserved).toBe(30)
     expect(store.total).toBe(100)
-    expect(store.currentPlan).toBe('pro')
   })
 
   it('createPayment возвращает {payment_id, confirmation_url} и не пишет error', async () => {
@@ -77,14 +78,21 @@ describe('useBillingStore', () => {
     expect(store.error).toBe('Платежи временно недоступны')
   })
 
-  it('fetchPlans парсит packages (вместо topup_packs)', async () => {
+  it('fetchPlans парсит packages, weights и video_pricing', async () => {
+    const videoPricing = {
+      text_base: 2,
+      auto_base: 3,
+      chars_per_credit: 3000,
+      auto_chars_per_slide: 600,
+    }
     fetchMock.mockResolvedValue({
       weights: { vision_analyze: 3, quiz_generate: 2 },
-      plans: { free: { monthly_allowance: 0, onetime_credits: 10, price_rub: 0 } },
+      plans: { free: { monthly_allowance: 0, onetime_credits: 0, price_rub: 0 } },
       packages: {
-        pack_50: { credits: 50, price_rub: 490 },
-        pack_200: { credits: 200, price_rub: 1690 },
+        pack_50: { credits: 50, price_rub: 190 },
+        pack_200: { credits: 200, price_rub: 590 },
       },
+      video_pricing: videoPricing,
     })
 
     const store = await loadStore()
@@ -92,11 +100,11 @@ describe('useBillingStore', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('/billing/plans')
     expect(store.packages).toEqual({
-      pack_50: { credits: 50, price_rub: 490 },
-      pack_200: { credits: 200, price_rub: 1690 },
+      pack_50: { credits: 50, price_rub: 190 },
+      pack_200: { credits: 200, price_rub: 590 },
     })
     expect(store.weights).toEqual({ vision_analyze: 3, quiz_generate: 2 })
-    expect(store.plans.free).toEqual({ monthly_allowance: 0, onetime_credits: 10, price_rub: 0 })
+    expect(store.videoPricing).toEqual(videoPricing)
   })
 
   it('fetchPayment возвращает платёж', async () => {

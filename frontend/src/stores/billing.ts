@@ -1,10 +1,18 @@
 import { defineStore } from 'pinia'
 
+export interface TrialState {
+  lectures_used: number
+  lectures_limit: number
+  quizzes_used: number
+  quizzes_limit: number
+}
+
 export interface BalanceState {
   balance: number
   reserved: number
   available: number
   plan: string
+  trial?: TrialState | null
 }
 
 export interface Transaction {
@@ -27,6 +35,13 @@ export interface CreditPackage {
   price_rub: number
 }
 
+export interface VideoPricing {
+  text_base: number
+  auto_base: number
+  chars_per_credit: number
+  auto_chars_per_slide: number
+}
+
 export interface PaymentInfo {
   id: string
   package_key: string
@@ -40,6 +55,7 @@ interface PlansResponse {
   weights: Record<string, number>
   plans: Record<string, PlanConfig>
   packages: Record<string, CreditPackage>
+  video_pricing: VideoPricing
 }
 
 export const useBillingStore = defineStore('billing', () => {
@@ -50,6 +66,7 @@ export const useBillingStore = defineStore('billing', () => {
   const weights = ref<Record<string, number>>({})
   const plans = ref<Record<string, PlanConfig>>({})
   const packages = ref<Record<string, CreditPackage>>({})
+  const videoPricing = ref<VideoPricing | null>(null)
   const payments = ref<PaymentInfo[]>([])
 
   const loadingBalance = ref(false)
@@ -94,8 +111,9 @@ export const useBillingStore = defineStore('billing', () => {
       weights.value = res.weights
       plans.value = res.plans
       packages.value = res.packages
+      videoPricing.value = res.video_pricing
     } catch (e: any) {
-      error.value = e?.data?.detail ?? 'Не удалось загрузить тарифы'
+      error.value = e?.data?.detail ?? 'Не удалось загрузить данные о ценах'
     } finally {
       loadingPlans.value = false
     }
@@ -147,6 +165,7 @@ export const useBillingStore = defineStore('billing', () => {
     weights,
     plans,
     packages,
+    videoPricing,
     payments,
     loadingBalance,
     loadingTx,
