@@ -1,63 +1,55 @@
-<script setup lang="ts">
-import { Zap, Clock, Monitor, Sparkles } from 'lucide-vue-next'
-
-const vReveal = useScrollReveal()
-
-// Static placeholders describing the product capability — no client/usage claims.
-const metrics = [
-  { icon: Clock, value: '2–5 мин', label: 'на сборку одной видеолекции' },
-  { icon: Zap, value: '10×', label: 'экономия времени против ручной записи' },
-  { icon: Monitor, value: '1080p', label: 'HD-видео с синхронной озвучкой' },
-  { icon: Sparkles, value: 'PPTX → MP4', label: 'полностью автоматический конвейер' },
-]
-</script>
-
+<!-- Stat banner (design_handoff_edllm). Numbers count up when the banner scrolls
+     into view (useLandingMotion reads data-from/data-to/data-suffix on .big).
+     Static placeholders describing product capability — no usage claims. -->
 <template>
-  <section class="px-6 py-12 max-w-5xl mx-auto">
-    <div
-      v-reveal
-      class="relative overflow-hidden rounded-3xl bg-gradient-to-br from-violet-700 via-violet-600 to-indigo-600 p-8 md:p-10 text-white shadow-hero"
-    >
-      <div aria-hidden="true" class="banner-sheen pointer-events-none absolute inset-0"></div>
-      <p class="relative text-center text-sm font-medium text-white/70">
-        Создано для преподавателей, методистов и онлайн-школ
-      </p>
-      <div class="relative mt-8 grid grid-cols-2 lg:grid-cols-4 gap-8">
-        <div v-for="(m, i) in metrics" :key="i" class="text-center">
-          <div class="mx-auto mb-3 grid h-11 w-11 place-items-center rounded-xl bg-white/15">
-            <component :is="m.icon" class="h-5 w-5" />
+  <section class="section-pad" style="padding-top: 20px">
+    <div class="wrap">
+      <div class="banner-wrap reveal">
+        <div class="banner">
+          <div class="blabel">Создано для преподавателей, методистов и онлайн-школ</div>
+          <div class="stats">
+            <div class="stat">
+              <div class="sic">
+                <svg class="icon" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="#fff" stroke-width="2" />
+                  <path d="M12 7v5l3.5 2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <div class="big" data-from="0" data-to="2" data-suffix="–5 мин">2–5 мин</div>
+              <div class="cap">на сборку одной видеолекции</div>
+            </div>
+            <div class="stat">
+              <div class="sic">
+                <svg class="icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M13 3 4 14h6l-1 7 9-11h-6z" stroke="#fff" stroke-width="2" stroke-linejoin="round" />
+                </svg>
+              </div>
+              <div class="big" data-from="0" data-to="10" data-suffix="×">10×</div>
+              <div class="cap">экономия времени против ручной записи</div>
+            </div>
+            <div class="stat">
+              <div class="sic">
+                <svg class="icon" viewBox="0 0 24 24" fill="none">
+                  <rect x="3" y="5" width="18" height="12" rx="2" stroke="#fff" stroke-width="2" />
+                  <path d="M8 21h8" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+                </svg>
+              </div>
+              <div class="big" data-from="0" data-to="1080" data-suffix="p">1080p</div>
+              <div class="cap">HD-видео с синхронной озвучкой</div>
+            </div>
+            <div class="stat">
+              <div class="sic">
+                <svg class="icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M5 4v3m0 13v-3m0 0a5 5 0 0 0 5-5m9-3v3m0 13v-3M14 7a5 5 0 0 1 5 5" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+                  <path d="M5 14a3 3 0 0 1 0-6m14 8a3 3 0 0 0 0-6" stroke="#fff" stroke-width="2" stroke-linecap="round" />
+                </svg>
+              </div>
+              <div class="big" style="font-size: clamp(24px, 2.7vw, 34px)">PPTX → MP4</div>
+              <div class="cap">полностью автоматический конвейер</div>
+            </div>
           </div>
-          <div class="text-2xl md:text-3xl font-semibold leading-none tabular-nums">{{ m.value }}</div>
-          <div class="mt-1.5 text-xs text-white/75 leading-snug">{{ m.label }}</div>
         </div>
       </div>
     </div>
   </section>
 </template>
-
-<style scoped>
-/* Slow diagonal sheen gliding across the saturated violet stats banner. Sits
-   behind the numbers (which get `relative`); low-opacity white, no contrast hit. */
-.banner-sheen {
-  background: linear-gradient(
-    115deg,
-    transparent 30%,
-    rgba(255, 255, 255, 0.12) 48%,
-    rgba(255, 255, 255, 0.18) 50%,
-    rgba(255, 255, 255, 0.12) 52%,
-    transparent 70%
-  );
-  background-size: 250% 100%;
-  animation: banner-sheen 9s ease-in-out infinite;
-}
-@keyframes banner-sheen {
-  0% { background-position: 150% 0; }
-  100% { background-position: -150% 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .banner-sheen {
-    animation: none;
-    opacity: 0;
-  }
-}
-</style>

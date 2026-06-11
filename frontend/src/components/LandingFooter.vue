@@ -1,77 +1,47 @@
-<script setup lang="ts">
-import { GraduationCap, ArrowUpRight } from 'lucide-vue-next'
-
-const year = new Date().getFullYear()
-
-const nav = {
-  product: [
-    { label: 'Как это работает', href: '#how' },
-    { label: 'Зачем нужно', href: '#features' },
-    { label: 'Тарифы', href: '#pricing' },
-  ],
-  account: [
-    { label: 'Создать аккаунт', to: '/register' },
-    { label: 'Войти', to: '/login' },
-  ],
-}
-</script>
-
+<!-- Footer (design_handoff_edllm). Brand + Продукт (in-page anchors) +
+     Аккаунт (auth routes) + bottom bar. -->
 <template>
-  <footer class="relative overflow-hidden border-t border-violet-100 bg-gradient-to-b from-white to-violet-50/50">
-    <!-- decorative glow -->
-    <div class="pointer-events-none absolute -top-24 left-1/2 h-48 w-[640px] -translate-x-1/2 rounded-full bg-violet-300/20 blur-3xl"></div>
-
-    <div class="relative mx-auto max-w-6xl px-6 py-14">
-      <div class="grid grid-cols-2 gap-10 md:grid-cols-[1.6fr_1fr_1fr]">
-        <!-- brand -->
-        <div class="col-span-2 md:col-span-1">
-          <NuxtLink to="/" class="inline-flex items-center gap-2.5">
-            <div class="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-violet-600 to-purple-500 shadow-sm">
-              <GraduationCap class="h-5 w-5 text-white" />
-            </div>
-            <span class="bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-lg font-semibold text-transparent">
-              Edllm
+  <footer>
+    <div class="wrap">
+      <div class="foot">
+        <div class="brandcol">
+          <NuxtLink class="brand" to="/">
+            <span class="mark">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3 2 8l10 5 8-4v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M6 11v4c0 1.2 2.7 3 6 3s6-1.8 6-3v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
             </span>
+            Edllm
           </NuxtLink>
-          <p class="mt-4 max-w-xs text-sm leading-relaxed text-gray-500">
+          <p class="desc">
             Превращаем презентации в озвученные видеолекции автоматически — ИИ-анализ слайдов и нейросетевая озвучка.
           </p>
         </div>
-
-        <!-- product nav -->
-        <nav aria-label="Продукт">
-          <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-400">Продукт</h3>
-          <ul class="mt-4 space-y-3">
-            <li v-for="item in nav.product" :key="item.href">
-              <a :href="item.href" class="text-sm text-gray-600 transition-colors hover:text-violet-700">
-                {{ item.label }}
-              </a>
-            </li>
+        <div>
+          <h5>Продукт</h5>
+          <ul>
+            <li><a href="#how">Как это работает</a></li>
+            <li><a href="#why">Зачем нужно</a></li>
+            <li><a href="#pricing">Тарифы</a></li>
           </ul>
-        </nav>
-
-        <!-- account nav -->
-        <nav aria-label="Аккаунт">
-          <h3 class="text-xs font-semibold uppercase tracking-wider text-gray-400">Аккаунт</h3>
-          <ul class="mt-4 space-y-3">
-            <li v-for="item in nav.account" :key="item.to">
-              <NuxtLink
-                :to="item.to"
-                class="group inline-flex items-center gap-1 text-sm text-gray-600 transition-colors hover:text-violet-700"
-              >
-                {{ item.label }}
-                <ArrowUpRight class="h-3.5 w-3.5 opacity-0 transition-opacity group-hover:opacity-100" />
-              </NuxtLink>
-            </li>
+        </div>
+        <div>
+          <h5>Аккаунт</h5>
+          <ul>
+            <li><NuxtLink to="/register">Создать аккаунт</NuxtLink></li>
+            <li><NuxtLink to="/login">Войти</NuxtLink></li>
           </ul>
-        </nav>
+        </div>
       </div>
-
-      <!-- bottom bar -->
-      <div class="mt-12 flex flex-col items-center justify-between gap-3 border-t border-violet-100 pt-6 sm:flex-row">
-        <p class="text-xs text-gray-400">© {{ year }} Edllm. Все права защищены.</p>
-        <p class="text-xs text-gray-400">PPTX → MP4 · нейросетевая озвучка</p>
+      <div class="foot-bottom">
+        <span>© {{ year }} Edllm. Все права защищены.</span>
+        <span>PPTX → MP4 · нейросетевая озвучка</span>
       </div>
     </div>
   </footer>
 </template>
+
+<script setup lang="ts">
+const year = new Date().getFullYear()
+</script>

@@ -1,124 +1,115 @@
 <script setup lang="ts">
-import { Coins, Film, RefreshCw, PiggyBank, Gift, ArrowRight } from 'lucide-vue-next'
-
+// Pricing values come from useLandingPricing (mirrors backend constants) so the
+// numbers can't drift from the authenticated tariffs page; the design markup is
+// reproduced around them. The 3rd pack (500 кр.) is the highlighted "best" one.
 const { packs, operationCosts, videoPricing, creditFacts, trial } = useLandingPricing()
-const vReveal = useScrollReveal()
-
-const factIcons = [Coins, RefreshCw, PiggyBank]
 </script>
 
 <template>
-  <section id="pricing" class="px-6 py-20 max-w-6xl mx-auto scroll-mt-20">
-    <div v-reveal class="text-center max-w-2xl mx-auto">
-      <span class="text-xs font-semibold uppercase tracking-wider text-violet-600">Тарифы</span>
-      <h2 class="mt-2 text-2xl md:text-3xl font-semibold tracking-tight">Оплата по кредитам — без подписок</h2>
-      <p class="mt-3 text-gray-600">
-        Покупаете кредиты разово и тратите их только на ИИ-операции. Остаток не сгорает.
-      </p>
-    </div>
-
-    <!-- free trial banner -->
-    <div
-      v-reveal
-      class="mt-10 flex flex-col items-center gap-3 rounded-2xl border border-violet-100 bg-violet-50/60 px-6 py-4 text-center sm:flex-row sm:text-left"
-    >
-      <div class="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-violet-700 shadow-sm ring-1 ring-violet-100">
-        <Gift class="h-5 w-5" />
+  <section class="section-pad" id="pricing">
+    <div class="wrap">
+      <div class="section-head center reveal">
+        <span class="eyebrow">Тарифы</span>
+        <h2 class="h2">Оплата по кредитам — без подписок</h2>
+        <p class="sub">Покупаете кредиты разово и тратите их только на ИИ-операции. Остаток не сгорает.</p>
       </div>
-      <p class="text-sm text-gray-700">
-        <span class="font-semibold text-gray-900">Старт бесплатно.</span>
-        Триал на {{ trial.lectures }} лекции и {{ trial.quizzes }} теста — без карты, дальше операции
-        оплачиваются кредитами.
-      </p>
-    </div>
 
-    <!-- credit packs -->
-    <div class="mt-5 grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <div
-        v-for="(p, i) in packs"
-        :key="p.credits"
-        v-reveal
-        :data-reveal-delay="i * 60"
-        class="rounded-2xl border border-violet-100 bg-white p-5 shadow-soft transition-all duration-200 hover:-translate-y-1 hover:shadow-soft-hover"
-      >
-        <div class="inline-flex items-center gap-1.5 text-xl font-semibold tabular-nums text-gray-900">
-          <Coins class="h-4 w-4 text-violet-500" />{{ p.credits }} кр.
+      <div class="trial reveal">
+        <span class="gift">
+          <svg class="icon" viewBox="0 0 24 24" fill="none">
+            <rect x="4" y="9" width="16" height="11" rx="1.5" stroke="currentColor" stroke-width="2" />
+            <path d="M4 13h16M12 9v11M12 9c-2 0-3.5-1-3.5-2.5S9.5 4 12 6c2.5-2 3.5-1 3.5.5S14 9 12 9z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+          </svg>
+        </span>
+        <span>
+          <b>Старт бесплатно.</b> Триал на {{ trial.lectures }} лекции и {{ trial.quizzes }} теста — без карты,
+          дальше операции оплачиваются кредитами.
+        </span>
+      </div>
+
+      <div class="packs">
+        <div
+          v-for="(p, i) in packs"
+          :key="p.credits"
+          class="pack reveal"
+          :class="{ best: i === 2 }"
+        >
+          <div v-if="i === 2" class="ribbon">Выгодно</div>
+          <div class="pk-top"><span class="tag">◆</span> {{ p.credits }} кр.</div>
+          <div class="price">{{ p.price }}</div>
+          <div class="per">≈ {{ p.perCredit }} за кредит</div>
         </div>
-        <div class="mt-1 text-lg font-medium text-gray-900">{{ p.price }}</div>
-        <div class="mt-0.5 text-xs text-gray-400">≈ {{ p.perCredit }} за кредит</div>
       </div>
-    </div>
-    <p class="mt-3 text-center text-xs text-gray-400">
-      Кредиты покупаются в личном кабинете после регистрации. Оплата картой через ЮKassa.
-    </p>
+      <p class="pay-note reveal">Кредиты покупаются в личном кабинете после регистрации. Оплата картой через ЮKassa.</p>
 
-    <!-- operation costs + credit mechanics -->
-    <div class="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-5">
-      <div v-reveal class="rounded-2xl border border-violet-100 bg-white p-6 shadow-soft md:p-8">
-        <h3 class="font-semibold text-gray-900">Стоимость операций</h3>
-        <p class="mt-1 text-xs text-gray-500">Сколько кредитов списывается за каждое действие.</p>
-
-        <div class="mt-4 rounded-xl border border-violet-100 bg-violet-50/50 p-4 text-xs leading-relaxed text-gray-600">
-          <div class="inline-flex items-center gap-1.5 font-medium text-gray-800">
-            <Film class="h-3.5 w-3.5 text-violet-500" />Видеолекция
+      <div class="price-grid">
+        <div class="pbox reveal">
+          <h3>Стоимость операций</h3>
+          <p class="pdesc">Сколько кредитов списывается за каждое действие.</p>
+          <div class="innerbox">
+            <div class="ititle"><span class="d"></span> Видеолекция</div>
+            <p>
+              Текст-режим: {{ videoPricing.textBase }} кр. + 1 кр. за слайд + 1 кр. за каждые
+              {{ videoPricing.charsPerCredit }} знаков озвучки.<br />
+              Авто-режим: {{ videoPricing.autoBase }} кр. + 1 кр. за слайд
+              (≈ {{ videoPricing.autoCharsPerSlide }} знаков на слайд).<br />
+              <template v-for="(ex, i) in videoPricing.examples" :key="ex.slides">
+                <span v-if="i"> · </span>{{ ex.slides }} слайдов ≈ {{ ex.lo }}–{{ ex.hi }} кр.
+              </template>
+            </p>
           </div>
-          <div class="mt-1.5">
-            Текст-режим: {{ videoPricing.textBase }} кр. + 1 кр. за слайд + 1 кр. за каждые
-            {{ videoPricing.charsPerCredit }} знаков озвучки.
-          </div>
-          <div>
-            Авто-режим: {{ videoPricing.autoBase }} кр. + 1 кр. за слайд
-            (≈ {{ videoPricing.autoCharsPerSlide }} знаков на слайд).
-          </div>
-          <div class="mt-1 text-gray-500">
-            <template v-for="(ex, i) in videoPricing.examples" :key="ex.slides">
-              <span v-if="i"> · </span>{{ ex.slides }} слайдов ≈ {{ ex.lo }}–{{ ex.hi }} кр.
-            </template>
+          <div v-for="op in operationCosts" :key="op.label" class="prow">
+            <span>{{ op.label }}</span>
+            <span v-if="op.free" class="free">бесплатно</span>
+            <span v-else class="cr">{{ op.cost }} кр.</span>
           </div>
         </div>
 
-        <ul class="mt-4 divide-y divide-gray-100">
-          <li
-            v-for="op in operationCosts"
-            :key="op.label"
-            class="flex items-center justify-between gap-4 py-3"
-          >
-            <span class="text-sm text-gray-600">{{ op.label }}</span>
-            <span
-              class="shrink-0 rounded-lg px-2.5 py-1 text-sm font-semibold tabular-nums"
-              :class="op.free ? 'bg-emerald-100 text-emerald-700' : 'bg-violet-50 text-violet-700'"
-            >
-              {{ op.free ? 'бесплатно' : `${op.cost} кр.` }}
-            </span>
-          </li>
-        </ul>
+        <div class="pbox reveal">
+          <h3>Как работают кредиты</h3>
+          <p class="pdesc">Прозрачная модель: платите только за результат.</p>
+          <div class="howlist" style="margin-top: 18px">
+            <div class="how">
+              <span class="hic">
+                <svg class="icon" viewBox="0 0 24 24" fill="none">
+                  <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" />
+                  <path d="M9.5 9.5a2.5 2.5 0 1 1 3.2 2.4c-.6.2-.7.5-.7 1.1m0 2.5h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                </svg>
+              </span>
+              <div>
+                <h4>{{ creditFacts[0].title }}</h4>
+                <p>{{ creditFacts[0].body }}</p>
+              </div>
+            </div>
+            <div class="how">
+              <span class="hic">
+                <svg class="icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M4 7a8 8 0 0 1 14-2m2-2v4h-4M20 17a8 8 0 0 1-14 2m-2 2v-4h4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
+              <div>
+                <h4>{{ creditFacts[1].title }}</h4>
+                <p>{{ creditFacts[1].body }}</p>
+              </div>
+            </div>
+            <div class="how">
+              <span class="hic">
+                <svg class="icon" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 21s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 11c0 5.6-7 10-7 10z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                </svg>
+              </span>
+              <div>
+                <h4>{{ creditFacts[2].title }}</h4>
+                <p>{{ creditFacts[2].body }}</p>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div v-reveal :data-reveal-delay="90" class="rounded-2xl border border-violet-100 bg-gradient-to-br from-violet-50 to-white p-6 shadow-soft md:p-8">
-        <h3 class="font-semibold text-gray-900">Как работают кредиты</h3>
-        <ul class="mt-5 space-y-5">
-          <li v-for="(fact, i) in creditFacts" :key="fact.title" class="flex gap-3.5">
-            <div class="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-white text-violet-700 shadow-sm ring-1 ring-violet-100">
-              <component :is="factIcons[i]" class="h-[18px] w-[18px]" />
-            </div>
-            <div>
-              <div class="text-sm font-medium text-gray-900">{{ fact.title }}</div>
-              <p class="mt-0.5 text-sm leading-relaxed text-gray-500">{{ fact.body }}</p>
-            </div>
-          </li>
-        </ul>
-      </div>
+      <p class="try-line reveal">
+        Готовы попробовать? <NuxtLink to="/register">Создать аккаунт →</NuxtLink>
+      </p>
     </div>
-
-    <p class="mt-8 text-center text-sm text-gray-500">
-      Готовы попробовать?
-      <NuxtLink
-        to="/register"
-        class="group inline-flex items-center gap-1 rounded font-medium text-violet-700 hover:text-violet-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-600 focus-visible:ring-offset-2"
-      >
-        Создать аккаунт
-        <ArrowRight class="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-      </NuxtLink>
-    </p>
   </section>
 </template>

@@ -1,67 +1,73 @@
-<script setup lang="ts">
-import { Upload, Brain, Volume2, GraduationCap } from 'lucide-vue-next'
-
-const vReveal = useScrollReveal()
-
-const steps = [
-  { icon: Upload, title: 'Загрузите PPTX', desc: 'Презентация и текст доклада. Никаких шаблонов и ручных настроек.' },
-  { icon: Brain, title: 'ИИ-анализ слайдов', desc: 'ИИ распознаёт и осмысляет каждый слайд и готовит закадровый текст.' },
-  { icon: Volume2, title: 'Нейросетевая озвучка', desc: 'Синтез речи проговаривает текст естественным голосом — без диктора.' },
-  { icon: GraduationCap, title: 'Видеоурок студентам', desc: 'Готовое MP4 публикуется студентам — с тестами и автопроверкой.' },
-]
-</script>
-
+<!-- "От PPTX до видеоурока" — the conveyor pipeline (design_handoff_edllm).
+     Conveyor line + traveling pulse-dot are CSS; card micro-tilt is wired by
+     useLandingMotion. Inline SVGs are the design's exact icons. -->
 <template>
-  <section id="how" class="px-6 py-20 max-w-6xl mx-auto scroll-mt-20">
-    <div v-reveal class="text-center max-w-2xl mx-auto">
-      <span class="text-xs font-semibold uppercase tracking-wider text-violet-600">Как это работает</span>
-      <h2 class="mt-2 text-2xl md:text-3xl font-semibold tracking-tight">От PPTX до видеоурока</h2>
-      <p class="mt-3 text-gray-600">Четыре шага от файла презентации до опубликованной видеолекции.</p>
-    </div>
+  <section class="section-pad" id="how">
+    <div class="wrap">
+      <div class="section-head center reveal">
+        <span class="eyebrow">Как это работает</span>
+        <h2 class="h2">От PPTX до видеоурока</h2>
+        <p class="sub">Четыре шага от файла презентации до опубликованной видеолекции.</p>
+      </div>
+      <div class="steps">
+        <div class="pulse-dot"></div>
 
-    <ol class="mt-12 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-      <li
-        v-for="(s, i) in steps"
-        :key="i"
-        v-reveal
-        :data-reveal-delay="i * 70"
-        class="group relative rounded-2xl border border-violet-100 bg-white p-6 shadow-soft transition-all duration-200 hover:-translate-y-1 hover:ring-1 hover:ring-violet-200 hover:shadow-[0_10px_34px_rgba(124,58,237,0.18)]"
-      >
-        <div class="flex items-center justify-between">
-          <div class="grid h-11 w-11 place-items-center rounded-xl bg-violet-100 text-violet-700 transition-colors group-hover:bg-violet-600 group-hover:text-white">
-            <component :is="s.icon" class="h-5 w-5" />
+        <div class="step reveal">
+          <div class="step-top">
+            <span class="ic">
+              <svg class="icon" viewBox="0 0 24 24" fill="none">
+                <path d="M12 16V4m0 0L7 9m5-5 5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M5 19h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="num">01</span>
           </div>
-          <span class="text-3xl font-semibold leading-none text-violet-100 transition-colors group-hover:text-violet-300">0{{ i + 1 }}</span>
+          <h3>Загрузите PPTX</h3>
+          <p>Презентация и текст доклада. Никаких шаблонов и ручных настроек.</p>
         </div>
-        <h3 class="mt-4 font-semibold text-gray-900">{{ s.title }}</h3>
-        <p class="mt-1.5 text-sm leading-relaxed text-gray-500">{{ s.desc }}</p>
 
-        <span
-          v-if="i < steps.length - 1"
-          aria-hidden="true"
-          class="step-connector absolute -right-[1.375rem] top-1/2 hidden h-px w-7 -translate-y-1/2 lg:block"
-        ></span>
-      </li>
-    </ol>
+        <div class="step reveal">
+          <div class="step-top">
+            <span class="ic">
+              <svg class="icon" viewBox="0 0 24 24" fill="none">
+                <circle cx="12" cy="12" r="3.2" stroke="currentColor" stroke-width="2" />
+                <path d="M12 5V3m0 18v-2M5 12H3m18 0h-2M6.5 6.5 5 5m14 14-1.5-1.5M17.5 6.5 19 5M5 19l1.5-1.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="num">02</span>
+          </div>
+          <h3>ИИ-анализ слайдов</h3>
+          <p>ИИ распознаёт и осмысляет каждый слайд и готовит закадровый текст.</p>
+        </div>
+
+        <div class="step reveal">
+          <div class="step-top">
+            <span class="ic">
+              <svg class="icon" viewBox="0 0 24 24" fill="none">
+                <path d="M4 9v6h4l5 4V5L8 9H4z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+                <path d="M17 8.5a4 4 0 0 1 0 7M19.5 6a7 7 0 0 1 0 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </span>
+            <span class="num">03</span>
+          </div>
+          <h3>Нейросетевая озвучка</h3>
+          <p>Синтез речи проговаривает текст естественным голосом — без диктора.</p>
+        </div>
+
+        <div class="step reveal">
+          <div class="step-top">
+            <span class="ic">
+              <svg class="icon" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3 2 8l10 5 8-4v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                <path d="M6 11v4c0 1.2 2.7 3 6 3s6-1.8 6-3v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </span>
+            <span class="num">04</span>
+          </div>
+          <h3>Видеоурок студентам</h3>
+          <p>Готовое MP4 публикуется студентам — с тестами и автопроверкой.</p>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
-
-<style scoped>
-/* Animated gradient connector threading the four steps (desktop only — lg:block
-   in the template — so it never causes mobile overflow). */
-.step-connector {
-  background: linear-gradient(90deg, rgba(167, 139, 250, 0.25), rgba(167, 139, 250, 0.9), rgba(167, 139, 250, 0.25));
-  background-size: 200% 100%;
-  animation: connector-flow 3.2s linear infinite;
-}
-@keyframes connector-flow {
-  0% { background-position: 200% 0; }
-  100% { background-position: -200% 0; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .step-connector {
-    animation: none;
-    background: rgba(167, 139, 250, 0.5);
-  }
-}
-</style>

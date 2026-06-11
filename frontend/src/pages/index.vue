@@ -1,5 +1,25 @@
 <script setup lang="ts">
-definePageMeta({ layout: 'bare', middleware: ['guest'] })
+// Pixel rebuild of design_handoff_edllm. The whole landing lives under a single
+// `.ldg` root so the design's namespaced stylesheet (assets/landing.css) applies
+// without leaking generic class names into the rest of the app. We opt out of the
+// app layout (no AppHeader) — the landing ships its own LandingNav.
+//
+// CSS + the Manrope webfont are loaded here at the page level (not in
+// nuxt.config) so they ship only with the landing route AND so they hot-reload
+// in dev — only `src/` is bind-mounted into the frontend container; nuxt.config
+// is image-baked, so config edits would need a rebuild to take effect.
+import '~/assets/landing.css'
+
+definePageMeta({ layout: false, middleware: ['guest'] })
+
+useHead({
+  link: [
+    {
+      rel: 'stylesheet',
+      href: 'https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap',
+    },
+  ],
+})
 
 useSeoMeta({
   title: 'Edllm — Видеолекции из презентаций за минуты',
@@ -14,44 +34,26 @@ useSeoMeta({
 // The landing is reached only by anonymous visitors — the `guest` middleware
 // redirects logged-in users to their dashboard — so all CTAs point at /register
 // and /login directly.
+const ldg = ref<HTMLElement | null>(null)
+useLandingMotion(ldg)
+
 onMounted(restoreScroll)
 </script>
 
 <template>
-  <div class="relative">
+  <div ref="ldg" class="ldg">
     <LandingBackdrop />
+    <LandingNav />
 
-    <LandingHero />
-    <LandingHeroVisual />
-    <LandingSteps />
-    <LandingFeatures />
-    <LandingMetrics />
-    <LandingPricing />
-    <LandingCta />
+    <main id="top">
+      <LandingHero />
+      <LandingSteps />
+      <LandingFeatures />
+      <LandingMetrics />
+      <LandingPricing />
+      <LandingCta />
+    </main>
+
     <LandingFooter />
   </div>
 </template>
-
-<style>
-/* Scroll-reveal for below-the-fold sections. The class is added by the
-   `v-reveal` directive (client only, skipped under reduced-motion); the media
-   query is a fallback so motion is never forced. */
-.reveal {
-  opacity: 0;
-  transform: translateY(16px);
-  transition:
-    opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1),
-    transform 0.6s cubic-bezier(0.22, 1, 0.36, 1);
-}
-.reveal-in {
-  opacity: 1;
-  transform: none;
-}
-@media (prefers-reduced-motion: reduce) {
-  .reveal {
-    opacity: 1 !important;
-    transform: none !important;
-    transition: none !important;
-  }
-}
-</style>
