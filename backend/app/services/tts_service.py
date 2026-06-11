@@ -13,10 +13,8 @@ import numpy as np
 from app.config import settings
 from app.constants import (
     POLZA_MAX_CHARS,
-    POLZA_OPENAI_DEFAULT_VOICE,
     POLZA_TTS_MAX_RETRIES,
-    POLZA_VOICE_MAP,
-    POLZA_VOICE_MAP_OPENAI,
+    POLZA_TTS_VOICES,
     SILERO_MAX_CHARS,
 )
 
@@ -51,7 +49,7 @@ _BLANK_LINES_RE = re.compile(r"\n{3,}")
 
 # LLM (qwen) occasionally leaks CJK characters into Russian narration
 # ("…мы должны产出 (выдать) уникальный продукт…"). Silero rejects them with
-# "Invalid XML format" → HTTP 500; polza/ElevenLabs tries to pronounce them
+# "Invalid XML format" → HTTP 500; polza (openai/tts-1) tries to pronounce them
 # mid-speech. Never pronounceable in our content — replace with a space.
 _CJK_RE = re.compile(
     r"[ᄀ-ᇿ"   # Hangul Jamo
@@ -166,7 +164,7 @@ def _concat_wav(paths: list[str], output_path: str) -> None:
 
 
 def _transcode_to_wav(audio: bytes, output_path: str) -> None:
-    """Convert provider audio (mp3 from polza/ElevenLabs) to 48 kHz mono 16-bit WAV.
+    """Convert provider audio (mp3 from polza/openai-tts) to 48 kHz mono 16-bit WAV.
 
     Uniform params across chunks are required by _concat_wav; 48 kHz matches
     Silero output so the downstream FFmpeg encode needs no resampling.
@@ -261,10 +259,10 @@ class TTSService:
         return output_path
 
     def _synthesize_polza(self, text: str, output_path: str, voice: str) -> str:
-        """Send text to polza.ai /audio/speech (ElevenLabs Turbo), chunking if long.
+        """Send text to polza.ai /audio/speech (openai/tts-1), chunking if long.
 
-        ElevenLabs models on polza return mp3 only (no response_format control),
-        so each chunk is transcoded to WAV before _concat_wav.
+        openai/tts-1 returns mp3, so each chunk is transcoded to WAV before
+        _concat_wav.
         """
         if not settings.POLZA_API_KEY:
             raise RuntimeError(
@@ -284,15 +282,12 @@ class TTSService:
         if len(chunks) > 1:
             logger.info("tts_splitting", chars=len(plain), chunks=len(chunks))
 
-        # OpenAI and ElevenLabs models on polza have disjoint voice catalogs —
-        # resolve the frontend (Silero) voice name against the active model's map.
-        if settings.POLZA_TTS_MODEL.startswith("openai/"):
-            voice_map = POLZA_VOICE_MAP_OPENAI
-            polza_voice = voice_map.get(voice, POLZA_OPENAI_DEFAULT_VOICE)
+        # The frontend sends an openai/tts-1 voice name directly; an unknown
+        # value falls back to the configured default (also a valid tts-1 voice).
+        if voice in POLZA_TTS_VOICES:
+            polza_voice = voice
         else:
-            voice_map = POLZA_VOICE_MAP
-            polza_voice = voice_map.get(voice, settings.POLZA_DEFAULT_VOICE)
-        if voice not in voice_map:
+            polza_voice = settings.POLZA_DEFAULT_VOICE
             logger.info("tts_polza_voice_fallback", requested=voice, used=polza_voice)
 
         tmp_paths: list[str] = []
@@ -326,20 +321,9 @@ class TTSService:
             "input": chunk,
             "voice": polza_voice,
         }
-        # language_code and the tuning sliders are ElevenLabs-only params —
-        # OpenAI models on polza reject unknown fields with 400.
-        if not settings.POLZA_TTS_MODEL.startswith("openai/"):
-            if settings.POLZA_LANGUAGE_CODE:
-                body["language_code"] = settings.POLZA_LANGUAGE_CODE
-            # Optional ElevenLabs voice tuning — sent only when set in .env.
-            for key, value in (
-                ("speed", settings.POLZA_TTS_SPEED),
-                ("stability", settings.POLZA_TTS_STABILITY),
-                ("similarity_boost", settings.POLZA_TTS_SIMILARITY),
-                ("style", settings.POLZA_TTS_STYLE),
-            ):
-                if value is not None:
-                    body[key] = value
+        # openai/tts-1 supports `speed` (0.25–4.0); sent only when set in .env.
+        if settings.POLZA_TTS_SPEED is not None:
+            body["speed"] = settings.POLZA_TTS_SPEED
 
         last_error = ""
         for attempt in range(POLZA_TTS_MAX_RETRIES + 1):

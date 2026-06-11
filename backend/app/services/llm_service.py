@@ -5,7 +5,7 @@ from typing import Any, Awaitable, Callable
 
 from openai import AsyncOpenAI
 
-from app.config import settings
+from app.config import provider_routing, settings
 from app.constants import (
     LLM_MAX_RETRIES,
     LLM_REQUEST_TIMEOUT_SECONDS,
@@ -125,6 +125,13 @@ class LLMService:
             max_retries=LLM_MAX_RETRIES,
         )
         self.model = settings.LLM_MODEL
+        self._provider_extra = provider_routing(settings.LLM_PROVIDER_ORDER)
+
+    def _apply_provider(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Inject the Polza provider-routing pin into a request, if configured."""
+        if self._provider_extra:
+            kwargs["extra_body"] = self._provider_extra
+        return kwargs
 
     @staticmethod
     def _strip_think(text: str) -> str:
@@ -164,7 +171,7 @@ class LLMService:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
 
-        response = await self.client.chat.completions.create(**kwargs)
+        response = await self.client.chat.completions.create(**self._apply_provider(kwargs))
         return self._strip_think(response.choices[0].message.content or "")
 
     async def _chat_json_validated[T](
@@ -330,7 +337,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             "temperature": settings.LLM_TEMPERATURE,
             "max_tokens": settings.LLM_MAX_TOKENS,
         }
-        response = await self.client.chat.completions.create(**kwargs)
+        response = await self.client.chat.completions.create(**self._apply_provider(kwargs))
         return self._strip_think(response.choices[0].message.content or "")
 
     async def refine_slide_narration(self, vision_text: str, model: str) -> str:
@@ -475,6 +482,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             "response_format": {"type": "json_object"},
         }
         # Bypass _chat to enforce max_tokens; retry on malformed once.
+        self._apply_provider(kwargs)
         last_error: str | None = None
         for attempt in range(2):
             response = await self.client.chat.completions.create(**kwargs)

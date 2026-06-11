@@ -33,6 +33,9 @@ def test_tts_cache_path_two_level_structure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr("app.tasks.video_pipeline.settings.STORAGE_PATH", str(tmp_path))
+    # Pin the provider so the filename suffix is deterministic regardless of the
+    # deployment's .env: silero uses the legacy unqualified name.
+    monkeypatch.setattr("app.tasks.video_pipeline.settings.TTS_PROVIDER", "silero")
     path = _tts_cache_path("<p>Привет</p>", "xenia")
     assert path is not None
     p = Path(path)

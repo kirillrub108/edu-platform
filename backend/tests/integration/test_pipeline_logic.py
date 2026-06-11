@@ -180,7 +180,7 @@ def test_generate_video_lesson_happy_path(
     lesson = _seed_lesson(sync_session, pptx_path=_seed_pptx_on_disk)
 
     result = generate_video_lesson.apply(
-        args=[str(lesson.id), lesson.pptx_path, "xenia"]
+        args=[str(lesson.id), lesson.pptx_path, "nova"]
     ).get()
     assert result["status"] == "ok"
     assert result["video_url"]
@@ -195,7 +195,7 @@ def test_generate_video_lesson_happy_path(
     assert lv.video_url == result["video_url"]
     assert str(lv.id) == result["video_id"]
     assert lv.is_published is False
-    assert lv.voice == "xenia"
+    assert lv.voice == "nova"
 
 
 def test_generate_video_lesson_marks_error_on_tts_failure(
@@ -249,7 +249,7 @@ def test_generate_video_lesson_uses_llm_fallback_on_llm_error(
     lesson = _seed_lesson(sync_session, pptx_path=_seed_pptx_on_disk)
 
     result = generate_video_lesson.apply(
-        args=[str(lesson.id), lesson.pptx_path, "xenia"]
+        args=[str(lesson.id), lesson.pptx_path, "nova"]
     ).get()
     assert result["status"] == "ok"
 

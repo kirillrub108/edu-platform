@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 from openai import AsyncOpenAI
 
-from app.config import settings
+from app.config import provider_routing, settings
 from app.constants import (
     VISION_MAX_RETRIES,
     VISION_REQUEST_TIMEOUT_SECONDS,
@@ -159,6 +159,7 @@ class VisionAnalysisService:
                 max_retries=VISION_MAX_RETRIES,
             )
             self._model = settings.VISION_MODEL
+            self._provider_extra = provider_routing(settings.VISION_PROVIDER_ORDER)
         elif self.provider == "yandex":
             self._ollama_client = None
             self._model = settings.YANDEX_VISION_MODEL
@@ -359,11 +360,15 @@ class VisionAnalysisService:
     ) -> str:
         assert self._ollama_client is not None
         kwargs: dict[str, Any] = {}
+        extra_body: dict[str, Any] = {}
         if settings.VISION_REASONING_DISABLED:
             # Polza/OpenRouter switch: skip hidden reasoning tokens (billed as
             # completion and ~halving per-slide latency). Sent only when the
             # flag is on — plain Ollama/Yandex must not receive unknown fields.
-            kwargs["extra_body"] = {"reasoning": {"enabled": False}}
+            extra_body["reasoning"] = {"enabled": False}
+        extra_body.update(self._provider_extra)  # Polza upstream-provider pin, if set
+        if extra_body:
+            kwargs["extra_body"] = extra_body
         resp = await self._ollama_client.chat.completions.create(
             model=self._model,
             messages=[

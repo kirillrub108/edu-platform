@@ -118,10 +118,9 @@ def _tts_cache_path(ssml: str, voice: str) -> str | None:
         os.makedirs(cache_dir, exist_ok=True)
         # Non-default providers get a provider-qualified filename so the same
         # ssml+voice key never returns audio synthesised by another provider.
-        # polza additionally keys by model: the frontend voice name resolves to
-        # a different actual voice per model family (Sarah vs nova), so
-        # switching models must not reuse old audio — and switching back
-        # revalidates the previous model's cache automatically.
+        # polza additionally keys by model so switching the TTS model never
+        # reuses audio from a different one (and switching back revalidates the
+        # old cache automatically).
         # Silero keeps the legacy unqualified name — existing caches stay valid.
         if settings.TTS_PROVIDER == "polza":
             suffix = f".polza.{settings.POLZA_TTS_MODEL.replace('/', '-')}"

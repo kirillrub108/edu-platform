@@ -41,6 +41,12 @@ class Settings(BaseSettings):
     # actually emits more. The SSML split (_chat) sets no max_tokens on purpose,
     # so a many-slide chunk array can't be truncated by this setting.
     LLM_MAX_TOKENS: int = 4096
+    # Polza/OpenRouter upstream-provider pin for the text model. Comma-separated
+    # display names (e.g. "StreamLake" or "StreamLake,SiliconFlow"); the first
+    # available serves the request, allow_fallbacks rolls to the next on
+    # outage/incompatibility. Blank → the gateway chooses. Empty by default so
+    # plain Ollama (the local default) never receives the unknown field.
+    LLM_PROVIDER_ORDER: str = ""
 
     # Model used to refine vision output during single-slide regeneration.
     # Defaults to the same text LLM as LLM_MODEL; set independently if you
@@ -57,6 +63,11 @@ class Settings(BaseSettings):
     # default: the param is not part of the core OpenAI schema, so it is only
     # sent when explicitly enabled for a provider that understands it (Polza).
     VISION_REASONING_DISABLED: bool = False
+    # Polza/OpenRouter upstream-provider pin for the vision model — same format
+    # and semantics as LLM_PROVIDER_ORDER. allow_fallbacks is essential here: not
+    # every provider under a multimodal model actually accepts image_url, so a
+    # blind pin could break generation; the fallback rolls to a working one.
+    VISION_PROVIDER_ORDER: str = ""
 
     # Yandex Vision (prod)
     YANDEX_VISION_MODEL: str = "yandexgpt-pro"
@@ -76,26 +87,18 @@ class Settings(BaseSettings):
     SILERO_TTS_URL: str = "http://silero-tts:9898"
     SILERO_TTS_VOICE: str = "xenia"
 
-    # polza.ai TTS gateway (OpenAI-compatible POST /audio/speech, ElevenLabs
-    # models) — active when TTS_PROVIDER=polza. The endpoint returns JSON with
-    # base64 audio or a CDN URL; ElevenLabs models have no output-format
-    # control (mp3 only), so tts_service transcodes to WAV via ffmpeg.
+    # polza.ai TTS gateway (OpenAI-compatible POST /audio/speech) — active when
+    # TTS_PROVIDER=polza, running openai/tts-1. The endpoint returns JSON with
+    # base64 audio (mp3), which tts_service transcodes to WAV via ffmpeg.
     POLZA_API_KEY: str = ""
-    POLZA_BASE_URL: str = "https://polza.ai/api/v1"
-    POLZA_TTS_MODEL: str = "elevenlabs/text-to-speech-turbo-2-5"
-    # ElevenLabs premade voice name used when the requested voice has no
-    # POLZA_VOICE_MAP entry (constants.py).
-    POLZA_DEFAULT_VOICE: str = "Rachel"
-    # ISO 639-1 pronunciation hint (Turbo v2.5 only). Empty = model autodetect.
-    POLZA_LANGUAGE_CODE: str = "ru"
-    # Optional ElevenLabs voice tuning (ползунки в кабинете polza: скорость /
-    # стабильность / схожесть / экспрессия). None = параметр не отправляется,
-    # действуют дефолты провайдера. Диапазоны по докам polza:
-    # speed 0.7–1.2, остальные 0.0–1.0.
+    POLZA_BASE_URL: str = "https://api.polza.ai/v1"
+    POLZA_TTS_MODEL: str = "openai/tts-1"
+    # Fallback voice when the requested one is not in POLZA_TTS_VOICES
+    # (constants.py). Must itself be a valid openai/tts-1 voice.
+    POLZA_DEFAULT_VOICE: str = "nova"
+    # Optional speech speed for openai/tts-1 (0.25–4.0). None = not sent, the
+    # provider default (1.0) applies. Tuning lives here, not inline.
     POLZA_TTS_SPEED: float | None = None
-    POLZA_TTS_STABILITY: float | None = None
-    POLZA_TTS_SIMILARITY: float | None = None
-    POLZA_TTS_STYLE: float | None = None
     POLZA_TIMEOUT: float = 120.0
     # TTS thread-pool size when TTS_PROVIDER=polza. Silero's TTS_WORKERS=4 is
     # tied to the local container's thread count; the cloud gateway is bounded
@@ -178,3 +181,19 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+def provider_routing(order: str) -> dict:
+    """OpenRouter-style provider-routing fragment for the Polza gateway.
+
+    `order` is a comma-separated list of provider display names; the first
+    available one serves the request, with allow_fallbacks so a down or
+    incompatible provider rolls to the next instead of failing. Blank → {}
+    (let the gateway pick). Only Polza/OpenRouter understand this field, so
+    callers gate on a non-empty result before adding it to extra_body — plain
+    Ollama/Yandex must not receive it.
+    """
+    names = [p.strip() for p in order.split(",") if p.strip()]
+    if not names:
+        return {}
+    return {"provider": {"order": names, "allow_fallbacks": True}}

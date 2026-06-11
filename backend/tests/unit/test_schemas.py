@@ -21,17 +21,17 @@ pytestmark = pytest.mark.unit
 
 # ── VideoGenerateRequest ────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("voice", ["aidar", "baya", "kseniya", "xenia", "eugene"])
+@pytest.mark.parametrize("voice", ["nova", "shimmer", "coral", "alloy", "onyx", "echo"])
 def test_video_generate_request_accepts_valid_voices(voice: str) -> None:
     req = VideoGenerateRequest(voice=voice)
     assert req.voice == voice
 
 
-def test_video_generate_request_defaults_to_xenia() -> None:
-    assert VideoGenerateRequest().voice == "xenia"
+def test_video_generate_request_defaults_to_nova() -> None:
+    assert VideoGenerateRequest().voice == "nova"
 
 
-@pytest.mark.parametrize("voice", ["bad", "", "XENIA", "alyss"])
+@pytest.mark.parametrize("voice", ["bad", "", "NOVA", "xenia", "ballad", "verse"])
 def test_video_generate_request_rejects_invalid_voice(voice: str) -> None:
     with pytest.raises(ValidationError):
         VideoGenerateRequest(voice=voice)

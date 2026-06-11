@@ -100,7 +100,7 @@ async def test_generate_video_with_pptx_enqueues_task(
 
     resp = await client.post(
         f"/api/v1/lessons/{lesson.id}/generate-video",
-        json={"pptx_path": "pptx/x.pptx", "voice": "xenia"},
+        json={"pptx_path": "pptx/x.pptx", "voice": "nova"},
         cookies=teacher_token,
     )
     assert resp.status_code == 200

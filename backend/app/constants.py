@@ -1,31 +1,18 @@
 # TTS
 SILERO_MAX_CHARS: int = 800  # conservative limit: Silero returns 500 on very long inputs
-# polza.ai /audio/speech hard-caps `input` at 5000 chars; stay under with margin.
-# Deliberately much higher than Silero's limit: fewer chunks → fewer audible seams.
-POLZA_MAX_CHARS: int = 4500
+# polza.ai caps the openai/tts-1 `input` at 4096 chars (probed 2026-06-10: longer
+# → 400). Stay under with margin; still far above Silero's 800 → fewer audible seams.
+POLZA_MAX_CHARS: int = 4000
 # Transient polza failures (429/5xx/timeout) are retried with exponential backoff;
 # other 4xx (bad key, bad voice) fail fast. Mirrors LLM_MAX_RETRIES below.
 POLZA_TTS_MAX_RETRIES: int = 3
-# Frontend voice values (Silero names) → ElevenLabs premade voice names on polza
-# (polza addresses voices by name, not voice_id). Unknown names fall back to
-# settings.POLZA_DEFAULT_VOICE.
-POLZA_VOICE_MAP: dict[str, str] = {
-    "xenia": "Sarah",        # жен.
-    "baya": "Alice",         # жен.
-    "kseniya": "Charlotte",  # жен.
-    "aidar": "Daniel",       # муж.
-    "eugene": "George",      # муж.
-}
-# OpenAI TTS models on polza (openai/tts-1, openai/gpt-4o-mini-tts, …) have a
-# disjoint voice catalog — ElevenLabs names like "Sarah" are rejected with 400.
-POLZA_VOICE_MAP_OPENAI: dict[str, str] = {
-    "xenia": "nova",      # жен.
-    "baya": "shimmer",    # жен.
-    "kseniya": "coral",   # жен.
-    "aidar": "onyx",      # муж.
-    "eugene": "echo",     # муж.
-}
-POLZA_OPENAI_DEFAULT_VOICE: str = "alloy"
+# openai/tts-1 voice catalog accepted by polza (probed 2026-06-10: these 9 → 200,
+# "ballad"/"verse" → 400). Single source of truth: the API voice validator
+# (schemas/lesson.py) and the polza synth fallback both build on this. The
+# frontend dropdown sends one of these names directly — no name translation.
+POLZA_TTS_VOICES: tuple[str, ...] = (
+    "alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer",
+)
 TTS_CACHE_TTL_DAYS: int = 7
 
 # Slide rendering

@@ -301,16 +301,14 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | `SILERO_TTS_URL` | `http://silero-tts:9898` | endpoint TTS-сервиса |
 | `SILERO_TTS_VOICE` | xenia | дефолтный голос; в API можно переопределить |
 | `POLZA_API_KEY` | (пусто) | Bearer-токен polza.ai; обязателен при `TTS_PROVIDER=polza` |
-| `POLZA_BASE_URL` | `https://polza.ai/api/v1` | база OpenAI-совместимого API polza |
-| `POLZA_TTS_MODEL` | `elevenlabs/text-to-speech-turbo-2-5` | slug TTS-модели в каталоге polza |
-| `POLZA_DEFAULT_VOICE` | Rachel | ElevenLabs-голос для имён вне `POLZA_VOICE_MAP` (constants.py) |
-| `POLZA_LANGUAGE_CODE` | ru | подсказка произношения ISO 639-1 (Turbo v2.5); пусто = автоопределение |
-| `POLZA_TTS_SPEED` | (не задано) | скорость речи 0.7–1.2; не задано = дефолт провайдера |
-| `POLZA_TTS_STABILITY` | (не задано) | стабильность голоса 0–1; не задано = дефолт провайдера |
-| `POLZA_TTS_SIMILARITY` | (не задано) | схожесть голоса 0–1; не задано = дефолт провайдера |
-| `POLZA_TTS_STYLE` | (не задано) | экспрессия стиля 0–1; не задано = дефолт провайдера |
+| `POLZA_BASE_URL` | `https://api.polza.ai/v1` | база OpenAI-совместимого API polza |
+| `POLZA_TTS_MODEL` | `openai/tts-1` | slug TTS-модели в каталоге polza |
+| `POLZA_DEFAULT_VOICE` | nova | запасной голос openai/tts-1 для имён вне `POLZA_TTS_VOICES` (constants.py) |
+| `POLZA_TTS_SPEED` | (не задано) | скорость речи openai/tts-1, 0.25–4.0; не задано = 1.0 |
 | `POLZA_TIMEOUT` | 120.0 | таймаут HTTP-запроса синтеза, сек |
 | `POLZA_TTS_WORKERS` | 4 | размер TTS-пула пайплайна при `TTS_PROVIDER=polza` |
+
+Голоса openai/tts-1 (валидатор API + дропдаун фронта, источник — `POLZA_TTS_VOICES` в `constants.py`): `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`.
 
 ### Storage / URL
 

@@ -3,6 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.constants import POLZA_TTS_VOICES
 from app.models.lesson import ContentType, CreationMode, LessonStatus
 
 
@@ -80,12 +81,13 @@ class ScriptUpdateRequest(BaseModel):
     script: str
 
 
-SILERO_VOICES = ["aidar", "baya", "kseniya", "xenia", "eugene"]
+# Accept only openai/tts-1 voice names (single source of truth in constants.py).
+_VOICE_PATTERN = "^(" + "|".join(POLZA_TTS_VOICES) + ")$"
 
 
 class VideoGenerateRequest(BaseModel):
     pptx_path: str | None = None
-    voice: str = Field(default="xenia", pattern="^(aidar|baya|kseniya|xenia|eugene)$")
+    voice: str = Field(default="nova", pattern=_VOICE_PATTERN)
 
 
 class TaskStatusResponse(BaseModel):

@@ -129,6 +129,7 @@ async def test_call_ollama_payload_has_no_ollama_only_fields(
     from app.services.vision_analysis import settings as vis_settings
 
     monkeypatch.setattr(vis_settings, "VISION_REASONING_DISABLED", False)
+    monkeypatch.setattr(vis_settings, "VISION_PROVIDER_ORDER", "")
     svc = VisionAnalysisService()
     captured: dict[str, Any] = {}
 
@@ -163,6 +164,7 @@ async def test_call_ollama_reasoning_flag_adds_extra_body(
     False (default, Ollama/Yandex) must not send the field at all."""
     from app.services.vision_analysis import settings as vis_settings
 
+    monkeypatch.setattr(vis_settings, "VISION_PROVIDER_ORDER", "")
     svc = VisionAnalysisService()
     captured: dict[str, Any] = {}
 
@@ -190,6 +192,40 @@ async def test_call_ollama_reasoning_flag_adds_extra_body(
         slide_image_path=str(slide_png), slide_number=1, total_slides=1, course_title="C"
     )
     assert "extra_body" not in captured
+
+
+async def test_call_ollama_pins_provider_when_configured(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path
+) -> None:
+    """VISION_PROVIDER_ORDER pins the Polza upstream provider via extra_body and
+    merges with the reasoning switch when both are active."""
+    from app.services.vision_analysis import settings as vis_settings
+
+    monkeypatch.setattr(vis_settings, "VISION_REASONING_DISABLED", True)
+    monkeypatch.setattr(vis_settings, "VISION_PROVIDER_ORDER", "Chutes")
+    svc = VisionAnalysisService()
+    captured: dict[str, Any] = {}
+
+    async def _create(**kwargs: Any) -> SimpleNamespace:
+        captured.clear()
+        captured.update(kwargs)
+        return _llm_response("narration")
+
+    monkeypatch.setattr(
+        svc,
+        "_ollama_client",
+        SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
+        ),
+    )
+
+    await svc.analyze_slide(
+        slide_image_path=str(slide_png), slide_number=1, total_slides=1, course_title="C"
+    )
+    assert captured["extra_body"] == {
+        "reasoning": {"enabled": False},
+        "provider": {"order": ["Chutes"], "allow_fallbacks": True},
+    }
 
 
 def test_vision_client_uses_cloud_retry_tuning() -> None:

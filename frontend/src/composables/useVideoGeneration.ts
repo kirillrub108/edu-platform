@@ -13,15 +13,20 @@ export function useVideoGeneration(
   const { apiFetch } = useApi()
   const billing = useBillingStore()
 
+  // Голоса openai/tts-1 (значения уходят на бэкенд как есть).
   const voices: Array<{ value: string; label: string }> = [
-    { value: 'xenia',   label: 'Ксения (жен.)' },
-    { value: 'baya',    label: 'Байя (жен.)' },
-    { value: 'kseniya', label: 'Ксения-2 (жен.)' },
-    { value: 'aidar',   label: 'Айдар (муж.)' },
-    { value: 'eugene',  label: 'Евгений (муж.)' },
+    { value: 'nova',    label: 'Nova (жен.)' },
+    { value: 'shimmer', label: 'Shimmer (жен., мягкий)' },
+    { value: 'coral',   label: 'Coral (жен.)' },
+    { value: 'sage',    label: 'Sage (жен., спокойный)' },
+    { value: 'alloy',   label: 'Alloy (нейтральный)' },
+    { value: 'onyx',    label: 'Onyx (муж., низкий)' },
+    { value: 'echo',    label: 'Echo (муж.)' },
+    { value: 'fable',   label: 'Fable (муж., выразительный)' },
+    { value: 'ash',     label: 'Ash (муж.)' },
   ]
 
-  const selectedVoice = ref<string>('xenia')
+  const selectedVoice = ref<string>('nova')
   const taskId = ref<string | null>(null)
   const taskStatus = ref('')
   const taskMeta = ref<{ step: string; done: number; total: number } | null>(null)

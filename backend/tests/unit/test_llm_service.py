@@ -151,3 +151,50 @@ def test_llm_client_uses_cloud_retry_tuning() -> None:
     from app.constants import LLM_MAX_RETRIES
 
     assert llm_service.client.max_retries == LLM_MAX_RETRIES
+
+
+def test_provider_routing_helper() -> None:
+    from app.config import provider_routing
+
+    assert provider_routing("") == {}
+    assert provider_routing("   ") == {}
+    assert provider_routing("StreamLake") == {
+        "provider": {"order": ["StreamLake"], "allow_fallbacks": True}
+    }
+    assert provider_routing("StreamLake, SiliconFlow") == {
+        "provider": {"order": ["StreamLake", "SiliconFlow"], "allow_fallbacks": True}
+    }
+
+
+async def test_split_injects_provider_pin_into_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A configured LLM_PROVIDER_ORDER rides along in extra_body; empty sends nothing."""
+    captured: dict[str, Any] = {}
+
+    async def _create(**kwargs: Any) -> SimpleNamespace:
+        captured.clear()
+        captured.update(kwargs)
+        return _llm_response(json.dumps({"chunks": ["<p>a</p>", "<p>b</p>"]}))
+
+    monkeypatch.setattr(
+        llm_service,
+        "client",
+        SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
+        ),
+    )
+
+    monkeypatch.setattr(
+        llm_service,
+        "_provider_extra",
+        {"provider": {"order": ["StreamLake"], "allow_fallbacks": True}},
+    )
+    await llm_service.split_and_annotate_ssml(script="A. B.", slides_count=2)
+    assert captured["extra_body"] == {
+        "provider": {"order": ["StreamLake"], "allow_fallbacks": True}
+    }
+
+    monkeypatch.setattr(llm_service, "_provider_extra", {})
+    await llm_service.split_and_annotate_ssml(script="A. B.", slides_count=2)
+    assert "extra_body" not in captured
