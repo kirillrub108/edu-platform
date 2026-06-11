@@ -109,6 +109,21 @@ class Settings(BaseSettings):
     # checked against the X-Admin-Token header. Empty disables admin access.
     ADMIN_API_TOKEN: str = ""
 
+    # YooKassa — one-time credit-package payments. Empty SHOP_ID/SECRET_KEY
+    # disables payment creation (POST /billing/payments returns 503). The
+    # webhook authenticates by re-fetching the payment from the YooKassa API,
+    # not by trusting the request body. API URL is overridable for tests.
+    YOOKASSA_SHOP_ID: str = ""
+    YOOKASSA_SECRET_KEY: str = ""
+    YOOKASSA_API_URL: str = "https://api.yookassa.ru/v3"
+    # Where YooKassa redirects the buyer after checkout. Empty falls back to
+    # f"{FRONTEND_URL}/billing".
+    YOOKASSA_RETURN_URL: str = ""
+    # 54-ФЗ receipts (ИП): when True, payment creation includes a receipt block
+    # (customer email + one "Пакет N кредитов" item with this vat_code).
+    YOOKASSA_SEND_RECEIPT: bool = False
+    YOOKASSA_VAT_CODE: int = 1
+
     # Storage
     STORAGE_PATH: str = "/app/storage"
     BASE_URL: str = "http://localhost:8000"

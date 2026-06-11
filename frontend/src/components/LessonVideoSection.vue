@@ -16,6 +16,11 @@ defineProps<{
   isAuto: boolean
   isManual: boolean
   scriptIsEmpty: boolean
+  creditsSpent: number
+  creditsReserved: number
+  billedVia: string | null
+  needTopup: boolean
+  cancelled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -43,6 +48,11 @@ const emit = defineEmits<{
     :is-auto="isAuto"
     :is-manual="isManual"
     :script-is-empty="scriptIsEmpty"
+    :credits-spent="creditsSpent"
+    :credits-reserved="creditsReserved"
+    :billed-via="billedVia"
+    :need-topup="needTopup"
+    :cancelled="cancelled"
     @update:selected-voice="emit('update:selectedVoice', $event)"
     @generate="emit('generate')"
     @cancel="emit('cancel')"

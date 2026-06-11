@@ -55,6 +55,10 @@ env = [
   "SILERO_TTS_URL=http://silero.invalid",
   "VISION_OLLAMA_BASE_URL=http://vision.invalid/v1",
   "VISION_API_KEY=test",
+  # YooKassa: configured-but-unreachable so unmocked calls fail fast.
+  "YOOKASSA_SHOP_ID=test-shop",
+  "YOOKASSA_SECRET_KEY=test-secret",
+  "YOOKASSA_API_URL=http://yookassa.invalid/v3",
 ]
 filterwarnings = [
   "ignore::DeprecationWarning",

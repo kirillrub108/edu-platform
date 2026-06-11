@@ -1,30 +1,84 @@
-"""Credit billing: balances, reservations, charges and monthly renewals.
+"""Credit billing: balances, reservations, charges, purchases and renewals.
 
 Async functions are used from FastAPI routers (AsyncSession). Celery tasks run
 on a sync Session (psycopg2) and must use the `sync_*` wrappers — never import
 the async functions into `app/tasks/*`.
 
-Reservation lifecycle (auth/capture style):
-  reserve_credits → hold moves into `reserved`, `available` drops.
-  charge_credits  → on success: balance -= amount, reserved -= amount.
-  release_credits → on failure: reserved -= amount, balance untouched.
+Reservation lifecycle (auth/capture style). The full generation estimate is
+reserved router-side before apply_async (ref_id = the per-launch billing_ref);
+the task settles it exactly once via the idempotent finalizer:
+  reserve_credits           → hold moves into `reserved`, `available` drops.
+  sync_finalize_generation  → success: charge the full estimate; failure:
+                              release 100%; mid-run cancel: charge the partial
+                              cost and release the remainder — one transaction,
+                              a no-op if billing_ref already has a finalizer
+                              row (Celery redelivery / cancel races).
+  release_reservation_if_held → cancel path for a task that never settled.
 """
+import math
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
-from app.constants import CREDIT_CARRYOVER_RATIO, PLAN_CONFIGS
+from app.constants import (
+    AUTO_CHARS_PER_SLIDE,
+    CREDIT_CARRYOVER_RATIO,
+    PLAN_CONFIGS,
+    TTS_CHARS_PER_CREDIT,
+    VIDEO_AUTO_BASE_CREDITS,
+    VIDEO_TEXT_BASE_CREDITS,
+)
 from app.models.credit import CreditAccount, CreditOperation, CreditPlan, CreditTransaction
+from app.models.lesson import Lesson
+from app.models.payment import Payment, PaymentStatus
 
 _RENEWAL_PERIOD = timedelta(days=30)
 
 
 def _to_operation(operation: "str | CreditOperation") -> CreditOperation:
     return operation if isinstance(operation, CreditOperation) else CreditOperation(operation)
+
+
+# ── Pricing formulas (pure — safe to import anywhere, including tasks) ────────
+
+
+def estimate_video_text(slides: int, script_chars: int) -> int:
+    """COST_VIDEO_TEXT: 2 + slides + ceil(script_chars / 3000)."""
+    return (
+        VIDEO_TEXT_BASE_CREDITS
+        + slides
+        + math.ceil(script_chars / TTS_CHARS_PER_CREDIT)
+    )
+
+
+def estimate_video_auto(slides: int) -> int:
+    """COST_VIDEO_AUTO: 3 + slides + ceil(slides * 600 / 3000)."""
+    return (
+        VIDEO_AUTO_BASE_CREDITS
+        + slides
+        + math.ceil(slides * AUTO_CHARS_PER_SLIDE / TTS_CHARS_PER_CREDIT)
+    )
+
+
+def partial_video_cost(base_credits: int, processed_slides: int, voiced_chars: int) -> int:
+    """Mid-run cancellation price: base + per-slide × processed + voiced chars
+    rounded UP to whole credits. Callers clamp to the reserved estimate."""
+    return (
+        base_credits
+        + processed_slides
+        + math.ceil(voiced_chars / TTS_CHARS_PER_CREDIT)
+    )
+
+
+def partial_vision_cost(total_cost: int, done: int, total: int) -> int:
+    """Pro-rata vision-analysis cancellation price, rounded up per slide."""
+    if total <= 0:
+        return 0
+    return min(total_cost, math.ceil(total_cost * done / total))
 
 
 # ── Async (FastAPI) ──────────────────────────────────────────────────────────
@@ -242,6 +296,81 @@ async def grant_credits(
     return tx
 
 
+async def claim_billing(db: AsyncSession, lesson_id: UUID) -> str | None:
+    """Atomically claim the unsettled billing of a lesson's generation run.
+
+    Returns the claimed billed_via ('credits' | 'trial') and nulls the column,
+    or None when the run was already settled. The FOR UPDATE lock on the lesson
+    row serializes the cancel endpoint against the task's finalizer so exactly
+    one side performs the release/charge (critical for trial slots, which have
+    no ledger rows to make them idempotent).
+    """
+    billed = await db.scalar(
+        select(Lesson.billed_via).where(Lesson.id == lesson_id).with_for_update()
+    )
+    if billed is None:
+        await db.rollback()
+        return None
+    await db.execute(update(Lesson).where(Lesson.id == lesson_id).values(billed_via=None))
+    await db.commit()
+    return billed
+
+
+async def apply_purchase(db: AsyncSession, payment_id: UUID) -> bool:
+    """Credit a succeeded YooKassa payment exactly once (one transaction).
+
+    Locks the payment row first, then the account row (same lock order as the
+    polling path, so webhook + poll cannot deadlock). Re-delivery of the same
+    webhook finds status=succeeded and is a no-op. Returns True when credits
+    were granted by this call.
+    """
+    # Ensure the account exists BEFORE taking any locks: get_or_create_account
+    # commits, which would otherwise drop the payment FOR UPDATE lock mid-flow
+    # and reopen the double-grant race this function exists to prevent.
+    peek = await db.scalar(select(Payment).where(Payment.id == payment_id))
+    if peek is None:
+        return False
+    await get_or_create_account(db, peek.user_id)
+
+    payment = await db.scalar(
+        select(Payment).where(Payment.id == payment_id).with_for_update()
+    )
+    if payment is None or payment.status == PaymentStatus.succeeded:
+        await db.rollback()
+        return False
+    account = await db.scalar(
+        select(CreditAccount)
+        .where(CreditAccount.owner_id == payment.user_id)
+        .with_for_update()
+    )
+    account.balance += payment.credits
+    db.add(
+        CreditTransaction(
+            account_id=account.id,
+            delta=payment.credits,
+            operation=CreditOperation.PURCHASE,
+            ref_id=str(payment.id),
+            description=f"Покупка пакета {payment.credits} кредитов",
+        )
+    )
+    payment.status = PaymentStatus.succeeded
+    await db.commit()
+    return True
+
+
+async def mark_payment_canceled(db: AsyncSession, payment_id: UUID) -> bool:
+    """Mark a pending payment canceled; no-op for settled payments."""
+    payment = await db.scalar(
+        select(Payment).where(Payment.id == payment_id).with_for_update()
+    )
+    if payment is None or payment.status != PaymentStatus.pending:
+        await db.rollback()
+        return False
+    payment.status = PaymentStatus.canceled
+    await db.commit()
+    return True
+
+
 async def get_transaction_history(
     db: AsyncSession, user_id: UUID, limit: int = 50
 ) -> list[CreditTransaction]:
@@ -297,95 +426,83 @@ async def process_monthly_renewal(db: AsyncSession) -> int:
 # ── Sync wrappers (Celery) ─────────────────────────────────────────────────────
 
 
-def _sync_get_or_create_account(db: Session, user_id: UUID) -> CreditAccount:
-    free = PLAN_CONFIGS["free"]
-    stmt = (
-        pg_insert(CreditAccount)
-        .values(
-            owner_id=user_id,
-            plan=CreditPlan.free,
-            balance=free["onetime_credits"],
-            reserved=0,
-            monthly_allowance=free["monthly_allowance"],
-        )
-        .on_conflict_do_nothing(index_elements=["owner_id"])
-        .returning(CreditAccount.id)
+def sync_claim_billing(db: Session, lesson_id: UUID) -> str | None:
+    """Sync mirror of claim_billing — see its docstring."""
+    billed = db.scalar(
+        select(Lesson.billed_via).where(Lesson.id == lesson_id).with_for_update()
     )
-    new_id = db.execute(stmt).scalar_one_or_none()
-    if new_id is not None and free["onetime_credits"]:
-        db.add(
-            CreditTransaction(
-                account_id=new_id,
-                delta=free["onetime_credits"],
-                operation=CreditOperation.GRANT,
-                description="Welcome credits (free plan)",
-            )
-        )
-    db.commit()
-    return db.scalar(select(CreditAccount).where(CreditAccount.owner_id == user_id))
-
-
-def sync_reserve_credits(
-    db: Session, user_id: UUID, amount: int, ref_id: str, operation: str
-) -> bool:
-    _sync_get_or_create_account(db, user_id)
-    account = db.scalar(
-        select(CreditAccount).where(CreditAccount.owner_id == user_id).with_for_update()
-    )
-    if account is None or account.balance - account.reserved < amount:
+    if billed is None:
         db.rollback()
-        return False
-    account.reserved += amount
-    db.add(
-        CreditTransaction(
-            account_id=account.id,
-            delta=-amount,
-            operation=CreditOperation.RESERVE,
-            ref_id=ref_id,
-            description=f"Reserve for {_to_operation(operation).value}",
-        )
-    )
+        return None
+    db.execute(update(Lesson).where(Lesson.id == lesson_id).values(billed_via=None))
     db.commit()
-    return True
+    return billed
 
 
-def sync_release_credits(db: Session, user_id: UUID, amount: int, ref_id: str) -> None:
-    account = db.scalar(
-        select(CreditAccount).where(CreditAccount.owner_id == user_id).with_for_update()
-    )
-    if account is None:
-        return
-    account.reserved = max(0, account.reserved - amount)
-    db.add(
-        CreditTransaction(
-            account_id=account.id,
-            delta=amount,
-            operation=CreditOperation.RELEASE,
-            ref_id=ref_id,
-            description="Release reserved hold",
-        )
-    )
-    db.commit()
+def sync_finalize_generation(
+    db: Session,
+    user_id: UUID,
+    billing_ref: str,
+    estimate: int,
+    spent: int,
+    operation: str,
+) -> bool:
+    """Settle a router-side reservation exactly once, in one transaction.
 
-
-def sync_charge_credits(
-    db: Session, user_id: UUID, amount: int, ref_id: str, operation: str
-) -> None:
+    spent == estimate → plain charge (success); spent == 0 → full release
+    (service failure); 0 < spent < estimate → partial charge + release of the
+    remainder (mid-run cancel). Idempotent: a second call for the same
+    billing_ref (Celery redelivery after a worker crash, or a cancel-endpoint
+    race) finds an existing finalizer row and does nothing. Returns True when
+    this call performed the settlement.
+    """
     op = _to_operation(operation)
     account = db.scalar(
         select(CreditAccount).where(CreditAccount.owner_id == user_id).with_for_update()
     )
     if account is None:
-        return
-    account.balance = max(0, account.balance - amount)
-    account.reserved = max(0, account.reserved - amount)
-    db.add(
-        CreditTransaction(
-            account_id=account.id,
-            delta=-amount,
-            operation=op,
-            ref_id=ref_id,
-            description=f"Charge for {op.value}",
+        db.rollback()
+        return False
+    finalized = db.scalar(
+        select(func.count())
+        .select_from(CreditTransaction)
+        .where(
+            CreditTransaction.account_id == account.id,
+            CreditTransaction.ref_id == billing_ref,
+            CreditTransaction.operation != CreditOperation.RESERVE,
         )
     )
+    if finalized:
+        db.rollback()
+        return False
+
+    spent = max(0, min(spent, estimate))
+    remainder = estimate - spent
+    account.reserved = max(0, account.reserved - estimate)
+    account.balance = max(0, account.balance - spent)
+    if spent:
+        db.add(
+            CreditTransaction(
+                account_id=account.id,
+                delta=-spent,
+                operation=op,
+                ref_id=billing_ref,
+                description=f"Charge for {op.value}",
+            )
+        )
+    if remainder or not spent:
+        db.add(
+            CreditTransaction(
+                account_id=account.id,
+                delta=remainder,
+                operation=CreditOperation.RELEASE,
+                ref_id=billing_ref,
+                description=(
+                    "Release reserved hold"
+                    if not spent
+                    else "Release remainder (partial charge)"
+                ),
+            )
+        )
     db.commit()
+    return True

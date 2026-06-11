@@ -2,7 +2,7 @@
 import { ChevronLeft, ChevronRight, Sparkles, Save, FileText, RotateCcw } from 'lucide-vue-next'
 import ProgressBar from './ProgressBar.vue'
 import UiButton from './UiButton.vue'
-import { friendlyTaskError } from '~/composables/useBillingMeta'
+import { friendlyApiError } from '~/composables/useBillingMeta'
 
 interface SlideText {
   id: string
@@ -145,9 +145,8 @@ const regenerate = async () => {
     void billing.refresh()
   } catch (err: any) {
     if (err?.name === 'AbortError' || err?.cause?.name === 'AbortError') return
-    // 402 = недостаточно кредитов; surface a friendly message instead of crashing.
-    regenError.value =
-      friendlyTaskError(err?.data?.detail) ?? err?.data?.detail ?? 'Не удалось регенерировать слайд'
+    // 402 = недостаточно кредитов; detail can be a machine-readable object now.
+    regenError.value = friendlyApiError(err).message
     if (err?.response?.status === 402) void billing.fetchBalance()
   } finally {
     regenIds.value.delete(slide.id)

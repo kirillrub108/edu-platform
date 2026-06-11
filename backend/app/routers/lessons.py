@@ -1,12 +1,12 @@
 import asyncio
 import json
 import os
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from redis.asyncio import Redis
-from sqlalchemy import desc, select, update
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -19,12 +19,19 @@ from app.dependencies import (
     require_verified_teacher,
 )
 from app.models.course import Course
+from app.models.credit import CreditOperation
 from app.models.enrollment import Enrollment
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
 from app.models.quiz import AttemptStatus, Quiz, QuizAttempt, QuizQuestion
+from app.models.slide_text import SlideText
 from app.models.user import User
 from app.redis_client import get_redis
+from app.schemas.billing import (
+    EstimateTrialOut,
+    EstimateVideoOut,
+    GenerationEstimateOut,
+)
 from app.schemas.lesson import (
     LessonCreate,
     LessonOut,
@@ -36,9 +43,15 @@ from app.schemas.lesson import (
 )
 from app.limiter import limiter
 from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
-from app.constants import CREDIT_WEIGHTS, MAX_VIDEO_UPLOAD_BYTES
-from app.services import billing_service, tier_service
+from app.constants import (
+    CREDIT_WEIGHTS,
+    MAX_VIDEO_UPLOAD_BYTES,
+    TRIAL_MAX_SCRIPT_CHARS,
+    TRIAL_MAX_SLIDES,
+)
+from app.services import billing_service, quota_service, tier_service
 from app.services.storage_service import storage_service
+from app.services.video_service import count_source_slides
 from app.tasks.video_pipeline import generate_video_lesson
 
 
@@ -201,6 +214,77 @@ async def upload_lesson_video(
     return _lesson_out(lesson, str(user.id))
 
 
+async def _video_estimate(
+    db: AsyncSession, lesson: Lesson, pptx_path: str | None
+) -> tuple[str, int | None, int, int | None]:
+    """(mode, slides, script_chars, credits) for a video-generation launch.
+
+    Auto mode counts existing SlideText rows (exact); otherwise the slide
+    count is read cheaply from the source PPTX/PDF without rendering. credits
+    is None when the slide count cannot be determined.
+    """
+    is_auto = lesson.creation_mode == CreationMode.presentation_auto
+    slides: int | None = None
+    if is_auto:
+        slides = (
+            await db.scalar(
+                select(func.count())
+                .select_from(SlideText)
+                .where(SlideText.lesson_id == lesson.id)
+            )
+            or None
+        )
+    if slides is None and pptx_path:
+        try:
+            slides = count_source_slides(storage_service.get_full_path(pptx_path))
+        except Exception:
+            slides = None
+    script_chars = 0 if is_auto else len((lesson.script or lesson.text_content or "").strip())
+    credits: int | None = None
+    if slides:
+        credits = (
+            billing_service.estimate_video_auto(slides)
+            if is_auto
+            else billing_service.estimate_video_text(slides, script_chars)
+        )
+    return ("auto" if is_auto else "text"), slides, script_chars, credits
+
+
+async def _trial_video_available(
+    db: AsyncSession, user_id: UUID, plan: str, slides: int | None, script_chars: int
+) -> tuple[dict, bool]:
+    """(trial_state, video slot usable) — free plan, slots left, lecture fits caps."""
+    trial = await quota_service.get_trial_state(db, user_id)
+    fits = (
+        slides is not None
+        and slides <= TRIAL_MAX_SLIDES
+        and script_chars <= TRIAL_MAX_SCRIPT_CHARS
+    )
+    return trial, plan == "free" and fits and trial["lectures_used"] < trial["lectures_limit"]
+
+
+def _insufficient_credits_402(balance: dict, required: int, trial: dict) -> HTTPException:
+    """402 payload: trial_exhausted for free accounts that burned their trial,
+    insufficient_credits otherwise — both machine-readable for the frontend."""
+    if balance["plan"] == "free" and trial["lectures_used"] >= trial["lectures_limit"]:
+        return HTTPException(
+            status_code=402,
+            detail={
+                "code": "trial_exhausted",
+                "limit": trial["lectures_limit"],
+                "used": trial["lectures_used"],
+            },
+        )
+    return HTTPException(
+        status_code=402,
+        detail={
+            "code": "insufficient_credits",
+            "required": required,
+            "available": balance["available"],
+        },
+    )
+
+
 # TODO: в тестах сбрасывать лимитер через limiter.reset() или MemoryStorage в фикстуре
 @router.post("/{lesson_id}/generate-video")
 @limiter.limit("3/minute")
@@ -219,25 +303,157 @@ async def generate_video(
             detail="pptx_path is required (pass it in the body or upload a PPTX to the lesson first)",  # noqa: E501
         )
 
+    # 1. Concurrency (read): one active generation per lesson.
+    if lesson.status in (LessonStatus.processing, LessonStatus.analyzing):
+        raise HTTPException(status_code=409, detail={"code": "generation_in_progress"})
+
     # Persist pptx_path on the lesson so it can be reused on retries
     if data.pptx_path and data.pptx_path != lesson.pptx_path:
         lesson.pptx_path = data.pptx_path
         await db.commit()
 
+    # 2. Estimate (read).
+    _mode, slides, script_chars, estimate = await _video_estimate(db, lesson, pptx_path)
+    if estimate is None:
+        raise HTTPException(
+            status_code=422, detail="Не удалось определить число слайдов презентации"
+        )
+
     is_regen = lesson.status == LessonStatus.published
-    cost_key = "lesson_regen" if is_regen else "lesson_generate"
+    operation = CreditOperation.LESSON_REGEN if is_regen else CreditOperation.LESSON_GENERATE
     balance = await billing_service.get_balance(db, user.id)
-    if balance["available"] < CREDIT_WEIGHTS[cost_key]:
-        raise HTTPException(status_code=402, detail="Недостаточно кредитов для генерации видео")
+
+    # 3. Trial slot or credit reservation (write, atomic).
+    billing_ref = f"{lesson.id}:{uuid4().hex[:12]}"
+    trial, trial_usable = await _trial_video_available(
+        db, user.id, balance["plan"], slides, script_chars
+    )
+    billed_via = "credits"
+    if trial_usable and await quota_service.try_consume_slot(
+        db, user.id, quota_service.TRIAL_LECTURE, trial["lectures_limit"]
+    ):
+        billed_via = "trial"
+    elif not await billing_service.reserve_credits(
+        db, user.id, estimate, billing_ref, operation
+    ):
+        raise _insufficient_credits_402(balance, estimate, trial)
+
+    # Billing state must be committed before apply_async — the worker reads it.
+    lesson.credit_estimate = estimate if billed_via == "credits" else 0
+    lesson.credits_spent = 0
+    lesson.billing_ref = billing_ref if billed_via == "credits" else None
+    lesson.billed_via = billed_via
+    lesson.cancel_requested = False
+    await db.commit()
 
     # Schedule paid tiers ahead of free ones (priority derived from the plan).
     priority = await tier_service.priority_for_user(db, user.id)
-    task = generate_video_lesson.apply_async(
-        args=[str(lesson.id), pptx_path, data.voice], queue="video", priority=priority
-    )
+    try:
+        task = generate_video_lesson.apply_async(
+            args=[str(lesson.id), pptx_path, data.voice, is_regen],
+            queue="video",
+            priority=priority,
+        )
+    except Exception:
+        # Broker down — compensate the reservation/slot taken above.
+        claimed = await billing_service.claim_billing(db, lesson.id)
+        if claimed == "credits":
+            await billing_service.release_credits(db, user.id, estimate, billing_ref)
+        elif claimed == "trial":
+            await quota_service.release_slot(db, user.id, quota_service.TRIAL_LECTURE)
+        raise HTTPException(status_code=503, detail="Не удалось поставить задачу в очередь")
     lesson.video_task_id = task.id
     await db.commit()
-    return {"task_id": task.id, "lesson_id": str(lesson.id)}
+    return {
+        "task_id": task.id,
+        "lesson_id": str(lesson.id),
+        "credit_estimate": estimate,
+        "billed_via": billed_via,
+    }
+
+
+async def cancel_generation_impl(lesson: Lesson, db: AsyncSession, redis: Redis) -> dict:
+    """Cancel the active video/vision generation of a lesson.
+
+    Queued task (Celery state PENDING) → revoke + full refund + status rollback
+    ('immediate'). Running task → cooperative: only the cancel_requested flag is
+    set; the pipeline stops at its next per-slide checkpoint, charges for the
+    processed slides and releases the rest ('cooperative'). The running task is
+    never killed with terminate=True. Refunds are guarded by claim_billing, so
+    a task that actually started despite a PENDING state (Redis restart) cannot
+    be refunded twice.
+    """
+    if lesson.status == LessonStatus.processing:
+        task_id, kind = lesson.video_task_id, "video"
+    elif lesson.status == LessonStatus.analyzing:
+        task_id, kind = lesson.analyze_task_id, "vision"
+    else:
+        return {"cancelled": False, "mode": "none", "status": lesson.status.value}
+
+    lesson.cancel_requested = True
+    await db.commit()
+
+    state = "PENDING"
+    if task_id:
+        try:
+            result = AsyncResult(task_id, app=celery_app)
+            state = result.state
+            if state == "PENDING":
+                result.revoke()  # prevents a queued task from starting; no terminate
+        except Exception:
+            state = "STARTED"  # can't tell — let the cooperative path handle it
+
+    if state != "PENDING":
+        return {"cancelled": True, "mode": "cooperative", "status": lesson.status.value}
+
+    # Snapshot scalars before claim_billing: its rollback path (already
+    # settled) expires the instance, and a lazy re-load from the async
+    # session would raise MissingGreenlet.
+    owner_id = lesson.module.course.owner_id
+    billing_ref = lesson.billing_ref
+    creation_mode = lesson.creation_mode
+    claimed = await billing_service.claim_billing(db, lesson.id)
+    if claimed == "credits" and billing_ref:
+        await billing_service.release_reservation_if_held(db, owner_id, billing_ref)
+    elif claimed == "trial" and kind == "video":
+        # Nothing was processed — the trial lecture slot goes back.
+        await quota_service.release_slot(db, owner_id, quota_service.TRIAL_LECTURE)
+
+    if kind == "video":
+        lesson.video_task_id = None
+        lesson.status = (
+            LessonStatus.ready_for_edit
+            if creation_mode == CreationMode.presentation_auto
+            else LessonStatus.draft
+        )
+    else:
+        lesson.analyze_task_id = None
+        lesson.status = LessonStatus.draft
+    lesson.cancel_requested = False
+    await db.commit()
+
+    try:
+        await redis.publish(
+            f"lesson:{lesson.id}", json.dumps({"status": "cancelled", "credits_spent": 0})
+        )
+    except Exception:
+        pass
+    return {
+        "cancelled": True,
+        "mode": "immediate",
+        "status": lesson.status.value,
+        "credits_spent": 0,
+    }
+
+
+@router.post("/{lesson_id}/cancel-generation")
+async def cancel_generation(
+    lesson_id: UUID,
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    return await cancel_generation_impl(lesson, db, redis)
 
 
 @router.post("/{lesson_id}/cancel-video")
@@ -245,25 +461,43 @@ async def cancel_video(
     lesson_id: UUID,
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
-    task_id = lesson.video_task_id
-    if task_id:
-        result = AsyncResult(task_id, app=celery_app)
-        result.revoke(terminate=True, signal="SIGKILL")
-        lesson.video_task_id = None
+    """Deprecated alias of cancel-generation kept for API compatibility."""
+    result = await cancel_generation_impl(lesson, db, redis)
+    return {"cancelled": result["cancelled"], "lesson_id": str(lesson_id), **result}
 
-    if lesson.creation_mode == CreationMode.presentation_auto:
-        lesson.status = LessonStatus.ready_for_edit
-    else:
-        lesson.status = LessonStatus.draft
-    await db.commit()
 
-    # A terminated task's `finally` block may not run, so its reserved credit
-    # hold would leak. Release it idempotently (no-op if the task already
-    # finalized before the revoke landed).
-    owner_id = lesson.module.course.owner_id
-    await billing_service.release_reservation_if_held(db, owner_id, str(lesson_id))
-    return {"cancelled": True, "lesson_id": str(lesson_id)}
+@router.get("/{lesson_id}/generation-estimate", response_model=GenerationEstimateOut)
+async def generation_estimate(
+    lesson_id: UUID,
+    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    """Pre-launch cost estimate for the generation confirm dialog. Read-only —
+    triggers no AI work, so it is deliberately not in AI_GATED_ENDPOINTS."""
+    mode, slides, script_chars, credits = await _video_estimate(db, lesson, lesson.pptx_path)
+    balance = await billing_service.get_balance(db, user.id)
+    trial, video_trial = await _trial_video_available(
+        db, user.id, balance["plan"], slides, script_chars
+    )
+    quiz_trial = (
+        balance["plan"] == "free" and trial["quizzes_used"] < trial["quizzes_limit"]
+    )
+    return GenerationEstimateOut(
+        video=EstimateVideoOut(
+            mode=mode, slides=slides, script_chars=script_chars, credits=credits
+        ),
+        vision_credits=CREDIT_WEIGHTS["vision_analyze"],
+        quiz_credits=CREDIT_WEIGHTS["quiz_generate"],
+        ai_review_credits=CREDIT_WEIGHTS["ai_review"],
+        available=balance["available"],
+        plan=balance["plan"],
+        trial=EstimateTrialOut(
+            **trial, video_trial_available=video_trial, quiz_trial_available=quiz_trial
+        ),
+    )
 
 
 _LESSON_STATUS_TO_CELERY: dict[LessonStatus, str] = {
@@ -273,6 +507,7 @@ _LESSON_STATUS_TO_CELERY: dict[LessonStatus, str] = {
     LessonStatus.processing: "PROGRESS",
     LessonStatus.published: "SUCCESS",
     LessonStatus.error: "FAILURE",
+    LessonStatus.cancelled: "REVOKED",
 }
 
 
@@ -308,6 +543,10 @@ async def task_status(
         }
         return payload
 
+    if lesson.status == LessonStatus.cancelled:
+        payload["meta"] = {"credits_spent": lesson.credits_spent}
+        return payload
+
     # Try Redis for live progress details; fails gracefully if Redis is down.
     try:
         ar = AsyncResult(task_id, app=celery_app)
@@ -328,7 +567,7 @@ async def task_status(
     return payload
 
 
-_SSE_TERMINAL = {"published", "ready_for_edit", "error"}
+_SSE_TERMINAL = {"published", "ready_for_edit", "error", "cancelled"}
 
 
 @router.get("/{lesson_id}/progress-stream")
@@ -354,6 +593,8 @@ async def progress_stream(
         terminal_payload = {"status": "error"}
     elif lesson.status == LessonStatus.ready_for_edit:
         terminal_payload = {"status": "ready_for_edit"}
+    elif lesson.status == LessonStatus.cancelled:
+        terminal_payload = {"status": "cancelled", "credits_spent": lesson.credits_spent}
 
     # Probe Redis before committing to streaming (only needed for live path).
     # Must happen here — once EventSourceResponse is returned, HTTP headers are

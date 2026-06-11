@@ -39,6 +39,32 @@ def _slide_number(path: str) -> int:
     return int(m[-1]) if m else 0
 
 
+def count_source_slides(full_path: str) -> int | None:
+    """Cheap slide/page count for the credit estimate — no rendering.
+
+    PPTX is exact (python-pptx). PDF uses byte heuristics: /Count of the page
+    tree, falling back to counting /Type /Page objects; both miss only on
+    exotic files with fully compressed object streams. None = can't tell.
+    """
+    try:
+        ext = os.path.splitext(full_path)[1].lower()
+        if ext in (".pptx", ".ppt"):
+            return len(Presentation(full_path).slides)
+        if ext == ".pdf":
+            with open(full_path, "rb") as f:
+                data = f.read()
+            counts = re.findall(rb"/Type\s*/Pages.*?/Count\s+(\d+)", data, re.DOTALL)
+            if counts:
+                return max(int(c) for c in counts)
+            pages = len(re.findall(rb"/Type\s*/Page\b", data)) - len(
+                re.findall(rb"/Type\s*/Pages\b", data)
+            )
+            return pages if pages > 0 else None
+    except Exception:
+        logger.warning("count_source_slides_failed", path=full_path, exc_info=True)
+    return None
+
+
 def _get_audio_duration(path: str) -> float:
     """Return audio duration in seconds via ffprobe."""
     result = subprocess.run(

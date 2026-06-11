@@ -9,10 +9,13 @@ export interface OperationMeta {
 export const OPERATION_LABELS: Record<string, string> = {
   GRANT: 'Начисление',
   TOPUP: 'Пополнение',
+  PURCHASE: 'Покупка кредитов',
   LESSON_GENERATE: 'Генерация видео',
   LESSON_REGEN: 'Перегенерация видео',
   VISION_ANALYZE: 'Анализ презентации',
   SLIDE_REGEN: 'Регенерация слайда',
+  QUIZ_GENERATE: 'Генерация теста',
+  AI_REVIEW: 'AI-проверка вопросов',
   RESERVE: 'Резервирование',
   RELEASE: 'Возврат резерва',
   EXPIRE: 'Сгорание кредитов',
@@ -20,10 +23,10 @@ export const OPERATION_LABELS: Record<string, string> = {
 
 // CREDIT_WEIGHTS keys → human labels for the "стоимость операций" table.
 export const COST_LABELS: Record<string, string> = {
-  lesson_generate: 'Генерация видео из презентации',
-  lesson_regen: 'Повторная генерация видео',
   vision_analyze: 'Анализ презентации (vision)',
   slide_regen: 'Регенерация текста одного слайда',
+  quiz_generate: 'Генерация теста',
+  ai_review: 'AI-review вопросов',
   quiz_grade: 'AI-проверка теста',
 }
 
@@ -61,6 +64,37 @@ export function friendlyTaskError(raw?: string | null): string | null {
 
 export function isInsufficientCredits(raw?: string | null): boolean {
   return !!raw && (raw === 'insufficient_credits' || /недостаточно кредит/i.test(raw))
+}
+
+// Parse a fetch error whose `data.detail` may be a machine-readable object
+// ({code, ...}) or a plain string. `insufficient` signals the caller should
+// show a "пополнить баланс" CTA.
+export function friendlyApiError(err: any): { message: string; insufficient: boolean } {
+  const detail = err?.data?.detail
+  if (detail && typeof detail === 'object') {
+    if (detail.code === 'insufficient_credits') {
+      return {
+        message: `Недостаточно кредитов: нужно ${detail.required} CR, доступно ${detail.available} CR.`,
+        insufficient: true,
+      }
+    }
+    if (detail.code === 'trial_exhausted') {
+      return {
+        message: `Бесплатный лимит исчерпан (${detail.used} из ${detail.limit}). Купите кредиты, чтобы продолжить.`,
+        insufficient: true,
+      }
+    }
+    if (detail.code === 'generation_in_progress') {
+      return { message: 'Генерация уже запущена.', insufficient: false }
+    }
+  }
+  if (typeof detail === 'string') {
+    return {
+      message: friendlyTaskError(detail) ?? detail,
+      insufficient: isInsufficientCredits(detail),
+    }
+  }
+  return { message: 'Что-то пошло не так', insufficient: false }
 }
 
 export function formatRub(n: number): string {

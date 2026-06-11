@@ -17,6 +17,7 @@ from app.constants import (
     POLZA_TTS_VOICES,
     SILERO_MAX_CHARS,
 )
+from app.services import usage_service
 
 logger = structlog.get_logger()
 
@@ -225,6 +226,8 @@ class TTSService:
         chunks = _split_for_tts(plain)
         if len(chunks) > 1:
             logger.info("tts_splitting", chars=len(plain), chunks=len(chunks))
+        # Self-hosted Silero has no provider bill — chars journaled with cost 0.
+        usage_service.record_tts_usage("silero", len(plain), billable=False)
 
         url = f"{settings.SILERO_TTS_URL}/process"
         tmp_paths: list[str] = []
@@ -281,6 +284,7 @@ class TTSService:
         chunks = _split_for_tts(plain, max_chars=POLZA_MAX_CHARS)
         if len(chunks) > 1:
             logger.info("tts_splitting", chars=len(plain), chunks=len(chunks))
+        usage_service.record_tts_usage(settings.POLZA_TTS_MODEL, len(plain))
 
         # The frontend sends an openai/tts-1 voice name directly; an unknown
         # value falls back to the configured default (also a valid tts-1 voice).

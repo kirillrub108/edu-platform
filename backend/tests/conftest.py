@@ -109,6 +109,12 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
     import app.tasks.vision_pipeline as _vis_mod
     _vis_mod.SyncSession = _vp_mod.SyncSession
 
+    # 2a) usage_service builds its private sync engine lazily on first record;
+    # drop anything cached so it re-reads the rebound settings/URL.
+    import app.services.usage_service as _usage_mod
+    _usage_mod._engine = None
+    _usage_mod._SyncSession = None
+
     # 2b) Celery: even in EAGER mode `task.update_state(...)` writes to the
     # result backend. The default points at Redis (which isn't running in
     # this test env), so swap it for an in-memory backend.
@@ -476,7 +482,11 @@ def mock_vision(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         slide_image_paths: list[str],
         course_title: str,
         progress_cb: Any = None,
+        cancel_check: Any = None,
     ) -> list[str]:
+        # Mirror the real per-slide-boundary cancellation contract.
+        if cancel_check is not None and cancel_check():
+            raise vis_mod.AnalysisCancelled(0)
         if state["analyze_raise"] is not None:
             raise state["analyze_raise"]
         return [state["analyze_return"]] * len(slide_image_paths)

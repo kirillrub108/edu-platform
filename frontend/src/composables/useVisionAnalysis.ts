@@ -1,4 +1,4 @@
-import { friendlyTaskError } from '~/composables/useBillingMeta'
+import { friendlyApiError, friendlyTaskError } from '~/composables/useBillingMeta'
 
 interface SnapshotPanel {
   takeSnapshot(): void
@@ -22,6 +22,13 @@ export function useVisionAnalysis(
   const analyzing = ref(false)
   const cancellingAnalysis = ref(false)
 
+  // Billing telemetry from progress events / start response.
+  const creditsSpent = ref(0)
+  const creditsReserved = ref(0)
+  const billedVia = ref<string | null>(null)
+  // 402 from /analyze → show a "пополнить баланс" CTA.
+  const needTopup = ref(false)
+
   let analyzeTimer: ReturnType<typeof setInterval> | null = null
   let statusPollTimer: ReturnType<typeof setInterval> | null = null
   // One-shot guard: refresh the balance once analysis starts reporting progress,
@@ -35,13 +42,39 @@ export function useVisionAnalysis(
     if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null }
   }
 
+  const applyCredits = (src: any) => {
+    if (!src) return
+    if (src.credits_spent !== undefined) creditsSpent.value = src.credits_spent
+    if (src.credits_reserved !== undefined) creditsReserved.value = src.credits_reserved
+    if (src.billed_via !== undefined) billedVia.value = src.billed_via
+  }
+
+  // Terminal "cancelled": after a cooperative cancel the lesson status becomes
+  // 'cancelled' — update the lesson locally and roll the editor back.
+  const onCancelledTerminal = (spent?: number) => {
+    stopPolling()
+    analyzing.value = false
+    cancellingAnalysis.value = false
+    analyzeTaskId.value = null
+    analyzeStatus.value = ''
+    analyzeMeta.value = null
+    analyzeError.value = ''
+    if (spent !== undefined) creditsSpent.value = spent
+    lesson.value = { ...lesson.value, status: 'cancelled', analyze_task_id: null }
+    panelRef.value?.restoreFromSnapshot()
+    void billing.refresh()
+  }
+
   // SSE stream for real-time progress. Falls back to polling if EventSource
   // is unavailable or the SSE connection closes unexpectedly.
   const progressStream = useProgressStream(lessonId, (data: any) => {
     if (data.step !== undefined) {
       analyzeMeta.value = { step: data.step, done: data.done, total: data.total }
       analyzeStatus.value = 'PROGRESS'
+      applyCredits(data)
       if (!reserveReflected) { reserveReflected = true; void billing.fetchBalance() }
+    } else if (data.status === 'cancelled') {
+      onCancelledTerminal(data.credits_spent)
     } else if (data.status === 'ready_for_edit') {
       progressStream.stop()
       analyzing.value = false
@@ -82,6 +115,9 @@ export function useVisionAnalysis(
         lesson.value = data
         if (data.status === 'ready_for_edit') {
           showSlideEditor.value = true
+        } else if (data.status === 'cancelled') {
+          cancellingAnalysis.value = false
+          panelRef.value?.restoreFromSnapshot()
         } else if (data.status === 'error') {
           analyzeError.value =
             friendlyTaskError(data.last_warning) ?? 'Ошибка анализа. Попробуйте запустить снова.'
@@ -101,8 +137,12 @@ export function useVisionAnalysis(
       analyzeStatus.value = res.status
       if (res.status === 'PROGRESS') {
         analyzeMeta.value = { step: res.step, done: res.done, total: res.total }
+        applyCredits(res.meta ?? res)
       }
-      if (res.status === 'SUCCESS') {
+      if (res.status === 'REVOKED') {
+        // Lesson status 'cancelled' is mapped to celery REVOKED by the backend.
+        onCancelledTerminal(res.meta?.credits_spent ?? res.credits_spent)
+      } else if (res.status === 'SUCCESS') {
         stopPolling()
         analyzing.value = false
         panelRef.value?.clearSnapshot()
@@ -130,11 +170,17 @@ export function useVisionAnalysis(
     analyzeMeta.value = null
     analyzing.value = true
     reserveReflected = false
+    needTopup.value = false
+    creditsSpent.value = 0
+    creditsReserved.value = 0
+    billedVia.value = null
     stopPolling()
     try {
       const res = await apiFetch<any>(`/lessons/${lessonId.value}/analyze`, { method: 'POST' })
       analyzeTaskId.value = res.task_id
       analyzeStatus.value = 'PENDING'
+      if (res.credit_estimate !== undefined) creditsReserved.value = res.credit_estimate
+      if (res.billed_via !== undefined) billedVia.value = res.billed_via
       if (typeof EventSource !== 'undefined') {
         progressStream.start()
       } else {
@@ -142,25 +188,36 @@ export function useVisionAnalysis(
       }
     } catch (e: any) {
       analyzing.value = false
-      analyzeError.value = e?.data?.detail ?? 'Не удалось запустить анализ'
+      const msg = friendlyApiError(e)
+      analyzeError.value = msg.message
+      needTopup.value = msg.insufficient
     }
   }
 
   const cancelAnalysis = async () => {
     cancellingAnalysis.value = true
+    let cooperative = false
     try {
-      await apiFetch(`/lessons/${lessonId.value}/analysis-cancel`, { method: 'POST' })
+      const res = await apiFetch<any>(`/lessons/${lessonId.value}/cancel-generation`, {
+        method: 'POST',
+      })
+      // Cooperative: the task stops itself at the next slide — keep the
+      // "cancelling" state and wait for the terminal SSE {"status":"cancelled"}.
+      cooperative = res?.mode === 'cooperative'
+      if (cooperative) return
+      // Immediate (or nothing to cancel): status already rolled back server-side.
       stopPolling()
       analyzing.value = false
       analyzeTaskId.value = null
       analyzeStatus.value = ''
       analyzeMeta.value = null
-      lesson.value = { ...lesson.value, status: 'draft', analyze_task_id: null }
+      lesson.value = { ...lesson.value, status: res?.status ?? 'cancelled', analyze_task_id: null }
       panelRef.value?.restoreFromSnapshot()
+      void billing.refresh()
     } catch (e: any) {
       analyzeError.value = e?.data?.detail ?? 'Не удалось отменить анализ'
     } finally {
-      cancellingAnalysis.value = false
+      if (!cooperative) cancellingAnalysis.value = false
     }
   }
 
@@ -190,6 +247,7 @@ export function useVisionAnalysis(
 
   return {
     analyzing, analyzeStatus, analyzeMeta, analyzeError, cancellingAnalysis,
+    creditsSpent, creditsReserved, billedVia, needTopup,
     startAnalysis, cancelAnalysis, stopPolling,
   }
 }

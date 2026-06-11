@@ -10,23 +10,31 @@ from uuid import UUID, uuid4
 
 import redis as _sync_redis
 import structlog
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.constants import CREDIT_WEIGHTS, ENCODE_WORKERS, TTS_CACHE_TTL_DAYS, TTS_WORKERS
+from app.constants import (
+    ENCODE_WORKERS,
+    TTS_CACHE_TTL_DAYS,
+    TTS_WORKERS,
+    VIDEO_AUTO_BASE_CREDITS,
+    VIDEO_TEXT_BASE_CREDITS,
+)
 from app.models.course import Course
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
 from app.models.slide_text import SlideText
 from app.models.user import User
+from app.services import usage_service
 from app.services.billing_service import (
-    sync_charge_credits,
-    sync_release_credits,
-    sync_reserve_credits,
+    partial_video_cost,
+    sync_claim_billing,
+    sync_finalize_generation,
 )
 from app.services.llm_service import llm_service
+from app.services.quota_service import TRIAL_LECTURE, sync_release_slot
 from app.services.storage_service import storage_service
 from app.services.tts_service import tts_service
 from app.services.video_service import video_service
@@ -133,6 +141,19 @@ def _tts_cache_path(ssml: str, voice: str) -> str | None:
         return None
 
 
+class GenerationCancelled(Exception):
+    """Cooperative cancellation: cancel_requested was observed at a checkpoint."""
+
+
+def _cancel_requested(session: Session, lesson_id: UUID) -> bool:
+    """Fresh read of the cooperative-cancel flag (bypasses the identity map)."""
+    return bool(
+        session.execute(
+            select(Lesson.cancel_requested).where(Lesson.id == lesson_id)
+        ).scalar()
+    )
+
+
 def _set_status(
     session: Session,
     lesson_id: UUID,
@@ -146,8 +167,9 @@ def _set_status(
     if video_url is not None:
         lesson.video_url = video_url
     # Clear video_task_id once the video pipeline is no longer active.
-    if status in (LessonStatus.published, LessonStatus.error):
+    if status in (LessonStatus.published, LessonStatus.error, LessonStatus.cancelled):
         lesson.video_task_id = None
+        lesson.cancel_requested = False
     session.commit()
 
 
@@ -216,10 +238,20 @@ def generate_video_lesson(
     slides_cache_dir = os.path.join(settings.STORAGE_PATH, "slides_cache")
     os.makedirs(work_dir, exist_ok=True)
     _success = False
-    _reserved = False
     _owner_id: UUID | None = None
     _credit_op = "LESSON_REGEN" if is_regen else "LESSON_GENERATE"
-    _credit_amount = CREDIT_WEIGHTS["lesson_regen" if is_regen else "lesson_generate"]
+    # Billing state is written by the router before apply_async (reservation
+    # already taken there); the task only settles it. Filled in below.
+    _billed_via: str | None = None
+    _billing_ref: str | None = None
+    _estimate = 0
+    _base_credits = VIDEO_TEXT_BASE_CREDITS
+    _settled = False
+    # Slides whose narration was synthesized (or restored from checkpoint) and
+    # their plain char counts — the inputs of the partial-cancellation price.
+    _voiced_idx: set[int] = set()
+    _plain_lens: list[int] = []
+    _spent_now = 0
 
     # Per-task Redis client for checkpoints.
     # Prefork workers must not share connections — create one per task invocation.
@@ -242,10 +274,60 @@ def generate_video_lesson(
         cp_redis = None
 
     def _progress(step: str, done: int, total: int) -> None:
-        self.update_state(state="PROGRESS", meta={"step": step, "done": done, "total": total})
-        _publish(lesson_id, {"step": step, "done": done, "total": total})
+        meta = {
+            "step": step,
+            "done": done,
+            "total": total,
+            "credits_spent": _spent_now,
+            "credits_reserved": _estimate,
+            "billed_via": _billed_via,
+        }
+        self.update_state(state="PROGRESS", meta=meta)
+        _publish(lesson_id, meta)
 
     with SyncSession() as session:
+
+        def _current_spent() -> int:
+            if _billed_via != "credits":
+                return 0
+            voiced_chars = sum(_plain_lens[i] for i in _voiced_idx if i < len(_plain_lens))
+            return min(_estimate, partial_video_cost(_base_credits, len(_voiced_idx), voiced_chars))
+
+        def _settle(spent: int, keep_trial_slot: bool) -> None:
+            """Settle billing exactly once (idempotent against the cancel
+            endpoint and Celery redelivery via claim + ledger guard)."""
+            nonlocal _settled
+            if _settled or _owner_id is None or _billed_via is None:
+                _settled = True
+                return
+            claimed = sync_claim_billing(session, lesson_uuid)
+            if claimed == "credits" and _billing_ref:
+                sync_finalize_generation(
+                    session, _owner_id, _billing_ref, _estimate, spent, _credit_op
+                )
+            elif claimed == "trial" and not keep_trial_slot:
+                sync_release_slot(session, _owner_id, TRIAL_LECTURE)
+            settled_lesson = session.get(Lesson, lesson_uuid)
+            if settled_lesson:
+                settled_lesson.credits_spent = spent if _billed_via == "credits" else 0
+                session.commit()
+            _settled = True
+
+        def _checkpoint(step: str, done: int, total: int) -> None:
+            """Per-slide checkpoint (main thread): refresh credits_spent in the
+            DB, emit progress, and honour cooperative cancellation."""
+            nonlocal _spent_now
+            new_spent = _current_spent()
+            if new_spent != _spent_now:
+                _spent_now = new_spent
+                cp_lesson = session.get(Lesson, lesson_uuid)
+                if cp_lesson:
+                    cp_lesson.credits_spent = new_spent
+                    session.commit()
+            _progress(step, done, total)
+            if _cancel_requested(session, lesson_uuid):
+                raise GenerationCancelled()
+
         try:
             # Reset any previous warning from a prior run before starting fresh.
             lesson_reset = session.get(Lesson, lesson_uuid)
@@ -254,9 +336,7 @@ def generate_video_lesson(
                 session.commit()
 
             _set_status(session, lesson_uuid, LessonStatus.processing)
-            _progress("slides", 0, 1)
 
-            # ── 0. Reserve credits before any expensive work ─────────────────
             owner_lesson = session.get(Lesson, lesson_uuid)
             owner_module = session.get(Module, owner_lesson.module_id) if owner_lesson else None
             owner_course = session.get(Course, owner_module.course_id) if owner_module else None
@@ -264,16 +344,16 @@ def generate_video_lesson(
                 raise RuntimeError(f"Lesson {lesson_id} has no owning course")
             _owner_id = owner_course.owner_id
 
-            if not sync_reserve_credits(
-                session, _owner_id, _credit_amount, lesson_id, _credit_op
-            ):
-                shortfall = session.get(Lesson, lesson_uuid)
-                if shortfall:
-                    shortfall.last_warning = "Недостаточно кредитов для генерации видео"
-                _set_status(session, lesson_uuid, LessonStatus.error)
-                _publish(lesson_id, {"status": "error"})
-                return {"status": "error", "error": "insufficient_credits"}
-            _reserved = True
+            # Billing context persisted by the router (None for pre-deploy
+            # enqueues — those run unbilled; queues are drained on deploy).
+            _billed_via = owner_lesson.billed_via
+            _billing_ref = owner_lesson.billing_ref
+            _estimate = owner_lesson.credit_estimate or 0
+            if _billed_via is None:
+                logger.warning("video_pipeline_unbilled_run", lesson_id=lesson_id)
+
+            usage_service.set_usage_context("video", lesson_id=lesson_id)
+            _progress("slides", 0, 1)
 
             pptx_full = storage_service.get_full_path(pptx_relative_path)
 
@@ -307,6 +387,10 @@ def generate_video_lesson(
                 and len(per_slide_texts) == total_slides
                 and any(per_slide_texts)
             )
+            # Mirror the router's estimate formula for partial-cancel pricing.
+            _base_credits = VIDEO_AUTO_BASE_CREDITS if use_per_slide else VIDEO_TEXT_BASE_CREDITS
+            if _cancel_requested(session, lesson_uuid):
+                raise GenerationCancelled()
 
             # ── 3. VLM summaries — alignment hints for the script splitter ───
             # Skipped in auto mode (per_slide_texts already describe each slide
@@ -316,6 +400,7 @@ def generate_video_lesson(
             slide_summaries: list[str] = []
             if not use_per_slide:
                 _progress("summary", 0, total_slides)
+                usage_service.set_usage_context("video_summary", lesson_id=lesson_id)
 
                 def _summary_progress(done: int, total: int) -> None:
                     _progress("summary", done, total)
@@ -335,9 +420,12 @@ def generate_video_lesson(
                     non_empty=sum(1 for s in slide_summaries if s),
                 )
                 _progress("summary", total_slides, total_slides)
+                if _cancel_requested(session, lesson_uuid):
+                    raise GenerationCancelled()
 
             # ── 4. Split + SSML-annotate via LLM ─────────────────────────────
             _progress("llm", 0, 1)
+            usage_service.set_usage_context("video_split", lesson_id=lesson_id)
 
             cp_ssml = cp.get("ssml_chunks", [])
             if use_per_slide:
@@ -370,7 +458,10 @@ def generate_video_lesson(
                     # narration — never feed them to TTS. Use a silent placeholder.
                     slide_scripts[i] = f"<p>Слайд {i + 1}</p>"
                     logger.warning("empty_ssml_chunk", slide=i + 1)
+            _plain_lens = [len(_TAG_RE.sub("", s).strip()) for s in slide_scripts]
             _progress("llm", 1, 1)
+            if _cancel_requested(session, lesson_uuid):
+                raise GenerationCancelled()
 
             # Persist ssml_chunks and voice to checkpoint. If the voice changed
             # compared to what was previously checkpointed, invalidate tts_done
@@ -418,10 +509,19 @@ def generate_video_lesson(
 
             tts_done_count = len(cp_segments_done)  # start from already-done slides
             enc_done = len(cp_segments_done)
+            # Checkpoint-restored slides count as processed for partial pricing.
+            _voiced_idx.update(cp_segments_done)
 
             _cp_lock = threading.Lock()
 
             def _do_tts(idx: int) -> tuple[int, str]:
+                # Cooperative cancel before starting a new synthesis. Pool
+                # threads must not touch the task's session — use a private one.
+                with SyncSession() as tts_session:
+                    if _cancel_requested(tts_session, lesson_uuid):
+                        raise GenerationCancelled()
+                # ContextVars don't cross thread boundaries — set per thread.
+                usage_service.set_usage_context("tts", lesson_id=lesson_id)
                 audio_path = os.path.join(audio_dir, f"slide_{idx:04d}.wav")
                 ssml = slide_scripts[idx]
                 cache_path = _tts_cache_path(ssml, effective_voice)
@@ -460,32 +560,40 @@ def generate_video_lesson(
                 tts_futures = {tts_pool.submit(_do_tts, i): i for i in slides_needing_tts}
                 enc_futures: dict = {}
 
-                # Chain: each completed TTS immediately spawns an encode task.
-                for tts_future in as_completed(tts_futures):
-                    idx, audio_path = tts_future.result()
-                    tts_done_count += 1
-                    _progress("tts", tts_done_count, total_slides)
-                    logger.info("tts_done", done=tts_done_count, total=total_slides, slide=idx)
-                    enc_future = enc_pool.submit(
-                        video_service.encode_segment,
-                        idx,
-                        image_paths[idx],
-                        audio_path,
-                        seg_work_dir,
-                    )
-                    enc_futures[enc_future] = idx
+                try:
+                    # Chain: each completed TTS immediately spawns an encode task.
+                    for tts_future in as_completed(tts_futures):
+                        idx, audio_path = tts_future.result()
+                        tts_done_count += 1
+                        _voiced_idx.add(idx)
+                        logger.info("tts_done", done=tts_done_count, total=total_slides, slide=idx)
+                        enc_future = enc_pool.submit(
+                            video_service.encode_segment,
+                            idx,
+                            image_paths[idx],
+                            audio_path,
+                            seg_work_dir,
+                        )
+                        enc_futures[enc_future] = idx
+                        _checkpoint("tts", tts_done_count, total_slides)
 
-                # Collect encoding results (enc_pool still running inside `with`).
-                for enc_future in as_completed(enc_futures):
-                    idx = enc_futures[enc_future]
-                    segment_paths[idx] = enc_future.result()
-                    enc_done += 1
-                    _progress("encoding", enc_done, total_slides)
-                    with _cp_lock:
-                        cp_segments_done.add(idx)
-                        cp["segments_done"] = list(cp_segments_done)
-                        if cp_redis:
-                            _cp_write(cp_redis, lesson_id, cp)
+                    # Collect encoding results (enc_pool still running inside `with`).
+                    for enc_future in as_completed(enc_futures):
+                        idx = enc_futures[enc_future]
+                        segment_paths[idx] = enc_future.result()
+                        enc_done += 1
+                        with _cp_lock:
+                            cp_segments_done.add(idx)
+                            cp["segments_done"] = list(cp_segments_done)
+                            if cp_redis:
+                                _cp_write(cp_redis, lesson_id, cp)
+                        _checkpoint("encoding", enc_done, total_slides)
+                except GenerationCancelled:
+                    # Stop feeding the pools; queued work is dropped, threads
+                    # already running finish their current slide and exit.
+                    tts_pool.shutdown(wait=False, cancel_futures=True)
+                    enc_pool.shutdown(wait=False, cancel_futures=True)
+                    raise
 
             # ── 6. Concatenate segments → final MP4 ───────────────────────────
             # Each generation gets its own file so history entries stay independent.
@@ -532,6 +640,26 @@ def generate_video_lesson(
             _success = True
             return {"status": "ok", "video_id": video_id, "video_url": video_url}
 
+        except GenerationCancelled:
+            spent = _current_spent()
+            processed = len(_voiced_idx)
+            logger.info(
+                "video_pipeline_cancelled",
+                lesson_id=lesson_id,
+                processed_slides=processed,
+                credits_spent=spent,
+            )
+            try:
+                # ≥1 processed slide burns the trial slot; an untouched run refunds it.
+                _settle(spent=spent, keep_trial_slot=processed >= 1)
+            except Exception:
+                logger.exception("credit_finalize_failed", lesson_id=lesson_id)
+            _spent_now = spent
+            _set_status(session, lesson_uuid, LessonStatus.cancelled)
+            _publish(lesson_id, {"status": "cancelled", "credits_spent": spent})
+            # Keep the checkpoint — a future re-run reuses the synthesized slides.
+            return {"status": "cancelled", "credits_spent": spent}
+
         except Exception as exc:
             logger.exception("video_pipeline_failed", lesson_id=lesson_id)
             _set_status(session, lesson_uuid, LessonStatus.error)
@@ -540,18 +668,13 @@ def generate_video_lesson(
             return {"status": "error", "error": str(exc)}
 
         finally:
-            # Finalize billing before cleanup: charge on success, release the
-            # reserved hold on failure.
-            if _reserved and _owner_id is not None:
-                try:
-                    if _success:
-                        sync_charge_credits(
-                            session, _owner_id, _credit_amount, lesson_id, _credit_op
-                        )
-                    else:
-                        sync_release_credits(session, _owner_id, _credit_amount, lesson_id)
-                except Exception:
-                    logger.exception("credit_finalize_failed", lesson_id=lesson_id)
+            # Settle billing before cleanup: full charge on success, full
+            # release on failure (the cancel handler settled its partial charge
+            # already — _settle is a no-op then).
+            try:
+                _settle(spent=_estimate if _success else 0, keep_trial_slot=_success)
+            except Exception:
+                logger.exception("credit_finalize_failed", lesson_id=lesson_id)
 
             if work_dir and os.path.exists(work_dir):
                 if _success:

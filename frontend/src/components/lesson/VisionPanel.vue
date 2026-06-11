@@ -22,6 +22,10 @@ defineProps<{
   showSlideEditor: boolean
   lessonId: string
   cancellingAnalysis: boolean
+  creditsSpent: number
+  creditsReserved: number
+  billedVia: string | null
+  needTopup: boolean
 }>()
 
 const emit = defineEmits<{
@@ -31,6 +35,34 @@ const emit = defineEmits<{
   'slide-back': []
   'slide-ready': []
 }>()
+
+// Two-step cancel: first click flips into confirm mode, which resets after 5s
+// of inactivity.
+const confirmCancel = ref(false)
+let confirmTimer: ReturnType<typeof setTimeout> | null = null
+
+const clearConfirmTimer = () => {
+  if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null }
+}
+
+const onCancelClick = () => {
+  confirmCancel.value = true
+  clearConfirmTimer()
+  confirmTimer = setTimeout(() => { confirmCancel.value = false }, 5000)
+}
+
+const onCancelConfirm = () => {
+  confirmCancel.value = false
+  clearConfirmTimer()
+  emit('cancel-analyze')
+}
+
+const onCancelDecline = () => {
+  confirmCancel.value = false
+  clearConfirmTimer()
+}
+
+onUnmounted(clearConfirmTimer)
 </script>
 
 <template>
@@ -56,6 +88,10 @@ const emit = defineEmits<{
           :total="progressTotal"
           :indeterminate="progressTotal === 0"
         />
+        <p class="mt-2 text-xs text-gray-500">
+          <template v-if="billedVia === 'trial'">Триальная генерация — бесплатно</template>
+          <template v-else>Списано {{ creditsSpent }} из {{ creditsReserved }} CR</template>
+        </p>
       </div>
 
       <div
@@ -63,10 +99,17 @@ const emit = defineEmits<{
         class="flex items-start gap-2 mb-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"
       >
         <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
-        <span>{{ analyzeError }}</span>
+        <span class="flex-1">{{ analyzeError }}</span>
+        <NuxtLink
+          v-if="needTopup"
+          to="/billing"
+          class="shrink-0 text-xs font-medium text-violet-700 hover:text-violet-800 whitespace-nowrap"
+        >
+          Пополнить баланс →
+        </NuxtLink>
       </div>
 
-      <div class="flex gap-2 flex-wrap">
+      <div class="flex gap-2 flex-wrap items-center">
         <UiButton
           variant="primary"
           :loading="analyzing"
@@ -76,15 +119,33 @@ const emit = defineEmits<{
           <template #icon><Sparkles class="w-4 h-4" /></template>
           {{ (lessonStatus === 'ready_for_edit' || lessonStatus === 'published') ? 'Перезапустить анализ' : 'Запустить анализ' }}
         </UiButton>
-        <UiButton
-          v-if="analyzing"
-          variant="secondary"
-          :loading="cancellingAnalysis"
-          @click="emit('cancel-analyze')"
-        >
-          <template #icon><Square class="w-4 h-4" /></template>
-          Остановить
-        </UiButton>
+        <template v-if="analyzing">
+          <UiButton
+            v-if="!confirmCancel"
+            variant="secondary"
+            :loading="cancellingAnalysis"
+            @click="onCancelClick"
+          >
+            <template #icon><Square class="w-4 h-4" /></template>
+            Остановить
+          </UiButton>
+          <template v-else>
+            <span class="text-sm text-gray-600">
+              Точно отменить? Спишется за обработанные слайды
+            </span>
+            <UiButton
+              variant="danger"
+              size="sm"
+              :loading="cancellingAnalysis"
+              @click="onCancelConfirm"
+            >
+              Да, отменить
+            </UiButton>
+            <UiButton variant="ghost" size="sm" @click="onCancelDecline">
+              Нет
+            </UiButton>
+          </template>
+        </template>
       </div>
     </section>
 

@@ -15,6 +15,7 @@ from app.constants import (
     QUIZ_TYPE_DISTRIBUTION,
 )
 from app.schemas.quiz import FlagKind, QuestionFlag, RegenerateMode
+from app.services import usage_service
 
 logger = structlog.get_logger()
 
@@ -172,6 +173,7 @@ class LLMService:
             kwargs["response_format"] = {"type": "json_object"}
 
         response = await self.client.chat.completions.create(**self._apply_provider(kwargs))
+        await usage_service.arecord_llm_usage(kwargs["model"], getattr(response, "usage", None))
         return self._strip_think(response.choices[0].message.content or "")
 
     async def _chat_json_validated[T](
@@ -338,6 +340,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             "max_tokens": settings.LLM_MAX_TOKENS,
         }
         response = await self.client.chat.completions.create(**self._apply_provider(kwargs))
+        await usage_service.arecord_llm_usage(self.model, getattr(response, "usage", None))
         return self._strip_think(response.choices[0].message.content or "")
 
     async def refine_slide_narration(self, vision_text: str, model: str) -> str:
@@ -486,6 +489,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         last_error: str | None = None
         for attempt in range(2):
             response = await self.client.chat.completions.create(**kwargs)
+            await usage_service.arecord_llm_usage(self.model, getattr(response, "usage", None))
             raw = self._strip_think(response.choices[0].message.content or "")
             if not raw.strip():
                 last_error = "empty response after strip_think"

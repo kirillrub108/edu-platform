@@ -18,6 +18,11 @@ const props = defineProps<{
   isAuto: boolean
   isManual: boolean
   scriptIsEmpty: boolean
+  creditsSpent: number
+  creditsReserved: number
+  billedVia: string | null
+  needTopup: boolean
+  cancelled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -27,6 +32,34 @@ const emit = defineEmits<{
 }>()
 
 const isProcessing = computed(() => props.generating || props.lessonStatus === 'processing')
+
+// Two-step cancel: first click flips into confirm mode, which resets after 5s
+// of inactivity.
+const confirmCancel = ref(false)
+let confirmTimer: ReturnType<typeof setTimeout> | null = null
+
+const clearConfirmTimer = () => {
+  if (confirmTimer) { clearTimeout(confirmTimer); confirmTimer = null }
+}
+
+const onCancelClick = () => {
+  confirmCancel.value = true
+  clearConfirmTimer()
+  confirmTimer = setTimeout(() => { confirmCancel.value = false }, 5000)
+}
+
+const onCancelConfirm = () => {
+  confirmCancel.value = false
+  clearConfirmTimer()
+  emit('cancel')
+}
+
+const onCancelDecline = () => {
+  confirmCancel.value = false
+  clearConfirmTimer()
+}
+
+onUnmounted(clearConfirmTimer)
 
 const hint = computed(() => {
   if (!props.hasPptx) return 'Сначала загрузите презентацию'
@@ -64,6 +97,18 @@ const hint = computed(() => {
 
       <div v-if="showPipeline" class="mb-5 px-2">
         <PipelineStages :stages="pipelineStages" :current="currentStageIdx" />
+        <p class="mt-3 text-xs text-center text-gray-500">
+          <template v-if="billedVia === 'trial'">Триальная генерация — бесплатно</template>
+          <template v-else>Списано {{ creditsSpent }} из {{ creditsReserved }} CR</template>
+        </p>
+      </div>
+
+      <div
+        v-if="cancelled"
+        class="flex items-start gap-2 mb-3 text-sm text-gray-600 bg-gray-50 border border-gray-200 rounded-xl px-3 py-2"
+      >
+        <AlertCircle class="w-4 h-4 shrink-0 mt-0.5 text-gray-400" />
+        <span>Генерация отменена, списано {{ creditsSpent }} CR</span>
       </div>
 
       <div
@@ -71,7 +116,14 @@ const hint = computed(() => {
         class="flex items-start gap-2 mb-3 text-sm text-rose-700 bg-rose-50 border border-rose-200 rounded-xl px-3 py-2"
       >
         <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
-        <span>{{ taskError }}</span>
+        <span class="flex-1">{{ taskError }}</span>
+        <NuxtLink
+          v-if="needTopup"
+          to="/billing"
+          class="shrink-0 text-xs font-medium text-violet-700 hover:text-violet-800 whitespace-nowrap"
+        >
+          Пополнить баланс →
+        </NuxtLink>
       </div>
 
       <div class="flex gap-2 flex-wrap items-center">
@@ -86,16 +138,35 @@ const hint = computed(() => {
           <span v-else-if="lessonStatus === 'published'">Перегенерировать</span>
           <span v-else>Создать видео</span>
         </UiButton>
-        <UiButton
-          v-if="isProcessing"
-          variant="secondary"
-          :loading="cancellingVideo"
-          type="button"
-          @click.prevent="emit('cancel')"
-        >
-          <template #icon><Square class="w-4 h-4" /></template>
-          Остановить
-        </UiButton>
+        <template v-if="isProcessing">
+          <UiButton
+            v-if="!confirmCancel"
+            variant="secondary"
+            :loading="cancellingVideo"
+            type="button"
+            @click.prevent="onCancelClick"
+          >
+            <template #icon><Square class="w-4 h-4" /></template>
+            Остановить
+          </UiButton>
+          <template v-else>
+            <span class="text-sm text-gray-600">
+              Точно отменить? Спишется за обработанные слайды
+            </span>
+            <UiButton
+              variant="danger"
+              size="sm"
+              :loading="cancellingVideo"
+              type="button"
+              @click.prevent="onCancelConfirm"
+            >
+              Да, отменить
+            </UiButton>
+            <UiButton variant="ghost" size="sm" type="button" @click.prevent="onCancelDecline">
+              Нет
+            </UiButton>
+          </template>
+        </template>
       </div>
       <p v-if="!canGenerateVideo && !isProcessing && hint" class="mt-2 text-xs text-gray-400">
         {{ hint }}

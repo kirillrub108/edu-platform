@@ -46,14 +46,17 @@ async def test_generate_video_free_uses_low_priority(
     teacher_token: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.routers import lessons as lessons_router
     from app.tasks import video_pipeline as vp
 
+    monkeypatch.setattr(lessons_router, "count_source_slides", lambda _p: 5)
     calls = _capture_apply_async(monkeypatch, vp.generate_video_lesson)
 
     course = await make_course(db_session, owner=teacher_user)
     module = await make_module(db_session, course)
     lesson = await make_lesson(db_session, module, pptx_path="pptx/x.pptx")
 
+    # Fresh free account: the launch is covered by a trial slot (no credits).
     resp = await client.post(
         f"/api/v1/lessons/{lesson.id}/generate-video",
         json={"pptx_path": "pptx/x.pptx", "voice": "nova"},
@@ -72,9 +75,13 @@ async def test_generate_video_paid_uses_higher_priority(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     await _set_plan(db_session, teacher_user.id, CreditPlan.pro)
+    # Paid plans have no trial — fund the reservation.
+    await billing_service.grant_credits(db_session, teacher_user.id, 100, "seed")
 
+    from app.routers import lessons as lessons_router
     from app.tasks import video_pipeline as vp
 
+    monkeypatch.setattr(lessons_router, "count_source_slides", lambda _p: 5)
     calls = _capture_apply_async(monkeypatch, vp.generate_video_lesson)
 
     course = await make_course(db_session, owner=teacher_user)
@@ -98,8 +105,10 @@ async def test_analyze_free_uses_low_priority(
     teacher_token: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from app.routers import slides as slides_router
     from app.tasks import vision_pipeline as vp
 
+    monkeypatch.setattr(slides_router, "count_source_slides", lambda _p: 5)
     calls = _capture_apply_async(monkeypatch, vp.analyze_presentation_task)
 
     course = await make_course(db_session, owner=teacher_user)

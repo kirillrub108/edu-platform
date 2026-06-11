@@ -27,7 +27,7 @@ import structlog
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.constants import QUIZ_GRADING_WORKERS, QUIZ_TYPE_DISTRIBUTION
+from app.constants import CREDIT_WEIGHTS, QUIZ_GRADING_WORKERS, QUIZ_TYPE_DISTRIBUTION
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import Lesson
 from app.models.quiz import (
@@ -36,6 +36,8 @@ from app.models.quiz import (
     QuizAnswer,
     QuizAttempt,
 )
+from app.services import usage_service
+from app.services.billing_service import sync_finalize_generation
 from app.services.grading_service import (
     aggregate_score,
     is_open_type,
@@ -50,6 +52,7 @@ from app.services.quiz_service import (
     replace_questions_sync,
     resolve_snapshot_sync,
 )
+from app.services.quota_service import TRIAL_QUIZ, sync_release_slot
 from app.tasks.video_pipeline import SyncSession, _publish
 
 logger = structlog.get_logger()
@@ -69,22 +72,52 @@ def generate_quiz_task(
     num_questions: int,
     num_options: int,
     types: list[str] | None = None,
+    billing_ref: str | None = None,
+    billed_via: str | None = None,
+    owner_id: str | None = None,
 ) -> dict:
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(task_id=self.request.id, task_name=self.name)
     lesson_uuid = UUID(lesson_id)
     allowed_types = list(types) if types else list(QUIZ_TYPE_DISTRIBUTION.keys())
+    estimate = CREDIT_WEIGHTS["quiz_generate"]
+    owner_uuid = UUID(owner_id) if owner_id else None
 
     def _progress(step: str, done: int, total: int) -> None:
         self.update_state(state="PROGRESS", meta={"step": step, "done": done, "total": total})
         _publish(lesson_id, {"step": step, "done": done, "total": total})
 
     with SyncSession() as session:
+
+        def _settle(success: bool) -> None:
+            """Charge full price on success, refund (credits or trial slot) on
+            failure. Quiz generation is not cancellable once started. The
+            credits path is ledger-idempotent against Celery redelivery."""
+            if owner_uuid is None:
+                return
+            try:
+                if billed_via == "credits" and billing_ref:
+                    sync_finalize_generation(
+                        session,
+                        owner_uuid,
+                        billing_ref,
+                        estimate,
+                        estimate if success else 0,
+                        "QUIZ_GENERATE",
+                    )
+                elif billed_via == "trial" and not success:
+                    sync_release_slot(session, owner_uuid, TRIAL_QUIZ)
+            except Exception:
+                logger.exception("credit_finalize_failed", lesson_id=lesson_id)
+
         try:
             _progress("material", 0, 3)
             material = assemble_material_sync(session, lesson_uuid)
             quiz = get_or_create_quiz_sync(session, lesson_uuid)
             quiz_id = quiz.id
+            usage_service.set_usage_context(
+                "quiz_generate", lesson_id=lesson_id, quiz_id=quiz_id
+            )
 
             _progress("llm", 1, 3)
             generated = asyncio.run(
@@ -100,6 +133,7 @@ def generate_quiz_task(
             replace_questions_sync(session, quiz_id, generated)
             _clear_generation_task(session, quiz_id)
             session.commit()
+            _settle(success=True)
             _progress("persist", 3, 3)
             return {"status": "ok", "total": len(generated), "quiz_id": str(quiz_id)}
 
@@ -108,6 +142,7 @@ def generate_quiz_task(
             quiz_row = session.query(Quiz).filter(Quiz.lesson_id == lesson_uuid).first()
             if quiz_row:
                 _clear_generation_task(session, quiz_row.id)
+            _settle(success=False)
             logger.warning("quiz_gen_empty_material", lesson_id=lesson_id)
             return {"status": "error", "error": str(exc)}
         except LLMOutputError as exc:
@@ -115,6 +150,7 @@ def generate_quiz_task(
             quiz_row = session.query(Quiz).filter(Quiz.lesson_id == lesson_uuid).first()
             if quiz_row:
                 _clear_generation_task(session, quiz_row.id)
+            _settle(success=False)
             logger.error("quiz_gen_llm_invalid", error=str(exc))
             return {"status": "error", "error": str(exc)}
         except Exception as exc:
@@ -122,6 +158,7 @@ def generate_quiz_task(
             quiz_row = session.query(Quiz).filter(Quiz.lesson_id == lesson_uuid).first()
             if quiz_row:
                 _clear_generation_task(session, quiz_row.id)
+            _settle(success=False)
             logger.exception("quiz_gen_failed", lesson_id=lesson_id)
             return {"status": "error", "error": str(exc)}
 
@@ -133,10 +170,14 @@ def _grade_one_open(
     answer_id: UUID,
     payload: dict[str, Any],
     response_text: str,
+    quiz_id: UUID | None = None,
 ) -> tuple[UUID, float, str, bool]:
     """Run LLM grading for a single open answer. Returns (answer_id, score,
     feedback, ok) — ok=False signals LLM failure (router treats as needs_review).
     """
+    # Pool thread — usage context must be set here (ContextVars don't cross
+    # threads). Grading is free for the user but still journaled for margin.
+    usage_service.set_usage_context("quiz_grade", quiz_id=quiz_id)
     try:
         score, feedback = asyncio.run(llm_service.grade_open_answer(payload, response_text))
         return answer_id, score, feedback, True
@@ -254,7 +295,9 @@ def grade_attempt_task(self, attempt_id: str) -> dict:
                     max_workers=QUIZ_GRADING_WORKERS, thread_name_prefix="grade"
                 ) as pool:
                     futs = {
-                        pool.submit(_grade_one_open, ans_id, payload, text): ans_id
+                        pool.submit(
+                            _grade_one_open, ans_id, payload, text, attempt.quiz_id
+                        ): ans_id
                         for ans_id, payload, text in open_jobs
                     }
                     for fut in as_completed(futs):

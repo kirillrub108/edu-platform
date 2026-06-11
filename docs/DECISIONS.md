@@ -800,6 +800,28 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## Монетизация: формульный прайс, резерв в роутере, кооперативная отмена, ЮКасса
+
+**Контекст.** Кредиты были плоскими (`CREDIT_WEIGHTS["lesson_generate"]=10`), резерв жил внутри Celery-таски (TOCTOU-окно после проверки баланса в роутере), отмена убивала таску `revoke(terminate=True)`, покупки кредитов не было.
+
+**Решение.**
+- **Двухслойная модель цены.** Пользователю — детерминированная формула (`billing_service.estimate_video_text/auto`: база + слайды + `ceil(символы/3000)`; компоненты в `constants.py`). Факт провайдерских трат — в `generation_usage` (хуки в `llm_service`/`vision_analysis`/`tts_service` на месте реальных HTTP-вызовов; кеш-хиты не журналируются). Метрика `ai_cost_rub` — DB-backed коллектор на FastAPI-стороне, т.к. Prometheus скрейпит только backend, не воркеры.
+- **Резерв полного эстимейта — в роутере до `apply_async`** (порядок: concurrency → estimate → триал/резерв → enqueue), с уникальным `billing_ref` на запуск. Таска только **финализирует**: `sync_finalize_generation` в одной транзакции списывает spent и возвращает остаток, идемпотентно по леджеру (повторный finalizer для `billing_ref` — no-op; переживает Celery-redelivery при `acks_late`). Старые `sync_reserve/charge/release_credits` удалены.
+- **Гонка «cancel-эндпоинт vs финализация таски»** решается claim'ом: `lesson.billed_via` обнуляется под `FOR UPDATE` (`claim_billing`/`sync_claim_billing`) — ровно одна сторона выполняет возврат/списание (критично для триал-слотов, у которых нет леджера).
+- **Кооперативная отмена** (`POST /lessons/{id}/cancel-generation`): таска в очереди (PENDING) → `revoke()` без terminate + полный возврат; бегущая — флаг `cancel_requested`, пайплайны проверяют его на границах слайдов (video: тела циклов `as_completed` + старт `_do_tts`; vision: `cancel_check` в `analyze_presentation`), списывают `база + слайды + ceil(озвучено/3000)` (vision — pro-rata), остаток возвращают, статус → `cancelled`. SIGKILL больше не используется; старые `cancel-video`/`analysis-cancel` — делегаты.
+- **Lifetime-триал free-аккаунтов** (`usage_counters`, `period_key='lifetime'`): 2 лекции + 2 теста вместо кредитов (атомарный UPSERT `...DO UPDATE WHERE count < :limit RETURNING`); кап лекции ≤20 слайдов и ≤15000 символов. Welcome-кредиты free-плана убраны (50→0) — иначе «3-я лекция → 402 trial_exhausted» недостижим. Vision-анализ под неисчерпанным триалом бесплатен и слот не жжёт — слот сжигает только generate-video (успех или отмена после ≥1 слайда; фейл сервиса возвращает слот).
+- **ЮКасса без SDK** (httpx, `services/yookassa_service.py`): `POST /billing/payments` (Idempotence-Key = `Payment.idempotence_key`, redirect-confirmation, чек 54-ФЗ за флагом `YOOKASSA_SEND_RECEIPT`), webhook `POST /billing/webhooks/yookassa` телу не доверяет — re-fetch платежа из API; начисление `apply_purchase` идемпотентно (лок строки Payment → лок счёта, один порядок локов с поллингом). `GET /billing/payments/{id}` тоже финализирует — локальный флоу работает без публичного webhook. Webhook вне CSRF автоматически: у него нет cookie-зависимостей (список исключений не нужен — его не существует).
+- **Деплой-нота:** задачи, поставленные в очередь до деплоя, не несут биллинг-полей урока — выполняются как unbilled (warning в логах). Очереди дренировать перед деплоем (тот же прецедент, что миграция очередей в KNOWN_PROBLEMS).
+
+**Trade-offs:**
+
+- + Списание ровно эстимейт / полный возврат / частичное при отмене — атомарно и идемпотентно; покупка не дублируется при повторной доставке webhook.
+- − Цена авто-режима — норматив 600 симв/слайд, а не факт (предсказуемость до анализа дороже точности).
+- − Слайды PDF до рендера считаются эвристикой по байтам (`/Count`); экзотические PDF с object streams могут не посчитаться → 422 до запуска.
+- − Триал-слот квиза при двойном фейле с redelivery теоретически может вернуться дважды (клемп ≥0; у слотов нет леджера) — принято как редкий и дешёвый кейс.
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.

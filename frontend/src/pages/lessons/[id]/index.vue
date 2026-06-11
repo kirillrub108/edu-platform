@@ -32,21 +32,67 @@ const {
 const {
   startAnalysis, cancelAnalysis, analyzing, analyzeMeta, analyzeStatus, analyzeError,
   cancellingAnalysis, stopPolling: stopVisionPolling,
+  creditsSpent: analyzeCreditsSpent, creditsReserved: analyzeCreditsReserved,
+  billedVia: analyzeBilledVia, needTopup: analyzeNeedTopup,
 } = useVisionAnalysis(lessonId, lesson, visionPanelRef, showSlideEditor)
 
 const {
   generateVideo: _generateVideo, cancelVideo, generating, taskError,
   selectedVoice, voices, canGenerateVideo, showPipeline,
   pipelineStages, currentStageIdx, cancellingVideo, stopPolling: stopVideoPolling,
+  creditsSpent, creditsReserved, billedVia, needTopup, cancelled,
 } = useVideoGeneration(lessonId, lesson, mode, script, flushScript, isAuto, showSlideEditor)
 
 // Block AI actions behind email verification — opens the verify prompt and
 // never hits the backend when the user is unverified.
 const { ensureVerified } = useAiGuard()
+
+// ── Generation cost confirmation modal ─────────────────────────────────────────
+
+const estimateData = ref<any | null>(null)
+const estimateLoading = ref(false)
+const costModalOpen = ref(false)
+const costModalKind = ref<'video' | 'analyze'>('video')
+let pendingAction: (() => unknown) | null = null
+
+const openCostModal = async (kind: 'video' | 'analyze', action: () => unknown) => {
+  costModalKind.value = kind
+  pendingAction = action
+  estimateData.value = null
+  estimateLoading.value = true
+  costModalOpen.value = true
+  try {
+    estimateData.value = await apiFetch<any>(`/lessons/${lessonId.value}/generation-estimate`)
+  } catch {
+    // Estimate failed — don't block the user, run directly without the modal.
+    costModalOpen.value = false
+    const act = pendingAction
+    pendingAction = null
+    await act?.()
+  } finally {
+    estimateLoading.value = false
+  }
+}
+
+const onCostConfirm = async () => {
+  costModalOpen.value = false
+  const act = pendingAction
+  pendingAction = null
+  await act?.()
+}
+
+const onCostClose = () => {
+  costModalOpen.value = false
+  pendingAction = null
+}
+
 // Reset the LLM-fallback warning banner each time generation starts.
 const generateVideo = () =>
-  ensureVerified(async () => { warningDismissed.value = false; await _generateVideo() })
-const guardedStartAnalysis = () => ensureVerified(startAnalysis)
+  ensureVerified(() =>
+    openCostModal('video', async () => { warningDismissed.value = false; await _generateVideo() }),
+  )
+const guardedStartAnalysis = () =>
+  ensureVerified(() => openCostModal('analyze', startAnalysis))
 
 const lessonStatusForBadge = computed(() => {
   if (analyzing.value) return 'analyzing'
@@ -259,6 +305,10 @@ watch(lessonId, (newId, oldId) => {
         :show-slide-editor="showSlideEditor"
         :lesson-id="lessonId"
         :cancelling-analysis="cancellingAnalysis"
+        :credits-spent="analyzeCreditsSpent"
+        :credits-reserved="analyzeCreditsReserved"
+        :billed-via="analyzeBilledVia"
+        :need-topup="analyzeNeedTopup"
         @file-change="pptxFile = $event; uploadError = ''"
         @upload="uploadPptx"
         @start-analyze="guardedStartAnalysis"
@@ -297,6 +347,11 @@ watch(lessonId, (newId, oldId) => {
         :is-auto="isAuto"
         :is-manual="isManual"
         :script-is-empty="!script.trim()"
+        :credits-spent="creditsSpent"
+        :credits-reserved="creditsReserved"
+        :billed-via="billedVia"
+        :need-topup="needTopup"
+        :cancelled="cancelled"
         @generate="generateVideo"
         @cancel="cancelVideo"
       />
@@ -411,5 +466,14 @@ watch(lessonId, (newId, oldId) => {
         </table>
       </section>
     </div>
+
+    <GenerationCostModal
+      :open="costModalOpen"
+      :kind="costModalKind"
+      :estimate="estimateData"
+      :loading="estimateLoading"
+      @confirm="onCostConfirm"
+      @close="onCostClose"
+    />
   </div>
 </template>

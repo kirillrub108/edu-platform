@@ -1,5 +1,5 @@
 import { CreationMode, type CreationModeValue } from '~/composables/useCreationMode'
-import { friendlyTaskError } from '~/composables/useBillingMeta'
+import { friendlyApiError, friendlyTaskError } from '~/composables/useBillingMeta'
 
 export function useVideoGeneration(
   lessonId: Readonly<Ref<string>>,
@@ -35,6 +35,16 @@ export function useVideoGeneration(
   const cancellingVideo = ref(false)
   const pipelineDone = ref(false)
 
+  // Billing telemetry from progress events / start response.
+  const creditsSpent = ref(0)
+  const creditsReserved = ref(0)
+  const billedVia = ref<string | null>(null)
+  // 402 from generate-video → show a "пополнить баланс" CTA.
+  const needTopup = ref(false)
+  // Short-lived banner "Генерация отменена, списано N CR".
+  const cancelled = ref(false)
+  let cancelledTimer: ReturnType<typeof setTimeout> | null = null
+
   let pollTimer: ReturnType<typeof setInterval> | null = null
   let statusPollTimer: ReturnType<typeof setInterval> | null = null
   // One-shot guard: refresh the balance once the task starts reporting progress,
@@ -48,13 +58,40 @@ export function useVideoGeneration(
     if (statusPollTimer) { clearInterval(statusPollTimer); statusPollTimer = null }
   }
 
+  const applyCredits = (src: any) => {
+    if (!src) return
+    if (src.credits_spent !== undefined) creditsSpent.value = src.credits_spent
+    if (src.credits_reserved !== undefined) creditsReserved.value = src.credits_reserved
+    if (src.billed_via !== undefined) billedVia.value = src.billed_via
+  }
+
+  // Terminal "cancelled": stop tracking, reflect the partial charge, reload the
+  // lesson — like the error path, but without an error message.
+  const onCancelledTerminal = (spent?: number) => {
+    stopPolling()
+    generating.value = false
+    cancellingVideo.value = false
+    taskStatus.value = ''
+    taskMeta.value = null
+    taskError.value = ''
+    if (spent !== undefined) creditsSpent.value = spent
+    cancelled.value = true
+    if (cancelledTimer) clearTimeout(cancelledTimer)
+    cancelledTimer = setTimeout(() => { cancelled.value = false }, 60_000)
+    apiFetch<any>(`/lessons/${lessonId.value}`).then(d => { lesson.value = d })
+    void billing.refresh()
+  }
+
   // SSE stream for real-time progress. Falls back to polling if EventSource
   // is unavailable or the SSE connection closes unexpectedly.
   const progressStream = useProgressStream(lessonId, (data: any) => {
     if (data.step !== undefined) {
       taskMeta.value = { step: data.step, done: data.done ?? 0, total: data.total ?? 1 }
       taskStatus.value = 'PROGRESS'
+      applyCredits(data)
       if (!reserveReflected) { reserveReflected = true; void billing.fetchBalance() }
+    } else if (data.status === 'cancelled') {
+      onCancelledTerminal(data.credits_spent)
     } else if (data.status === 'published') {
       progressStream.stop()
       generating.value = false
@@ -99,6 +136,11 @@ export function useVideoGeneration(
         lesson.value = data
         if (data.status === 'error') {
           taskError.value = friendlyTaskError(data.last_warning) ?? 'Ошибка генерации видео.'
+        } else if (data.status === 'cancelled') {
+          cancellingVideo.value = false
+          cancelled.value = true
+          if (cancelledTimer) clearTimeout(cancelledTimer)
+          cancelledTimer = setTimeout(() => { cancelled.value = false }, 60_000)
         } else {
           pipelineDone.value = true
         }
@@ -115,8 +157,12 @@ export function useVideoGeneration(
       taskStatus.value = res.status
       if (res.status === 'PROGRESS' && res.meta) {
         taskMeta.value = res.meta
+        applyCredits(res.meta)
       }
-      if (res.status === 'SUCCESS') {
+      if (res.status === 'REVOKED') {
+        // Lesson status 'cancelled' is mapped to celery REVOKED by the backend.
+        onCancelledTerminal(res.meta?.credits_spent)
+      } else if (res.status === 'SUCCESS') {
         stopPollTimer()
         generating.value = false
         const data = await apiFetch<any>(`/lessons/${lessonId.value}`)
@@ -152,6 +198,12 @@ export function useVideoGeneration(
     pipelineDone.value = false
     generating.value = true
     reserveReflected = false
+    needTopup.value = false
+    cancelled.value = false
+    if (cancelledTimer) { clearTimeout(cancelledTimer); cancelledTimer = null }
+    creditsSpent.value = 0
+    creditsReserved.value = 0
+    billedVia.value = null
     stopPolling()
     if (mode.value === CreationMode.PRESENTATION_AND_TEXT) {
       await flushScript()
@@ -163,6 +215,8 @@ export function useVideoGeneration(
       })
       taskId.value = res.task_id
       taskStatus.value = 'PENDING'
+      if (res.credit_estimate !== undefined) creditsReserved.value = res.credit_estimate
+      if (res.billed_via !== undefined) billedVia.value = res.billed_via
       if (typeof EventSource !== 'undefined') {
         progressStream.start()
       } else {
@@ -170,14 +224,24 @@ export function useVideoGeneration(
       }
     } catch (e: any) {
       generating.value = false
-      taskError.value = e?.data?.detail ?? 'Не удалось запустить генерацию'
+      const msg = friendlyApiError(e)
+      taskError.value = msg.message
+      needTopup.value = msg.insufficient
     }
   }
 
   const cancelVideo = async () => {
     cancellingVideo.value = true
+    let cooperative = false
     try {
-      await apiFetch(`/lessons/${lessonId.value}/cancel-video`, { method: 'POST' })
+      const res = await apiFetch<any>(`/lessons/${lessonId.value}/cancel-generation`, {
+        method: 'POST',
+      })
+      // Cooperative: the pipeline stops itself at the next slide — keep the
+      // "cancelling" state and wait for the terminal SSE {"status":"cancelled"}.
+      cooperative = res?.mode === 'cooperative'
+      if (cooperative) return
+      // Immediate (or nothing to cancel): status already rolled back server-side.
       stopPolling()
       generating.value = false
       taskStatus.value = ''
@@ -192,8 +256,9 @@ export function useVideoGeneration(
       // just before cancel committed, so lesson status could be 'published' rather
       // than 'ready_for_edit', and the watch wouldn't open the editor automatically.
       if (isAuto.value) showSlideEditor.value = true
+      void billing.refresh()
     } catch { /* ignore */ } finally {
-      cancellingVideo.value = false
+      if (!cooperative) cancellingVideo.value = false
     }
   }
 
@@ -217,7 +282,10 @@ export function useVideoGeneration(
     }
   }, { immediate: true })
 
-  onUnmounted(stopPolling)
+  onUnmounted(() => {
+    stopPolling()
+    if (cancelledTimer) { clearTimeout(cancelledTimer); cancelledTimer = null }
+  })
 
   const stages = computed(() => {
     const base = [
@@ -258,7 +326,8 @@ export function useVideoGeneration(
     if (!lesson.value?.pptx_path) return false
     if (generating.value || lesson.value.status === 'processing') return false
     if (isAuto.value) {
-      return lesson.value.status === 'ready_for_edit' || lesson.value.status === 'published'
+      // 'cancelled' allows a restart, same as draft/ready_for_edit.
+      return ['ready_for_edit', 'published', 'cancelled'].includes(lesson.value.status)
     }
     if (mode.value === CreationMode.PRESENTATION_AND_TEXT) {
       return script.value.trim().length > 0
@@ -269,6 +338,7 @@ export function useVideoGeneration(
   return {
     voices, selectedVoice,
     generating, cancellingVideo, taskError,
+    creditsSpent, creditsReserved, billedVia, needTopup, cancelled,
     generateVideo, cancelVideo, stopPolling,
     showPipeline, pipelineStages, currentStageIdx, canGenerateVideo,
   }

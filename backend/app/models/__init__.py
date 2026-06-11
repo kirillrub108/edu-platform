@@ -7,8 +7,10 @@ from app.models.credit import (
     CreditTransaction,
 )
 from app.models.enrollment import Enrollment, LessonProgress
+from app.models.generation_usage import GenerationUsage
 from app.models.lesson import ContentType, CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
+from app.models.payment import Payment, PaymentStatus
 from app.models.quiz import (
     AttemptStatus,
     QuestionType,
@@ -19,6 +21,7 @@ from app.models.quiz import (
     QuizStatus,
 )
 from app.models.slide_text import SlideText
+from app.models.usage_counter import UsageCounter
 from app.models.user import User, UserRole
 
 __all__ = [
@@ -47,4 +50,8 @@ __all__ = [
     "CreditTransaction",
     "CreditPlan",
     "CreditOperation",
+    "Payment",
+    "PaymentStatus",
+    "GenerationUsage",
+    "UsageCounter",
 ]

@@ -17,6 +17,10 @@ defineProps<{
   showSlideEditor: boolean
   lessonId: string
   cancellingAnalysis: boolean
+  creditsSpent: number
+  creditsReserved: number
+  billedVia: string | null
+  needTopup: boolean
 }>()
 
 const emit = defineEmits<{
@@ -67,6 +71,10 @@ defineExpose({
       :show-slide-editor="showSlideEditor"
       :lesson-id="lessonId"
       :cancelling-analysis="cancellingAnalysis"
+      :credits-spent="creditsSpent"
+      :credits-reserved="creditsReserved"
+      :billed-via="billedVia"
+      :need-topup="needTopup"
       @start-analyze="emit('start-analyze')"
       @cancel-analyze="emit('cancel-analyze')"
       @toggle-slide-editor="emit('toggle-slide-editor')"

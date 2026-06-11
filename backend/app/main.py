@@ -140,6 +140,18 @@ if settings.METRICS_ENABLED:
 
     Instrumentator().instrument(app).expose(app)
 
+    # AI provider cost (₽) from the generation_usage journal. DB-backed
+    # collector because the AI calls run in Celery workers whose in-process
+    # counters are never scraped (prometheus.yml targets only the backend).
+    from prometheus_client import REGISTRY
+
+    from app.services.usage_service import UsageCostCollector
+
+    try:
+        REGISTRY.register(UsageCostCollector())
+    except ValueError:
+        pass  # already registered (test re-imports)
+
 # ── Middleware ────────────────────────────────────────────────────────────────
 # In modern Starlette, `app.add_middleware()` *prepends* to user_middleware
 # (insert(0, ...)), so the LAST middleware registered ends up OUTERMOST. We

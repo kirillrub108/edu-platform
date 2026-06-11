@@ -85,8 +85,12 @@ async def test_generate_video_with_pptx_enqueues_task(
     module = await make_module(db_session, course)
     lesson = await make_lesson(db_session, module, pptx_path="pptx/x.pptx")
 
-    # Patch apply_async on the task object the router imports.
+    # Patch apply_async on the task object the router imports, and the slide
+    # counter (no real PPTX on disk in this test).
+    from app.routers import lessons as lessons_router
     from app.tasks import video_pipeline as vp
+
+    monkeypatch.setattr(lessons_router, "count_source_slides", lambda _p: 5)
 
     fake_task_id = "task-abc-123"
 
@@ -107,6 +111,9 @@ async def test_generate_video_with_pptx_enqueues_task(
     body = resp.json()
     assert body["task_id"] == fake_task_id
     assert body["lesson_id"] == str(lesson.id)
+    # Fresh free account: the launch rides on a lifetime-trial slot.
+    assert body["billed_via"] == "trial"
+    assert body["credit_estimate"] > 0
 
     # Persisted on the lesson for resume-after-refresh polling.
     lesson_id = lesson.id  # snapshot before expire_all so the next get()
@@ -114,6 +121,7 @@ async def test_generate_video_with_pptx_enqueues_task(
     refreshed = await db_session.get(Lesson, lesson_id)
     assert refreshed is not None
     assert refreshed.video_task_id == fake_task_id
+    assert refreshed.billed_via == "trial"
 
 
 @pytest.mark.parametrize(
@@ -153,9 +161,8 @@ async def test_cancel_video_releases_reserved_credits(
     teacher_token: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A cancelled video task is killed with terminate=True, so its finally-block
-    credit release may not run. The cancel endpoint must release the hold itself."""
-    from app.constants import CREDIT_WEIGHTS
+    """Cancelling a still-queued task must fully release the router-side
+    reservation (claim guard makes it race-safe against the task)."""
     from app.models.credit import CreditOperation
     from app.services import billing_service
 
@@ -164,13 +171,21 @@ async def test_cancel_video_releases_reserved_credits(
 
     course = await make_course(db_session, owner=teacher_user)
     module = await make_module(db_session, course)
+    amount = 17
+    billing_ref = "ref-cancel-1"
     lesson = await make_lesson(
-        db_session, module, status=LessonStatus.processing, video_task_id="vid-task-1"
+        db_session,
+        module,
+        status=LessonStatus.processing,
+        video_task_id="vid-task-1",
+        billed_via="credits",
+        billing_ref=billing_ref,
+        credit_estimate=amount,
     )
 
-    amount = CREDIT_WEIGHTS["lesson_generate"]
+    await billing_service.grant_credits(db_session, teacher_user.id, 50, "seed")
     ok = await billing_service.reserve_credits(
-        db_session, teacher_user.id, amount, str(lesson.id), CreditOperation.LESSON_GENERATE
+        db_session, teacher_user.id, amount, billing_ref, CreditOperation.LESSON_GENERATE
     )
     assert ok
     before = await billing_service.get_balance(db_session, teacher_user.id)
@@ -181,6 +196,7 @@ async def test_cancel_video_releases_reserved_credits(
     )
     assert resp.status_code == 200
     assert resp.json()["cancelled"] is True
+    assert resp.json()["mode"] == "immediate"
 
     after = await billing_service.get_balance(db_session, teacher_user.id)
     assert after["reserved"] == 0
@@ -189,7 +205,7 @@ async def test_cancel_video_releases_reserved_credits(
     history = await billing_service.get_transaction_history(db_session, teacher_user.id)
     releases = [t for t in history if t.operation == CreditOperation.RELEASE]
     assert len(releases) == 1
-    assert releases[0].ref_id == str(lesson.id)
+    assert releases[0].ref_id == billing_ref
 
     # Idempotent: a second cancel must not release the hold again.
     resp2 = await client.post(
@@ -208,29 +224,38 @@ async def test_cancel_video_does_not_release_when_already_charged(
     teacher_token: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """If the task finished (charged) before the revoke landed, cancel must be a
-    no-op — releasing would wrongly inflate available credits."""
-    from app.constants import CREDIT_WEIGHTS
+    """If the task settled (claimed billing and charged) before the cancel
+    landed, cancel must be a no-op — releasing would inflate available credits."""
     from app.models.credit import CreditOperation
     from app.services import billing_service
 
     monkeypatch.setattr("celery.result.AsyncResult.revoke", lambda self, *a, **k: None)
 
+    # Snapshot: claim_billing's no-op path rolls back, expiring ORM instances.
+    uid = teacher_user.id
     course = await make_course(db_session, owner=teacher_user)
     module = await make_module(db_session, course)
+    amount = 17
+    billing_ref = "ref-cancel-2"
+    # billed_via=None mirrors a task that already claimed + settled its billing.
     lesson = await make_lesson(
-        db_session, module, status=LessonStatus.processing, video_task_id="vid-task-2"
+        db_session,
+        module,
+        status=LessonStatus.processing,
+        video_task_id="vid-task-2",
+        billed_via=None,
+        billing_ref=billing_ref,
+        credit_estimate=amount,
     )
 
-    amount = CREDIT_WEIGHTS["lesson_generate"]
+    await billing_service.grant_credits(db_session, uid, 50, "seed")
     await billing_service.reserve_credits(
-        db_session, teacher_user.id, amount, str(lesson.id), CreditOperation.LESSON_GENERATE
+        db_session, uid, amount, billing_ref, CreditOperation.LESSON_GENERATE
     )
-    # Simulate the task finalizing normally just before the revoke.
     await billing_service.charge_credits(
-        db_session, teacher_user.id, amount, str(lesson.id), CreditOperation.LESSON_GENERATE
+        db_session, uid, amount, billing_ref, CreditOperation.LESSON_GENERATE
     )
-    charged = await billing_service.get_balance(db_session, teacher_user.id)
+    charged = await billing_service.get_balance(db_session, uid)
     assert charged["reserved"] == 0
 
     resp = await client.post(
@@ -238,10 +263,10 @@ async def test_cancel_video_does_not_release_when_already_charged(
     )
     assert resp.status_code == 200
 
-    after = await billing_service.get_balance(db_session, teacher_user.id)
+    after = await billing_service.get_balance(db_session, uid)
     assert after["reserved"] == 0
     assert after["balance"] == charged["balance"]
     assert after["available"] == charged["available"]
 
-    history = await billing_service.get_transaction_history(db_session, teacher_user.id)
+    history = await billing_service.get_transaction_history(db_session, uid)
     assert [t for t in history if t.operation == CreditOperation.RELEASE] == []

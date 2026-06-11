@@ -33,7 +33,10 @@ async def test_analyze_enqueues_vision_task_and_persists_id(
     module = await make_module(db_session, course)
     lesson = await make_lesson(db_session, module, pptx_path="pptx/x.pptx")
 
+    from app.routers import slides as slides_router
     from app.tasks import vision_pipeline as vp
+
+    monkeypatch.setattr(slides_router, "count_source_slides", lambda _p: 5)
 
     class _Fake:
         id = "vision-task-1"
@@ -48,6 +51,8 @@ async def test_analyze_enqueues_vision_task_and_persists_id(
     assert resp.status_code == 200
     body = resp.json()
     assert body["task_id"] == "vision-task-1"
+    # Fresh free account with trial slots left → analysis rides for free.
+    assert body["billed_via"] == "trial"
 
     lesson_id = lesson.id  # snapshot — expire_all() expires `lesson`, and
     db_session.expire_all()  # reading `lesson.id` afterwards would trigger a
@@ -145,6 +150,8 @@ async def test_regenerate_uses_vision_mock(
 ) -> None:
     """Mock vision service so no LLM is hit. Image existence is checked via
     storage_service.get_full_path — point STORAGE_PATH to tmp_path here."""
+    from app.services import billing_service
+
     course = await make_course(db_session, owner=teacher_user)
     module = await make_module(db_session, course)
     lesson = await make_lesson(db_session, module)
@@ -152,6 +159,8 @@ async def test_regenerate_uses_vision_mock(
     # actual file doesn't need to exist for our mocked analyze_slide.
     row = await make_slide_text(db_session, lesson, slide_number=1)
     mock_vision["analyze_return"] = "Regenerated narration"
+    # Slide regen costs 1 CR and free accounts start at zero now.
+    await billing_service.grant_credits(db_session, teacher_user.id, 5, "seed")
 
     resp = await client.post(
         f"/api/v1/lessons/{lesson.id}/slides/{row.id}/regenerate",
@@ -200,25 +209,32 @@ async def test_cancel_analysis_releases_reserved_credits(
     teacher_token: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A terminated vision task may skip its finally-block release, so the
-    analysis-cancel endpoint must release the reserved hold itself."""
-    from app.celery_app import celery_app
+    """Cancelling a still-queued vision task must fully release the router-side
+    reservation identified by the lesson's billing_ref."""
     from app.constants import CREDIT_WEIGHTS
     from app.models.credit import CreditOperation
     from app.models.lesson import LessonStatus
     from app.services import billing_service
 
-    monkeypatch.setattr(celery_app.control, "revoke", lambda *a, **k: None)
+    monkeypatch.setattr("celery.result.AsyncResult.revoke", lambda self, *a, **k: None)
 
     course = await make_course(db_session, owner=teacher_user)
     module = await make_module(db_session, course)
+    amount = CREDIT_WEIGHTS["vision_analyze"]
+    billing_ref = "ref-vis-cancel"
     lesson = await make_lesson(
-        db_session, module, status=LessonStatus.analyzing, analyze_task_id="vis-task-1"
+        db_session,
+        module,
+        status=LessonStatus.analyzing,
+        analyze_task_id="vis-task-1",
+        billed_via="credits",
+        billing_ref=billing_ref,
+        credit_estimate=amount,
     )
 
-    amount = CREDIT_WEIGHTS["vision_analyze"]
+    await billing_service.grant_credits(db_session, teacher_user.id, 50, "seed")
     ok = await billing_service.reserve_credits(
-        db_session, teacher_user.id, amount, str(lesson.id), CreditOperation.VISION_ANALYZE
+        db_session, teacher_user.id, amount, billing_ref, CreditOperation.VISION_ANALYZE
     )
     assert ok
     before = await billing_service.get_balance(db_session, teacher_user.id)
@@ -237,4 +253,4 @@ async def test_cancel_analysis_releases_reserved_credits(
     history = await billing_service.get_transaction_history(db_session, teacher_user.id)
     releases = [t for t in history if t.operation == CreditOperation.RELEASE]
     assert len(releases) == 1
-    assert releases[0].ref_id == str(lesson.id)
+    assert releases[0].ref_id == billing_ref

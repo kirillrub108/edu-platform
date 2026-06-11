@@ -62,27 +62,56 @@ QUIZ_MAX_MATERIAL_CHARS: int = 12000
 QUIZ_GRADING_WORKERS: int = 4
 
 # Billing / credits
-# Per-operation credit cost. Keys are matched by callers via CREDIT_WEIGHTS["..."].
+# Per-operation credit cost for FLAT-priced operations. Video generation is
+# priced by formula instead — see VIDEO_*_BASE_CREDITS below and
+# billing_service.estimate_video_text/estimate_video_auto.
 CREDIT_WEIGHTS: dict[str, int] = {
-    "lesson_generate": 10,  # PPTX→видео полный цикл (vision+LLM+TTS+FFmpeg)
-    "lesson_regen": 8,      # повторная генерация (кеш слайдов есть, но LLM+TTS+FFmpeg)
     "vision_analyze": 5,    # vision-анализ PPTX → SlideText (без видео)
     "slide_regen": 1,       # регенерация одного слайда через vision LLM
+    "quiz_generate": 5,     # AI-генерация квиза (полная цена и при перегенерации)
+    "ai_review": 2,         # AI-review вопросов квиза
     "quiz_grade": 0,        # AI-проверка квиза — бесплатно (маркетинговый аргумент)
 }
 
-# Tariff plans. Keys match CreditPlan enum values.
+# Video-generation pricing formula components (polza.ai tariffs of 2026-06-11,
+# upper bound: TTS 1380.48 ₽/1M chars; qwen3-30b 17.49 ₽/1M prompt / 63.5 ₽/1M
+# completion tokens). Credits formula:
+#   text mode: VIDEO_TEXT_BASE + slides + ceil(script_chars / TTS_CHARS_PER_CREDIT)
+#   auto mode: VIDEO_AUTO_BASE + slides + ceil(slides * AUTO_CHARS_PER_SLIDE / TTS_CHARS_PER_CREDIT)
+VIDEO_TEXT_BASE_CREDITS: int = 2
+VIDEO_AUTO_BASE_CREDITS: int = 3
+TTS_CHARS_PER_CREDIT: int = 3000
+AUTO_CHARS_PER_SLIDE: int = 600  # нормативная длина озвучки слайда в auto-режиме
+
+# Provider cost rates (rubles) for the generation_usage margin journal.
+TTS_RUB_PER_MCHAR: float = 1380.48
+LLM_RUB_PER_MTOK_PROMPT: float = 17.49
+LLM_RUB_PER_MTOK_COMPLETION: float = 63.5
+
+# Lifetime trial for free accounts: usage_counters(period_key='lifetime').
+# A trial lecture/quiz is consumed instead of credits while slots remain.
+TRIAL_LECTURES: int = 2
+TRIAL_QUIZZES: int = 2
+TRIAL_MAX_SLIDES: int = 20          # cap per trial lecture
+TRIAL_MAX_SCRIPT_CHARS: int = 15000  # cap per trial lecture (text mode)
+
+# Tariff plans. Keys match CreditPlan enum values. Free accounts get no welcome
+# credits — the lifetime trial (2 lectures + 2 quizzes) replaces them.
 PLAN_CONFIGS: dict[str, dict[str, int]] = {
-    "free":    {"monthly_allowance": 0,   "onetime_credits": 50, "price_rub": 0},
+    "free":    {"monthly_allowance": 0,   "onetime_credits": 0,  "price_rub": 0},
     "starter": {"monthly_allowance": 30,  "onetime_credits": 0,  "price_rub": 490},
     "pro":     {"monthly_allowance": 120, "onetime_credits": 0,  "price_rub": 1490},
     "school":  {"monthly_allowance": 500, "onetime_credits": 0,  "price_rub": 4990},
 }
 
-TOPUP_PACKS: list[dict[str, int]] = [
-    {"credits": 50,  "price_rub": 750},
-    {"credits": 200, "price_rub": 2600},
-]
+# One-time credit packages purchasable via YooKassa. Keys are package_key in
+# POST /api/v1/billing/payments and Payment.package_key.
+CREDIT_PACKAGES: dict[str, dict[str, int]] = {
+    "pack_50":   {"credits": 50,   "price_rub": 190},
+    "pack_200":  {"credits": 200,  "price_rub": 590},
+    "pack_500":  {"credits": 500,  "price_rub": 1290},
+    "pack_1200": {"credits": 1200, "price_rub": 2690},
+}
 
 CREDIT_CARRYOVER_RATIO: float = 0.5  # до 50% месячного объёма переносится на след. месяц
 

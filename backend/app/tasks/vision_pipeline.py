@@ -8,20 +8,20 @@ from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.constants import CREDIT_WEIGHTS
 from app.models.course import Course
 from app.models.lesson import Lesson, LessonStatus, Module
 from app.models.slide_text import SlideText
+from app.services import usage_service
 from app.services.billing_service import (
-    sync_charge_credits,
-    sync_release_credits,
-    sync_reserve_credits,
+    partial_vision_cost,
+    sync_claim_billing,
+    sync_finalize_generation,
 )
 from app.services.storage_service import storage_service
 from app.services.tts_service import strip_tts_artifacts
 from app.services.video_service import video_service
-from app.services.vision_analysis import vision_analysis_service
-from app.tasks.video_pipeline import SyncSession, _publish
+from app.services.vision_analysis import AnalysisCancelled, vision_analysis_service
+from app.tasks.video_pipeline import SyncSession, _cancel_requested, _publish
 
 logger = structlog.get_logger()
 
@@ -33,8 +33,14 @@ def _set_status(session: Session, lesson_id: UUID, status: LessonStatus) -> None
     lesson.status = status
     # Clear analyze_task_id once the analysis pipeline is no longer active
     # so the frontend stops resuming polling on this finished task.
-    if status in (LessonStatus.ready_for_edit, LessonStatus.error, LessonStatus.draft):
+    if status in (
+        LessonStatus.ready_for_edit,
+        LessonStatus.error,
+        LessonStatus.draft,
+        LessonStatus.cancelled,
+    ):
         lesson.analyze_task_id = None
+        lesson.cancel_requested = False
     session.commit()
 
 
@@ -58,38 +64,68 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
     slides_cache_dir = os.path.join(settings.STORAGE_PATH, "slides_cache")
     os.makedirs(work_dir, exist_ok=True)
     _success = False
-    _reserved = False
     _owner_id: UUID | None = None
-    _credit_amount = CREDIT_WEIGHTS["vision_analyze"]
+    # Billing state written by the router before apply_async (see lessons/
+    # slides routers); the task only settles it. Trial-covered analysis
+    # consumes nothing — the trial lecture slot is taken by generate-video.
+    _billed_via: str | None = None
+    _billing_ref: str | None = None
+    _estimate = 0
+    _settled = False
+    _spent_now = 0
 
     def _progress(step: str, done: int, total: int) -> None:
-        self.update_state(state="PROGRESS", meta={"step": step, "done": done, "total": total})
-        _publish(lesson_id, {"step": step, "done": done, "total": total})
+        meta = {
+            "step": step,
+            "done": done,
+            "total": total,
+            "credits_spent": _spent_now,
+            "credits_reserved": _estimate,
+            "billed_via": _billed_via,
+        }
+        self.update_state(state="PROGRESS", meta=meta)
+        _publish(lesson_id, meta)
 
     with SyncSession() as session:
+
+        def _settle(spent: int) -> None:
+            nonlocal _settled
+            if _settled or _owner_id is None or _billed_via is None:
+                _settled = True
+                return
+            claimed = sync_claim_billing(session, lesson_uuid)
+            if claimed == "credits" and _billing_ref:
+                sync_finalize_generation(
+                    session, _owner_id, _billing_ref, _estimate, spent, "VISION_ANALYZE"
+                )
+            settled_lesson = session.get(Lesson, lesson_uuid)
+            if settled_lesson:
+                settled_lesson.credits_spent = spent if _billed_via == "credits" else 0
+                session.commit()
+            _settled = True
+
         try:
             _set_status(session, lesson_uuid, LessonStatus.analyzing)
-            _progress("slides", 0, 1)
 
             lesson = session.get(Lesson, lesson_uuid)
             if not lesson:
                 raise RuntimeError(f"Lesson {lesson_id} not found")
             course_title = lesson.title or ""
 
-            # Reserve credits before any expensive vision work.
             module = session.get(Module, lesson.module_id)
             course = session.get(Course, module.course_id) if module else None
             if course is None:
                 raise RuntimeError(f"Lesson {lesson_id} has no owning course")
             _owner_id = course.owner_id
 
-            if not sync_reserve_credits(
-                session, _owner_id, _credit_amount, lesson_id, "VISION_ANALYZE"
-            ):
-                _set_status(session, lesson_uuid, LessonStatus.error)
-                _publish(lesson_id, {"status": "error"})
-                return {"status": "error", "error": "insufficient_credits"}
-            _reserved = True
+            _billed_via = lesson.billed_via
+            _billing_ref = lesson.billing_ref
+            _estimate = lesson.credit_estimate or 0
+            if _billed_via is None:
+                logger.warning("vision_pipeline_unbilled_run", lesson_id=lesson_id)
+
+            usage_service.set_usage_context("vision_analyze", lesson_id=lesson_id)
+            _progress("slides", 0, 1)
 
             pptx_full = storage_service.get_full_path(pptx_relative_path)
 
@@ -128,6 +164,20 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             _progress("vision", 0, total)
 
             def _on_progress(done: int, total_: int) -> None:
+                # Per-slide checkpoint: pro-rata spend is persisted so the SSE
+                # stream (and a cancel settlement) always reflect real progress.
+                nonlocal _spent_now
+                new_spent = (
+                    partial_vision_cost(_estimate, done, total_)
+                    if _billed_via == "credits"
+                    else 0
+                )
+                if new_spent != _spent_now:
+                    _spent_now = new_spent
+                    row = session.get(Lesson, lesson_uuid)
+                    if row:
+                        row.credits_spent = new_spent
+                        session.commit()
                 _progress("vision", done, total_)
 
             texts = asyncio.run(
@@ -135,6 +185,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                     image_paths,
                     course_title,
                     progress_cb=_on_progress,
+                    cancel_check=lambda: _cancel_requested(session, lesson_uuid),
                 )
             )
 
@@ -166,6 +217,27 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             _success = True
             return {"status": "ok", "total_slides": total, "empty_slides": empty_count}
 
+        except AnalysisCancelled as exc:
+            spent = (
+                partial_vision_cost(_estimate, exc.slides_done, total)
+                if _billed_via == "credits"
+                else 0
+            )
+            logger.info(
+                "vision_pipeline_cancelled",
+                lesson_id=lesson_id,
+                processed_slides=exc.slides_done,
+                credits_spent=spent,
+            )
+            try:
+                _settle(spent)
+            except Exception:
+                logger.exception("credit_finalize_failed", lesson_id=lesson_id)
+            _spent_now = spent
+            _set_status(session, lesson_uuid, LessonStatus.cancelled)
+            _publish(lesson_id, {"status": "cancelled", "credits_spent": spent})
+            return {"status": "cancelled", "credits_spent": spent}
+
         except Exception as exc:
             logger.exception("vision_pipeline_failed", lesson_id=lesson_id)
             _set_status(session, lesson_uuid, LessonStatus.error)
@@ -173,16 +245,12 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             return {"status": "error", "error": str(exc)}
 
         finally:
-            if _reserved and _owner_id is not None:
-                try:
-                    if _success:
-                        sync_charge_credits(
-                            session, _owner_id, _credit_amount, lesson_id, "VISION_ANALYZE"
-                        )
-                    else:
-                        sync_release_credits(session, _owner_id, _credit_amount, lesson_id)
-                except Exception:
-                    logger.exception("credit_finalize_failed", lesson_id=lesson_id)
+            # Full charge on success, full release on service failure; the
+            # cancel handler settles its partial charge itself (no-op here).
+            try:
+                _settle(_estimate if _success else 0)
+            except Exception:
+                logger.exception("credit_finalize_failed", lesson_id=lesson_id)
 
             if os.path.exists(work_dir):
                 shutil.rmtree(work_dir, ignore_errors=True)

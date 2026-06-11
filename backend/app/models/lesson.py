@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -23,6 +23,7 @@ class LessonStatus(str, enum.Enum):
     processing = "processing"
     published = "published"
     error = "error"
+    cancelled = "cancelled"
 
 
 class CreationMode(str, enum.Enum):
@@ -92,6 +93,19 @@ class Lesson(Base):
     analyze_task_id = Column(String(64), nullable=True)
     video_task_id = Column(String(64), nullable=True)
     last_warning = Column(Text, nullable=True)
+    # Billing state of the active (or last) generation run. billing_ref is the
+    # unique per-launch ledger key (RESERVE/finalizer rows in credit_transactions);
+    # billed_via ('credits' | 'trial') is non-null only while a run is unsettled —
+    # claiming it (set to NULL) is the idempotency guard between the task's
+    # finalizer and the cancel endpoint. cancel_requested is the cooperative
+    # cancellation flag polled by pipelines at per-slide checkpoints.
+    credit_estimate = Column(Integer, nullable=True)
+    credits_spent = Column(Integer, nullable=False, default=0, server_default="0")
+    billing_ref = Column(String(64), nullable=True)
+    billed_via = Column(String(16), nullable=True)
+    cancel_requested = Column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
     # Soft delete: non-null = hidden everywhere (see app/database.py global filter).
     deleted_at = Column(DateTime(timezone=True), nullable=True, default=None, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

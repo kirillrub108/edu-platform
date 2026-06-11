@@ -1,13 +1,14 @@
 import structlog
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request
+from redis.asyncio import Redis
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
-from app.constants import CREDIT_WEIGHTS
+from app.constants import CREDIT_WEIGHTS, TRIAL_MAX_SLIDES
 from app.database import get_db
 from app.dependencies import (
     get_owned_lesson,
@@ -20,7 +21,8 @@ from app.models.credit import CreditOperation
 from app.models.lesson import CreationMode, Lesson, LessonStatus
 from app.models.slide_text import SlideText
 from app.models.user import User
-from app.services import billing_service, tier_service
+from app.redis_client import get_redis
+from app.services import billing_service, quota_service, tier_service, usage_service
 from app.schemas.slide import (
     AnalyzeStatusResponse,
     SlideListResponse,
@@ -28,8 +30,10 @@ from app.schemas.slide import (
     SlideTextUpdate,
 )
 from app.config import settings
+from app.routers.lessons import cancel_generation_impl
 from app.services.llm_service import llm_service
 from app.services.storage_service import storage_service
+from app.services.video_service import count_source_slides
 from app.services.vision_analysis import vision_analysis_service
 from app.tasks.vision_pipeline import analyze_presentation_task
 
@@ -71,19 +75,85 @@ async def analyze_lesson_slides(
             detail="Загрузите PPTX перед анализом презентации",
         )
 
+    # Concurrency (read): one active generation per lesson.
+    if lesson.status in (LessonStatus.processing, LessonStatus.analyzing):
+        raise HTTPException(status_code=409, detail={"code": "generation_in_progress"})
+
+    estimate = CREDIT_WEIGHTS["vision_analyze"]
+    balance = await billing_service.get_balance(db, user.id)
+    billing_ref = f"{lesson.id}:{uuid4().hex[:12]}"
+
+    # Trial: while a free account has unspent trial lectures, the analyze step
+    # of an auto lecture is free — the lecture slot itself is consumed by
+    # generate-video, not here (see docs/DECISIONS.md).
+    billed_via = "credits"
+    trial = await quota_service.get_trial_state(db, user.id)
+    slides = None
+    try:
+        slides = count_source_slides(storage_service.get_full_path(lesson.pptx_path))
+    except Exception:
+        slides = None
+    trial_covers = (
+        balance["plan"] == "free"
+        and trial["lectures_used"] < trial["lectures_limit"]
+        and slides is not None
+        and slides <= TRIAL_MAX_SLIDES
+    )
+    if trial_covers:
+        billed_via = "trial"
+    elif not await billing_service.reserve_credits(
+        db, user.id, estimate, billing_ref, CreditOperation.VISION_ANALYZE
+    ):
+        if balance["plan"] == "free" and trial["lectures_used"] >= trial["lectures_limit"]:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "trial_exhausted",
+                    "limit": trial["lectures_limit"],
+                    "used": trial["lectures_used"],
+                },
+            )
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "insufficient_credits",
+                "required": estimate,
+                "available": balance["available"],
+            },
+        )
+
     # Schedule paid tiers ahead of free ones (priority derived from the plan).
     priority = await tier_service.priority_for_user(db, user.id)
 
     lesson.creation_mode = CreationMode.presentation_auto
     lesson.status = LessonStatus.analyzing
+    lesson.credit_estimate = estimate if billed_via == "credits" else 0
+    lesson.credits_spent = 0
+    lesson.billing_ref = billing_ref if billed_via == "credits" else None
+    lesson.billed_via = billed_via
+    lesson.cancel_requested = False
     await db.commit()
 
-    task = analyze_presentation_task.apply_async(
-        args=[str(lesson.id), lesson.pptx_path], queue="vision", priority=priority
-    )
+    try:
+        task = analyze_presentation_task.apply_async(
+            args=[str(lesson.id), lesson.pptx_path], queue="vision", priority=priority
+        )
+    except Exception:
+        claimed = await billing_service.claim_billing(db, lesson.id)
+        if claimed == "credits":
+            await billing_service.release_credits(db, user.id, estimate, billing_ref)
+        lesson.status = LessonStatus.draft
+        await db.commit()
+        raise HTTPException(status_code=503, detail="Не удалось поставить задачу в очередь")
     lesson.analyze_task_id = task.id
     await db.commit()
-    return {"task_id": task.id, "lesson_id": str(lesson.id), "status": "analyzing"}
+    return {
+        "task_id": task.id,
+        "lesson_id": str(lesson.id),
+        "status": "analyzing",
+        "credit_estimate": estimate,
+        "billed_via": billed_via,
+    }
 
 
 @router.post("/{lesson_id}/analysis-cancel")
@@ -91,23 +161,13 @@ async def cancel_analysis(
     lesson_id: UUID,
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
+    """Deprecated alias of /cancel-generation kept for API compatibility."""
     if lesson.status != LessonStatus.analyzing:
         raise HTTPException(status_code=400, detail="Lesson is not being analyzed")
-
-    if lesson.analyze_task_id:
-        celery_app.control.revoke(lesson.analyze_task_id, terminate=True, signal="SIGTERM")
-
-    lesson.status = LessonStatus.draft
-    lesson.analyze_task_id = None
-    await db.commit()
-
-    # A terminated task's `finally` block may not run, so its reserved credit
-    # hold would leak. Release it idempotently (no-op if the task already
-    # finalized before the revoke landed).
-    owner_id = lesson.module.course.owner_id
-    await billing_service.release_reservation_if_held(db, owner_id, str(lesson_id))
-    return {"ok": True}
+    result = await cancel_generation_impl(lesson, db, redis)
+    return {"ok": True, **result}
 
 
 @router.get(
@@ -225,9 +285,18 @@ async def regenerate_slide_text(
         db, user.id, amount, str(slide_id), CreditOperation.SLIDE_REGEN
     )
     if not ok:
-        raise HTTPException(status_code=402, detail="Недостаточно кредитов")
+        balance = await billing_service.get_balance(db, user.id)
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "insufficient_credits",
+                "required": amount,
+                "available": balance["available"],
+            },
+        )
 
     image_full_path = storage_service.get_full_path(row.image_path)
+    usage_service.set_usage_context("slide_regen", lesson_id=lesson_id)
     try:
         # Phase 1: vision model (VISION_MODEL) extracts narration from the slide image.
         # Phase 2: text LLM (REGEN_LLM_MODEL = qwen3:8b) polishes the raw vision output.

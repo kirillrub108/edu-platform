@@ -10,7 +10,7 @@ import structlog
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -20,6 +20,7 @@ from sqlalchemy.orm import selectinload
 
 from app.celery_app import celery_app
 from app.constants import (
+    CREDIT_WEIGHTS,
     QUIZ_DEFAULT_WEIGHT,
     QUIZ_NUM_OPTIONS,
     QUIZ_NUM_QUESTIONS,
@@ -29,6 +30,7 @@ from app.constants import (
 from app.database import get_db
 from app.dependencies import get_owned_lesson, require_verified_email
 from app.limiter import limiter
+from app.models.credit import CreditOperation
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import Lesson, Module
 from app.models.quiz import (
@@ -58,6 +60,7 @@ from app.schemas.quiz import (
     QuizRegenerateRequest,
     QuizSettingsUpdate,
 )
+from app.services import billing_service, quota_service, usage_service
 from app.services.grading_service import aggregate_score, resolved_index
 from app.services.llm_service import LLMOutputError, llm_service
 from app.services.quiz_service import (
@@ -349,7 +352,7 @@ async def generate_quiz(
     request: Request,
     lesson_id: UUID,
     payload: QuizGenerateRequest,
-    _verified: User = Depends(require_verified_email),
+    user: User = Depends(require_verified_email),
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ) -> QuizGenerateResponse:
@@ -364,10 +367,61 @@ async def generate_quiz(
 
     quiz = await get_or_create_quiz(db, lesson)
 
-    task = generate_quiz_task.apply_async(
-        args=[str(lesson.id), num_questions, num_options, types],
-        queue="quiz",
-    )
+    # Concurrency (read): one active generation per quiz.
+    if quiz.generation_task_id:
+        raise HTTPException(status_code=409, detail={"code": "generation_in_progress"})
+
+    # Trial quiz slot or full-price reservation (regeneration costs the same).
+    estimate = CREDIT_WEIGHTS["quiz_generate"]
+    balance = await billing_service.get_balance(db, user.id)
+    trial = await quota_service.get_trial_state(db, user.id)
+    billing_ref = f"quiz:{quiz.id}:{uuid4().hex[:12]}"
+    billed_via = "credits"
+    if (
+        balance["plan"] == "free"
+        and trial["quizzes_used"] < trial["quizzes_limit"]
+        and await quota_service.try_consume_slot(
+            db, user.id, quota_service.TRIAL_QUIZ, trial["quizzes_limit"]
+        )
+    ):
+        billed_via = "trial"
+    elif not await billing_service.reserve_credits(
+        db, user.id, estimate, billing_ref, CreditOperation.QUIZ_GENERATE
+    ):
+        if balance["plan"] == "free" and trial["quizzes_used"] >= trial["quizzes_limit"]:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "trial_exhausted",
+                    "limit": trial["quizzes_limit"],
+                    "used": trial["quizzes_used"],
+                },
+            )
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "insufficient_credits",
+                "required": estimate,
+                "available": balance["available"],
+            },
+        )
+
+    try:
+        task = generate_quiz_task.apply_async(
+            args=[str(lesson.id), num_questions, num_options, types],
+            kwargs={
+                "billing_ref": billing_ref,
+                "billed_via": billed_via,
+                "owner_id": str(user.id),
+            },
+            queue="quiz",
+        )
+    except Exception:
+        if billed_via == "credits":
+            await billing_service.release_credits(db, user.id, estimate, billing_ref)
+        else:
+            await quota_service.release_slot(db, user.id, quota_service.TRIAL_QUIZ)
+        raise HTTPException(status_code=503, detail="Не удалось поставить задачу в очередь")
     quiz.generation_task_id = task.id
     await db.commit()
     return QuizGenerateResponse(task_id=task.id, quiz_id=quiz.id, lesson_id=lesson.id)
@@ -429,6 +483,7 @@ async def regenerate_question(
         raise HTTPException(status_code=409, detail=str(exc))
 
     num_options = len(row.payload.get("options") or [])
+    usage_service.set_usage_context("quiz_regen_question", lesson_id=lesson_id, quiz_id=quiz.id)
     try:
         updated = await llm_service.regenerate_quiz_question(
             material, row.payload, payload.mode, num_options=num_options
@@ -453,7 +508,7 @@ async def regenerate_question(
 async def ai_review(
     request: Request,
     lesson_id: UUID,
-    _verified: User = Depends(require_verified_email),
+    user: User = Depends(require_verified_email),
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ) -> list[QuestionFlag]:
@@ -485,15 +540,40 @@ async def ai_review(
         except EmptyMaterialError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
 
+        # Charged only when the LLM is actually called (structured-only quizzes
+        # are reviewed deterministically for free). No trial — credits only.
+        amount = CREDIT_WEIGHTS["ai_review"]
+        billing_ref = f"ai-review:{quiz.id}:{uuid4().hex[:12]}"
+        if not await billing_service.reserve_credits(
+            db, user.id, amount, billing_ref, CreditOperation.AI_REVIEW
+        ):
+            balance = await billing_service.get_balance(db, user.id)
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "insufficient_credits",
+                    "required": amount,
+                    "available": balance["available"],
+                },
+            )
+
         payload = [
             {"id": r.id, "type": r.type.value, "payload": r.payload}
             for r in open_ended
         ]
+        usage_service.set_usage_context("ai_review", lesson_id=lesson_id, quiz_id=quiz.id)
         try:
             llm_flags = await llm_service.qa_review_quiz(material, payload)
         except LLMOutputError as exc:
+            await billing_service.release_credits(db, user.id, amount, billing_ref)
             logger.warning("quiz_qa_review_llm_error", error=str(exc))
             raise HTTPException(status_code=502, detail=f"LLM returned invalid output: {exc}")
+        except Exception:
+            await billing_service.release_credits(db, user.id, amount, billing_ref)
+            raise
+        await billing_service.charge_credits(
+            db, user.id, amount, billing_ref, CreditOperation.AI_REVIEW
+        )
         open_ended_by_id = {f.question_id: f for f in llm_flags}
 
     return [structured.get(r.id) or open_ended_by_id[r.id] for r in rows]

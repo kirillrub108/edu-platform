@@ -14,6 +14,7 @@ from app.constants import (
     VISION_REQUEST_TIMEOUT_SECONDS,
     VISION_SUMMARY_CONCURRENCY,
 )
+from app.services import usage_service
 
 logger = structlog.get_logger()
 
@@ -146,6 +147,15 @@ def _summarise_for_context(text: str, max_chars: int = 280) -> str:
     return cleaned[: max_chars - 1].rstrip() + "…"
 
 
+class AnalysisCancelled(Exception):
+    """Raised by analyze_presentation when its cancel_check fires; carries the
+    number of slides fully processed before the stop."""
+
+    def __init__(self, slides_done: int) -> None:
+        super().__init__(f"analysis cancelled after {slides_done} slides")
+        self.slides_done = slides_done
+
+
 class VisionAnalysisService:
     """Generate per-slide narration from rendered PNG images via a vision LLM."""
 
@@ -192,13 +202,21 @@ class VisionAnalysisService:
         slide_image_paths: list[str],
         course_title: str,
         progress_cb: Any = None,
+        cancel_check: Any = None,
     ) -> list[str]:
-        """Analyse all slides sequentially with accumulated context."""
+        """Analyse all slides sequentially with accumulated context.
+
+        cancel_check() is polled at each slide boundary (cooperative
+        cancellation); when it returns True, AnalysisCancelled is raised and
+        the caller settles billing for the slides processed so far.
+        """
         results: list[str] = []
         context_lines: list[str] = []
         total = len(slide_image_paths)
 
         for idx, path in enumerate(slide_image_paths):
+            if cancel_check is not None and cancel_check():
+                raise AnalysisCancelled(idx)
             slide_number = idx + 1
             previous_context = "\n".join(context_lines[-3:])  # last 3 slides only
             try:
@@ -379,6 +397,7 @@ class VisionAnalysisService:
             max_tokens=settings.LLM_MAX_TOKENS,
             **kwargs,
         )
+        await usage_service.arecord_llm_usage(self._model, getattr(resp, "usage", None))
         return (resp.choices[0].message.content or "").strip()
 
     async def _call_yandex(
@@ -417,6 +436,7 @@ class VisionAnalysisService:
             resp = await client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
+        await usage_service.arecord_llm_usage(self._model, data.get("usage"))
         try:
             return (data["choices"][0]["message"]["content"] or "").strip()
         except (KeyError, IndexError, TypeError):
