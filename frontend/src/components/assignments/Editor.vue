@@ -31,13 +31,22 @@ const attachmentsEnabled = ref(a?.attachments_enabled ?? true)
 const saving = ref(false)
 const error = ref<string | null>(null)
 
-const titleError = computed(() => (title.value.trim() ? '' : 'Введите название'))
-const promptError = computed(() => (prompt.value.trim() ? '' : 'Введите формулировку'))
+const titleTouched = ref(false)
+const promptTouched = ref(false)
+const submitted = ref(false)
+
+const titleError = computed(() =>
+  submitted.value || titleTouched.value ? (title.value.trim() ? '' : 'Введите название') : '',
+)
+const promptError = computed(() =>
+  submitted.value || promptTouched.value ? (prompt.value.trim() ? '' : 'Введите формулировку') : '',
+)
 const valid = computed(
-  () => !titleError.value && !promptError.value && maxPoints.value > 0,
+  () => !!title.value.trim() && !!prompt.value.trim() && maxPoints.value > 0,
 )
 
 const onSave = async () => {
+  submitted.value = true
   if (!valid.value) return
   saving.value = true
   error.value = null
@@ -55,6 +64,9 @@ const onSave = async () => {
     const result = isEdit.value
       ? await store.update(props.lessonId, props.assignment!.id, payload)
       : await store.create(props.lessonId, payload)
+    submitted.value = false
+    titleTouched.value = false
+    promptTouched.value = false
     emit('saved', result)
   } catch (err) {
     error.value = assignmentErrorMessage(err, 'Не удалось сохранить задание')
@@ -74,7 +86,7 @@ const numberClass =
       {{ isEdit ? 'Редактировать задание' : 'Новое задание' }}
     </h4>
 
-    <UiInput v-model="title" label="Название" :error="titleError" placeholder="Например: Эссе" />
+    <UiInput v-model="title" label="Название" :error="titleError" placeholder="Например: Эссе" @blur="titleTouched = true" />
     <UiInput
       v-model="prompt"
       as="textarea"
@@ -82,6 +94,7 @@ const numberClass =
       label="Формулировка"
       :error="promptError"
       placeholder="Что нужно сделать студенту…"
+      @blur="promptTouched = true"
     />
 
     <div class="grid grid-cols-2 gap-3">
@@ -119,7 +132,7 @@ const numberClass =
     <p v-if="error" class="text-sm text-rose-600">{{ error }}</p>
 
     <div class="flex items-center gap-2">
-      <UiButton size="sm" :loading="saving" :disabled="!valid" @click="onSave">
+      <UiButton size="sm" :loading="saving" @click="onSave">
         {{ isEdit ? 'Сохранить' : 'Создать' }}
       </UiButton>
       <UiButton size="sm" variant="ghost" @click="emit('cancel')">Отмена</UiButton>
