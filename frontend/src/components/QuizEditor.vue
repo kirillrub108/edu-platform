@@ -274,12 +274,31 @@ onUnmounted(() => {
 
     <div
       v-if="generating"
-      class="text-sm text-violet-700 bg-violet-50 border border-violet-200 rounded-xl px-3 py-2"
+      class="bg-violet-50 border border-violet-200 rounded-2xl p-4 space-y-4"
     >
-      Генерация теста…
-      <span v-if="generationStep">
-        ({{ generationStep }} {{ generationDone }}/{{ generationTotal }})
-      </span>
+      <!-- step indicators -->
+      <PipelineStages
+        :stages="[
+          { label: 'Подготовка материала' },
+          { label: 'Генерация вопросов' },
+          { label: 'Сохранение теста' },
+        ]"
+        :current="{ material: 0, llm: 1, persist: 2 }[generationStep ?? ''] ?? 0"
+      />
+
+      <!-- fill bar -->
+      <div class="space-y-1">
+        <div class="h-2 w-full bg-violet-100 rounded-full overflow-hidden">
+          <div
+            class="h-full bg-violet-500 rounded-full transition-[width] duration-500 ease-out"
+            :style="{ width: `${generationTotal ? (generationDone / generationTotal) * 100 : 0}%` }"
+          />
+        </div>
+        <p class="text-xs text-violet-600">
+          Шаг {{ (({ material: 1, llm: 2, persist: 3 }[generationStep ?? '']) ?? 1) }} из 3
+          · {{ { material: 'Подготовка материала', llm: 'Генерация вопросов', persist: 'Сохранение теста' }[generationStep ?? ''] ?? 'Обработка…' }}
+        </p>
+      </div>
     </div>
 
     <div
