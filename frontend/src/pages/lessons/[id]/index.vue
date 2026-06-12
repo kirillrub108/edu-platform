@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { AlertCircle } from 'lucide-vue-next'
+import type { Comment } from '~/stores/comments'
 
 definePageMeta({ middleware: ['auth', 'teacher'], layout: 'workspace' })
 
@@ -12,6 +13,10 @@ const lessonId = computed(() => {
 })
 
 const { apiFetch } = useApi()
+
+// Teacher owns this lesson's course, so they may moderate any comment here.
+// Backend comment_service.delete_comment enforces the same ownership rule.
+const canDeleteComment = (_c: Comment): boolean => true
 
 const showSlideEditor = ref(false)
 const warningDismissed = ref(false)
@@ -408,6 +413,8 @@ watch(lessonId, (newId, oldId) => {
           </div>
         </div>
       </section>
+
+      <CommentsPanel :lesson-id="lessonId" :can-delete="canDeleteComment" />
     </div>
 
     <!-- Тест tab panel — v-show preserves QuizEditor's polling and save timers -->
