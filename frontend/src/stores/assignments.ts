@@ -113,6 +113,9 @@ export function assignmentErrorMessage(err: any, fallback: string): string {
   if (status === 429) return 'Слишком часто, подождите минуту'
   const detail = err?.data?.detail
   if (typeof detail === 'string') return detail
+  // Backend sends a specific human-readable `message` for attachment-limit
+  // errors (which file, its size, the limit) — prefer it over the generic map.
+  if (typeof detail?.message === 'string') return detail.message
   if (detail?.code) return ASSIGNMENT_ERROR_CODES[detail.code] ?? detail.code
   return fallback
 }
@@ -125,6 +128,7 @@ export const ASSIGNMENT_ERROR_CODES: Record<string, string> = {
   points_out_of_range: 'Балл вне допустимого диапазона',
   too_many_files: 'Превышено число файлов',
   file_too_large: 'Файл слишком большой',
+  submission_too_large: 'Суммарный объём сдачи слишком большой',
   extension_not_allowed: 'Недопустимый тип файла',
   attachments_disabled: 'Вложения отключены для этого задания',
 }

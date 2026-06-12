@@ -18,8 +18,8 @@ from app.constants import (
     ASSIGNMENT_MAX_MESSAGE_CHARS,
     ASSIGNMENT_MAX_PROMPT_CHARS,
     ASSIGNMENT_MAX_TEXT_CHARS,
-    MAX_ATTACHMENT_FILES,
-    MAX_ATTACHMENT_SIZE_MB,
+    ATTACHMENT_CATEGORY_MAX_SIZE_MB,
+    ATTACHMENT_MAX_FILES,
 )
 from app.models.assignment import AssignmentStatus, AttachmentKind, SubmissionStatus
 from app.models.user import UserRole
@@ -97,12 +97,13 @@ class AssignmentTeacherRead(BaseModel):
     @computed_field
     @property
     def max_files(self) -> int:
-        return MAX_ATTACHMENT_FILES
+        return ATTACHMENT_MAX_FILES
 
     @computed_field
     @property
     def max_file_mb(self) -> int:
-        return MAX_ATTACHMENT_SIZE_MB
+        # Largest per-file ceiling across categories (video); a coarse client hint.
+        return max(ATTACHMENT_CATEGORY_MAX_SIZE_MB.values())
 
 
 class AssignmentTeacherListResponse(BaseModel):
@@ -226,12 +227,13 @@ class AssignmentStudentRead(BaseModel):
     @computed_field
     @property
     def max_files(self) -> int:
-        return MAX_ATTACHMENT_FILES
+        return ATTACHMENT_MAX_FILES
 
     @computed_field
     @property
     def max_file_mb(self) -> int:
-        return MAX_ATTACHMENT_SIZE_MB
+        # Largest per-file ceiling across categories (video); a coarse client hint.
+        return max(ATTACHMENT_CATEGORY_MAX_SIZE_MB.values())
 
 
 class AssignmentStudentListResponse(BaseModel):

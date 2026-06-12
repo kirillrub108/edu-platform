@@ -112,7 +112,7 @@ const numberClass =
         Разрешить вложения
       </label>
       <p v-if="attachmentsEnabled" class="mt-1.5 text-xs text-gray-500">
-        До 5 файлов, до 10 МБ каждый
+        До 10 файлов · видео до 1 ГБ · суммарно до 2 ГБ
       </p>
     </div>
 

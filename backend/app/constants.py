@@ -25,13 +25,82 @@ MAX_VIDEO_UPLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
 
 # Assignment attachments (teacher-set text tasks + student submissions). Files
 # are only STORED, never parsed server-side (avoids XXE/zip-bomb from office
-# docs). The per-submission file count and per-file size are SYSTEM limits —
-# enforced from these constants on upload, not configurable per assignment.
-MAX_ATTACHMENT_FILES: int = 5                  # max files per submission
-MAX_ATTACHMENT_SIZE_MB: int = 10               # max per-file size (MB)
-MAX_ATTACHMENT_SIZE_BYTES: int = MAX_ATTACHMENT_SIZE_MB * 1024 * 1024
-# Extension whitelist (lower-case, no dot). A per-assignment allowed_ext must be
-# a subset of this; uploads are checked against the per-assignment list.
+# docs). Students may attach anything on the whitelist (incl. video), but a
+# submission is capped by file count, per-category file size, and total bytes.
+# These are SYSTEM limits (storage-cost guard) — not configurable per assignment.
+ATTACHMENT_MAX_FILES: int = 10                 # max files per submission (per kind)
+ATTACHMENT_MAX_TOTAL_SIZE_MB: int = 2048       # max combined size of one submission
+# Per-file ceiling by category (MB): video is generous, documents/images small.
+ATTACHMENT_CATEGORY_MAX_SIZE_MB: dict[str, int] = {
+    "document": 50,
+    "image": 50,
+    "audio": 200,
+    "video": 1024,
+    "archive": 200,
+}
+# Whitelist — MIME type → category. Source of truth for what may be attached;
+# the category drives the per-file size limit above.
+ATTACHMENT_ALLOWED_TYPES: dict[str, str] = {
+    "application/pdf": "document",
+    "application/msword": "document",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "document",
+    "application/vnd.ms-powerpoint": "document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "document",
+    "application/vnd.ms-excel": "document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "document",
+    "text/plain": "document",
+    "text/markdown": "document",
+    "text/csv": "document",
+    "application/rtf": "document",
+    "application/vnd.oasis.opendocument.text": "document",
+    "image/png": "image",
+    "image/jpeg": "image",
+    "image/webp": "image",
+    "image/heic": "image",
+    "image/gif": "image",
+    "audio/mpeg": "audio",
+    "audio/wav": "audio",
+    "audio/x-wav": "audio",
+    "audio/mp4": "audio",
+    "audio/x-m4a": "audio",
+    "video/mp4": "video",
+    "video/quicktime": "video",
+    "video/webm": "video",
+    "application/zip": "archive",
+    "application/x-zip-compressed": "archive",
+}
+# Extension → MIME fallback when the client omits or forges Content-Type. An
+# extension absent here is rejected outright (defends a spoofed MIME riding on a
+# disallowed extension, e.g. ".exe" sent as image/png).
+ATTACHMENT_EXTENSION_MIME: dict[str, str] = {
+    "pdf": "application/pdf",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "ppt": "application/vnd.ms-powerpoint",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "xls": "application/vnd.ms-excel",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "txt": "text/plain",
+    "md": "text/markdown",
+    "csv": "text/csv",
+    "rtf": "application/rtf",
+    "odt": "application/vnd.oasis.opendocument.text",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "heic": "image/heic",
+    "gif": "image/gif",
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "m4a": "audio/mp4",
+    "mp4": "video/mp4",
+    "mov": "video/quicktime",
+    "webm": "video/webm",
+    "zip": "application/zip",
+}
+# Extension whitelist (lower-case, no dot) for the teacher-set per-assignment
+# allowed_ext filter — separate from the system attachment whitelist above.
 ASSIGNMENT_ALLOWED_EXTENSIONS: tuple[str, ...] = (
     "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx",
     "csv", "txt", "md", "rtf", "odt", "png", "jpg", "jpeg", "gif", "zip",

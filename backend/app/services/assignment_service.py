@@ -20,9 +20,11 @@ from sqlalchemy.orm import selectinload
 
 from app.constants import (
     ASSIGNMENT_ALLOWED_EXTENSIONS,
-    MAX_ATTACHMENT_FILES,
-    MAX_ATTACHMENT_SIZE_BYTES,
-    MAX_ATTACHMENT_SIZE_MB,
+    ATTACHMENT_ALLOWED_TYPES,
+    ATTACHMENT_CATEGORY_MAX_SIZE_MB,
+    ATTACHMENT_EXTENSION_MIME,
+    ATTACHMENT_MAX_FILES,
+    ATTACHMENT_MAX_TOTAL_SIZE_MB,
 )
 from app.models.assignment import (
     Assignment,
@@ -544,10 +546,30 @@ async def list_published_for_student(
 # ── Attachments ──────────────────────────────────────────────────────────────
 
 
-def _effective_allowed_ext(assignment: Assignment) -> list[str]:
-    return list(assignment.allowed_ext) if assignment.allowed_ext else list(
-        ASSIGNMENT_ALLOWED_EXTENSIONS
-    )
+def _mb(num_bytes: int) -> float:
+    return round(num_bytes / (1024 * 1024), 1)
+
+
+def _resolve_attachment_category(file: UploadFile) -> tuple[str, str]:
+    """Return (category, ext) for an upload, by MIME with an extension fallback.
+
+    The extension MUST be on the whitelist, even when the MIME type already
+    resolves — this rejects a forged Content-Type riding on a disallowed
+    extension (e.g. ".exe" sent as image/png).
+    """
+    ext = os.path.splitext(file.filename or "")[1].lower().lstrip(".")
+    ext_mime = ATTACHMENT_EXTENSION_MIME.get(ext)
+    if ext_mime is None:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "extension_not_allowed",
+                "message": f"Тип файла «{file.filename or ext or 'неизвестно'}» не поддерживается.",
+            },
+        )
+    mime = (file.content_type or "").split(";")[0].strip().lower()
+    category = ATTACHMENT_ALLOWED_TYPES.get(mime) or ATTACHMENT_ALLOWED_TYPES[ext_mime]
+    return category, ext
 
 
 async def add_attachment(
@@ -562,34 +584,57 @@ async def add_attachment(
     if kind == AttachmentKind.submission:
         _ensure_editable(submission)
 
-    existing = sum(1 for a in submission.attachments if a.kind == kind)
-    if existing >= MAX_ATTACHMENT_FILES:
+    siblings = [a for a in submission.attachments if a.kind == kind]
+    if len(siblings) >= ATTACHMENT_MAX_FILES:
         raise HTTPException(
             status_code=400,
-            detail={"code": "too_many_files", "max_files": MAX_ATTACHMENT_FILES},
+            detail={
+                "code": "too_many_files",
+                "max_files": ATTACHMENT_MAX_FILES,
+                "message": f"Слишком много файлов: не более {ATTACHMENT_MAX_FILES} на одну сдачу.",
+            },
         )
 
-    ext = os.path.splitext(file.filename or "")[1].lower().lstrip(".")
-    allowed = _effective_allowed_ext(assignment)
-    if ext not in allowed:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "extension_not_allowed", "allowed": allowed},
-        )
+    category, ext = _resolve_attachment_category(file)
 
     size = file.size
     if size is None:
         data = await file.read()
         size = len(data)
         await file.seek(0)
-    if size > MAX_ATTACHMENT_SIZE_BYTES:
+
+    cat_limit_mb = ATTACHMENT_CATEGORY_MAX_SIZE_MB[category]
+    if size > cat_limit_mb * 1024 * 1024:
         raise HTTPException(
             status_code=400,
-            detail={"code": "file_too_large", "max_file_mb": MAX_ATTACHMENT_SIZE_MB},
+            detail={
+                "code": "file_too_large",
+                "category": category,
+                "max_file_mb": cat_limit_mb,
+                "message": (
+                    f"Файл «{file.filename}» — {_mb(size)} МБ, "
+                    f"для категории «{category}» допускается до {cat_limit_mb} МБ."
+                ),
+            },
         )
 
-    # Deep safety: magic-byte + zip-bomb/zip-slip checks (no XML parsing).
-    await validate_upload(file, [f".{ext}"])
+    total = sum(a.size_bytes for a in siblings) + size
+    if total > ATTACHMENT_MAX_TOTAL_SIZE_MB * 1024 * 1024:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "submission_too_large",
+                "max_total_mb": ATTACHMENT_MAX_TOTAL_SIZE_MB,
+                "message": (
+                    f"Суммарный объём сдачи {_mb(total)} МБ превышает лимит "
+                    f"{ATTACHMENT_MAX_TOTAL_SIZE_MB} МБ."
+                ),
+            },
+        )
+
+    # Deep safety: magic-byte + zip-bomb/zip-slip checks (no XML parsing). Size is
+    # governed by the per-category limit above, so SIZE_LIMITS is skipped here.
+    await validate_upload(file, [f".{ext}"], enforce_size_limits=False)
 
     relative = await storage_service.save_upload(file, f"assignments/{submission.id}")
     attachment = AssignmentAttachment(

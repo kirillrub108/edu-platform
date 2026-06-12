@@ -140,17 +140,24 @@ def _check_zip(content: bytes) -> None:
         zf.close()
 
 
-async def validate_upload(file: UploadFile, allowed_types: list[str]) -> None:
+async def validate_upload(
+    file: UploadFile, allowed_types: list[str], *, enforce_size_limits: bool = True
+) -> None:
     """Raises HTTPException(400) if the upload fails extension, magic-byte,
     size, or ZIP-integrity checks. Always leaves the file pointer at offset 0
     so the caller can stream/read the file as if untouched.
+
+    `enforce_size_limits=False` skips the generic per-extension SIZE_LIMITS cap
+    for callers that apply their own size policy (e.g. assignment attachments use
+    per-category limits); magic-byte and ZIP-integrity checks still run.
     """
     ext = _check_filename(file.filename or "", allowed_types)
 
-    max_size = SIZE_LIMITS.get(ext)
-    if max_size is not None and file.size is not None and file.size > max_size:
-        mb = max_size // (1024 * 1024)
-        raise _bad(f"File too large. Maximum size for {ext} is {mb}MB")
+    if enforce_size_limits:
+        max_size = SIZE_LIMITS.get(ext)
+        if max_size is not None and file.size is not None and file.size > max_size:
+            mb = max_size // (1024 * 1024)
+            raise _bad(f"File too large. Maximum size for {ext} is {mb}MB")
 
     sample = await file.read(512)
     await file.seek(0)
