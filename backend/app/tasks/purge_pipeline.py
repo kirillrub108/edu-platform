@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.constants import SOFT_DELETE_PURGE_DAYS
+from app.constants import ATTACHMENT_RETENTION_DAYS_AFTER_GRADED, SOFT_DELETE_PURGE_DAYS
 from app.models.assignment import Assignment, AssignmentAttachment, AssignmentSubmission
 from app.models.course import Course
 from app.models.lesson import Lesson, Module
@@ -178,6 +178,54 @@ def _purge_user_files(session: Session, user: User) -> None:
         _purge_course_files(session, course)
 
 
+# ── Submission-attachment retention ──────────────────────────────────────────
+
+def _purge_expired_submission_attachments(session: Session) -> int:
+    """Remove attachment files + rows for submissions graded longer than
+    ATTACHMENT_RETENTION_DAYS_AFTER_GRADED ago. The submission (grade, feedback,
+    thread) stays; only the stored files and their records go. Idempotent: once a
+    row is deleted a re-run finds nothing, and _remove_file tolerates a missing
+    file, so cascade-deleted attachments from the soft-delete pass don't error."""
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        days=ATTACHMENT_RETENTION_DAYS_AFTER_GRADED
+    )
+    rows = (
+        session.execute(
+            select(AssignmentAttachment)
+            .join(
+                AssignmentSubmission,
+                AssignmentAttachment.submission_id == AssignmentSubmission.id,
+            )
+            .where(
+                AssignmentSubmission.graded_at.isnot(None),
+                AssignmentSubmission.graded_at < cutoff,
+            )
+            .execution_options(include_deleted=True)
+        )
+        .scalars()
+        .all()
+    )
+    removed = 0
+    for att in rows:
+        try:
+            _remove_file(att.file_path)
+            session.delete(att)
+            session.flush()
+            removed += 1
+            if removed % _COMMIT_BATCH == 0:
+                session.commit()
+        except Exception:
+            session.rollback()
+            logger.warning(
+                "purge_attachment_failed",
+                id=str(getattr(att, "id", None)),
+                exc_info=True,
+            )
+            continue
+    session.commit()
+    return removed
+
+
 # ── Generic purge driver ──────────────────────────────────────────────────────
 
 def _purge_model(
@@ -229,5 +277,7 @@ def purge_soft_deleted() -> dict:
         counts["courses"] = _purge_model(session, Course, cutoff, _purge_course_files)
         counts["lessons"] = _purge_model(session, Lesson, cutoff, _purge_lesson_files)
         counts["users"] = _purge_model(session, User, cutoff, _purge_user_files)
+        # Retention sweep for graded submissions (independent of soft-delete).
+        counts["expired_attachments"] = _purge_expired_submission_attachments(session)
     logger.info("purge_soft_deleted_done", **counts)
     return counts

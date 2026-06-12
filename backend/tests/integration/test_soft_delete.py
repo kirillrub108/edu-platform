@@ -17,8 +17,16 @@ from sqlalchemy import create_engine, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.models.assignment import (
+    Assignment,
+    AssignmentAttachment,
+    AssignmentSubmission,
+    AttachmentKind,
+    SubmissionStatus,
+)
 from app.models.course import Course
-from app.models.lesson import Lesson, Module
+from app.models.enrollment import Enrollment
+from app.models.lesson import ContentType, CreationMode, Lesson, LessonStatus, Module
 from app.models.user import User, UserRole
 from app.services.auth_service import hash_password
 from tests.factories import make_course, make_enrollment, make_lesson, make_module
@@ -267,3 +275,102 @@ def test_purge_removes_files_via_os_remove(
     purge_pipeline.purge_soft_deleted()
 
     assert any("purge-test.png" in p for p in removed)
+
+
+def _make_graded_attachment(
+    session: Session, *, graded_days_ago: int | None
+) -> dict[str, object]:
+    """Build user→course→…→submission→attachment with a real file on disk.
+    graded_days_ago=None leaves the submission ungraded (graded_at NULL)."""
+    from app.services.storage_service import storage_service
+
+    teacher = _make_user(session)
+    student = _make_user(session)
+    course = Course(title="c", description="d", owner_id=teacher.id)
+    session.add(course)
+    session.commit()
+    module = Module(title="m", order=0, course_id=course.id)
+    session.add(module)
+    session.commit()
+    lesson = Lesson(
+        title="l",
+        order=0,
+        module_id=module.id,
+        content_type=ContentType.video,
+        creation_mode=CreationMode.presentation_and_text,
+        status=LessonStatus.draft,
+    )
+    session.add(lesson)
+    session.commit()
+    assignment = Assignment(lesson_id=lesson.id, title="a", prompt="p")
+    enrollment = Enrollment(student_id=student.id, course_id=course.id)
+    session.add_all([assignment, enrollment])
+    session.commit()
+    graded_at = (
+        None
+        if graded_days_ago is None
+        else datetime.now(timezone.utc) - timedelta(days=graded_days_ago)
+    )
+    submission = AssignmentSubmission(
+        assignment_id=assignment.id,
+        enrollment_id=enrollment.id,
+        status=SubmissionStatus.graded,
+        graded_at=graded_at,
+    )
+    session.add(submission)
+    session.commit()
+
+    rel = f"assignments/{submission.id}/file.bin"
+    full = storage_service.get_full_path(rel)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "wb") as fh:
+        fh.write(b"xyz")
+    attachment = AssignmentAttachment(
+        submission_id=submission.id,
+        kind=AttachmentKind.submission,
+        file_path=rel,
+        original_filename="file.bin",
+        size_bytes=3,
+    )
+    session.add(attachment)
+    session.commit()
+    return {"att_id": attachment.id, "full": full}
+
+
+def test_purge_retains_recent_and_ungraded_attachments(sync_session: Session) -> None:
+    from app.constants import ATTACHMENT_RETENTION_DAYS_AFTER_GRADED as ret
+    from app.tasks.purge_pipeline import purge_soft_deleted
+
+    old = _make_graded_attachment(sync_session, graded_days_ago=ret + 5)
+    recent = _make_graded_attachment(sync_session, graded_days_ago=ret - 5)
+    ungraded = _make_graded_attachment(sync_session, graded_days_ago=None)
+    survivors = [recent, ungraded]
+
+    try:
+        result = purge_soft_deleted()
+        assert result["expired_attachments"] >= 1
+
+        sync_session.expire_all()
+        remaining = (
+            sync_session.execute(
+                select(AssignmentAttachment.id).execution_options(include_deleted=True)
+            )
+            .scalars()
+            .all()
+        )
+        assert old["att_id"] not in remaining
+        assert recent["att_id"] in remaining
+        assert ungraded["att_id"] in remaining
+
+        # File of the expired one is gone; the others are untouched.
+        assert not os.path.exists(old["full"])  # type: ignore[arg-type]
+        assert os.path.exists(recent["full"])  # type: ignore[arg-type]
+        assert os.path.exists(ungraded["full"])  # type: ignore[arg-type]
+
+        # Idempotent: a second run removes nothing new and does not raise.
+        assert purge_soft_deleted()["expired_attachments"] == 0
+    finally:
+        for s in survivors:
+            full = s["full"]
+            if isinstance(full, str) and os.path.exists(full):
+                os.remove(full)

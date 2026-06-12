@@ -47,7 +47,7 @@ from app.schemas.assignment import (
 )
 from app.services.file_validation_service import validate_upload
 from app.services.grading_service import aggregate_score
-from app.services.storage_service import storage_service
+from app.services.storage_service import UploadTooLargeError, storage_service
 
 _LOCKED_STATUSES = {SubmissionStatus.graded, SubmissionStatus.returned}
 
@@ -550,6 +550,43 @@ def _mb(num_bytes: int) -> float:
     return round(num_bytes / (1024 * 1024), 1)
 
 
+def _enforce_declared_size(
+    filename: str | None,
+    size_bytes: int,
+    category: str,
+    cat_limit_bytes: int,
+    remaining_total_bytes: int,
+) -> None:
+    """Reject before any write when a known (declared) size already exceeds a
+    limit — per-file category cap first, then the submission's remaining budget."""
+    if size_bytes > cat_limit_bytes:
+        cat_mb = cat_limit_bytes // (1024 * 1024)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "file_too_large",
+                "category": category,
+                "max_file_mb": cat_mb,
+                "message": (
+                    f"Файл «{filename}» — {_mb(size_bytes)} МБ, для категории "
+                    f"«{category}» допускается до {cat_mb} МБ."
+                ),
+            },
+        )
+    if size_bytes > remaining_total_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "submission_too_large",
+                "max_total_mb": ATTACHMENT_MAX_TOTAL_SIZE_MB,
+                "message": (
+                    f"Суммарный объём сдачи превышает лимит "
+                    f"{ATTACHMENT_MAX_TOTAL_SIZE_MB} МБ."
+                ),
+            },
+        )
+
+
 def _resolve_attachment_category(file: UploadFile) -> tuple[str, str]:
     """Return (category, ext) for an upload, by MIME with an extension fallback.
 
@@ -597,53 +634,63 @@ async def add_attachment(
 
     category, ext = _resolve_attachment_category(file)
 
-    size = file.size
-    if size is None:
-        data = await file.read()
-        size = len(data)
-        await file.seek(0)
+    cat_limit_bytes = ATTACHMENT_CATEGORY_MAX_SIZE_MB[category] * 1024 * 1024
+    used_bytes = sum(a.size_bytes for a in siblings)
+    remaining_total_bytes = ATTACHMENT_MAX_TOTAL_SIZE_MB * 1024 * 1024 - used_bytes
 
-    cat_limit_mb = ATTACHMENT_CATEGORY_MAX_SIZE_MB[category]
-    if size > cat_limit_mb * 1024 * 1024:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "file_too_large",
-                "category": category,
-                "max_file_mb": cat_limit_mb,
-                "message": (
-                    f"Файл «{file.filename}» — {_mb(size)} МБ, "
-                    f"для категории «{category}» допускается до {cat_limit_mb} МБ."
-                ),
-            },
+    # Pre-flight: `file.size` is the exact byte count the multipart parser
+    # buffered — reject obvious overflows before any permanent write.
+    if file.size is not None:
+        _enforce_declared_size(
+            file.filename, file.size, category, cat_limit_bytes, remaining_total_bytes
         )
 
-    total = sum(a.size_bytes for a in siblings) + size
-    if total > ATTACHMENT_MAX_TOTAL_SIZE_MB * 1024 * 1024:
+    # Deep safety: magic-byte + zip-bomb/zip-slip checks (no XML parsing). Size is
+    # governed by the streaming hard cap below, so SIZE_LIMITS is skipped here.
+    await validate_upload(file, [f".{ext}"], enforce_size_limits=False)
+
+    # Hard cap: stream to storage, aborting + deleting the partial the instant it
+    # crosses the per-file category cap or the submission's remaining budget.
+    hard_cap = min(cat_limit_bytes, remaining_total_bytes)
+    try:
+        relative, written = await storage_service.save_upload_bounded(
+            file, f"assignments/{submission.id}", hard_cap
+        )
+    except UploadTooLargeError:
+        # Reached only when the declared size was absent or understated.
+        cat_mb = cat_limit_bytes // (1024 * 1024)
+        if cat_limit_bytes <= remaining_total_bytes:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "file_too_large",
+                    "category": category,
+                    "max_file_mb": cat_mb,
+                    "message": (
+                        f"Файл «{file.filename}» превышает лимит {cat_mb} МБ "
+                        f"для категории «{category}»."
+                    ),
+                },
+            )
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "submission_too_large",
                 "max_total_mb": ATTACHMENT_MAX_TOTAL_SIZE_MB,
                 "message": (
-                    f"Суммарный объём сдачи {_mb(total)} МБ превышает лимит "
+                    f"Суммарный объём сдачи превышает лимит "
                     f"{ATTACHMENT_MAX_TOTAL_SIZE_MB} МБ."
                 ),
             },
         )
 
-    # Deep safety: magic-byte + zip-bomb/zip-slip checks (no XML parsing). Size is
-    # governed by the per-category limit above, so SIZE_LIMITS is skipped here.
-    await validate_upload(file, [f".{ext}"], enforce_size_limits=False)
-
-    relative = await storage_service.save_upload(file, f"assignments/{submission.id}")
     attachment = AssignmentAttachment(
         submission_id=submission.id,
         kind=kind,
         file_path=relative,
         original_filename=file.filename or f"file.{ext}",
         content_type=file.content_type,
-        size_bytes=size,
+        size_bytes=written,
     )
     db.add(attachment)
     await db.commit()

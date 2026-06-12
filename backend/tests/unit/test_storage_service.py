@@ -38,6 +38,38 @@ async def test_save_upload_normalises_dangerous_filename(tmp_path: Path) -> None
     assert "/" not in rel.split("/", 1)[1].split("_", 1)[1]
 
 
+async def test_save_upload_bounded_writes_within_limit(tmp_path: Path) -> None:
+    svc = StorageService(base_path=str(tmp_path), base_url="http://t.example")
+    rel, size = await svc.save_upload_bounded(_upload_file("a.txt", b"abcde"), "sub", 10)
+    assert size == 5
+    assert (tmp_path / rel).read_bytes() == b"abcde"
+
+
+async def test_save_upload_bounded_allows_exact_boundary(tmp_path: Path) -> None:
+    svc = StorageService(base_path=str(tmp_path), base_url="http://t.example")
+    # size == cap passes; size > cap aborts.
+    rel, size = await svc.save_upload_bounded(_upload_file("a.bin", b"x" * 8), "sub", 8)
+    assert size == 8
+    assert (tmp_path / rel).exists()
+
+
+async def test_save_upload_bounded_aborts_midstream_and_removes_partial(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from app.services import storage_service as ss
+
+    # Tiny chunk so a small payload exercises the multi-chunk streaming abort.
+    monkeypatch.setattr(ss, "_UPLOAD_CHUNK_BYTES", 4)
+    svc = StorageService(base_path=str(tmp_path), base_url="http://t.example")
+
+    with pytest.raises(ss.UploadTooLargeError):
+        await svc.save_upload_bounded(_upload_file("big.bin", b"x" * 50), "sub", 10)
+
+    # The whole file was never written and the partial was unlinked.
+    sub = tmp_path / "sub"
+    assert not sub.exists() or not any(sub.iterdir())
+
+
 def test_get_url_starts_with_base_url_and_contains_path(tmp_path: Path) -> None:
     svc = StorageService(base_path=str(tmp_path), base_url="http://t.example/")
     url = svc.get_url("uploads/x.png", user_id="user-1")

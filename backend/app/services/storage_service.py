@@ -12,6 +12,20 @@ from app.config import settings
 from app.services.signed_url_service import generate_signed_url
 
 
+# Streaming granularity for bounded uploads (1 MiB).
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+class UploadTooLargeError(Exception):
+    """Raised by save_upload_bounded when an upload streams past its byte cap.
+    Any partially written object is removed before this propagates, so callers
+    only need to translate it into a user-facing error."""
+
+    def __init__(self, limit_bytes: int) -> None:
+        self.limit_bytes = limit_bytes
+        super().__init__(f"upload exceeded {limit_bytes} bytes")
+
+
 class StorageBackend(Protocol):
     def save(self, relative_path: str, data: bytes) -> str: ...
     def get_url(self, relative_path: str) -> str: ...
@@ -124,6 +138,60 @@ class StorageService:
         data = await file.read()
         await asyncio.to_thread(self._backend.save, relative, data)
         return relative
+
+    async def save_upload_bounded(
+        self, file: UploadFile, subfolder: str, max_bytes: int
+    ) -> tuple[str, int]:
+        """Stream an upload into storage, hard-aborting the moment the written
+        size exceeds max_bytes. On overflow the partial object is removed and
+        UploadTooLargeError is raised. Returns (relative_path, bytes_written).
+
+        Local storage streams to disk at O(chunk) memory; the (optional) S3
+        backend buffers up to the cap since its save() takes a full byte string.
+        """
+        safe_name = (file.filename or "file").replace("/", "_").replace("\\", "_")
+        unique_name = f"{uuid.uuid4().hex}_{safe_name}"
+        relative = os.path.join(subfolder, unique_name).replace("\\", "/")
+        if isinstance(self._backend, LocalBackend):
+            return await self._stream_to_local(file, relative, max_bytes)
+        return await self._buffer_bounded(file, relative, max_bytes)
+
+    async def _stream_to_local(
+        self, file: UploadFile, relative: str, max_bytes: int
+    ) -> tuple[str, int]:
+        full = Path(self._backend.get_full_path(relative))
+        await asyncio.to_thread(full.parent.mkdir, parents=True, exist_ok=True)
+        handle = await asyncio.to_thread(open, full, "wb")
+        total = 0
+        try:
+            while True:
+                chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > max_bytes:
+                    await asyncio.to_thread(handle.close)
+                    await asyncio.to_thread(full.unlink, missing_ok=True)
+                    raise UploadTooLargeError(max_bytes)
+                await asyncio.to_thread(handle.write, chunk)
+        finally:
+            if not handle.closed:
+                await asyncio.to_thread(handle.close)
+        return relative, total
+
+    async def _buffer_bounded(
+        self, file: UploadFile, relative: str, max_bytes: int
+    ) -> tuple[str, int]:
+        buffer = bytearray()
+        while True:
+            chunk = await file.read(_UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            buffer += chunk
+            if len(buffer) > max_bytes:
+                raise UploadTooLargeError(max_bytes)
+        await asyncio.to_thread(self._backend.save, relative, bytes(buffer))
+        return relative, len(buffer)
 
     def get_url(self, relative_path: str, user_id: str) -> str:
         if isinstance(self._backend, LocalBackend):

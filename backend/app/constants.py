@@ -28,14 +28,17 @@ MAX_VIDEO_UPLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
 # docs). Students may attach anything on the whitelist (incl. video), but a
 # submission is capped by file count, per-category file size, and total bytes.
 # These are SYSTEM limits (storage-cost guard) — not configurable per assignment.
+# The load-bearing guards are the whitelist + ATTACHMENT_MAX_FILES +
+# ATTACHMENT_MAX_TOTAL_SIZE_MB; the per-category caps are secondary (clear
+# messages and keeping a "document" from being gigantic).
 ATTACHMENT_MAX_FILES: int = 10                 # max files per submission (per kind)
-ATTACHMENT_MAX_TOTAL_SIZE_MB: int = 2048       # max combined size of one submission
+ATTACHMENT_MAX_TOTAL_SIZE_MB: int = 1024       # max combined size of one submission
 # Per-file ceiling by category (MB): video is generous, documents/images small.
 ATTACHMENT_CATEGORY_MAX_SIZE_MB: dict[str, int] = {
     "document": 50,
     "image": 50,
     "audio": 200,
-    "video": 1024,
+    "video": 500,
     "archive": 200,
 }
 # Whitelist — MIME type → category. Source of truth for what may be attached;
@@ -99,6 +102,10 @@ ATTACHMENT_EXTENSION_MIME: dict[str, str] = {
     "webm": "video/webm",
     "zip": "application/zip",
 }
+# Retention: submission attachment files are auto-purged this many days after the
+# submission's grade is finalized (see purge_pipeline). Storage-cost guard — the
+# grade/feedback rows are kept, only the stored files + their records go.
+ATTACHMENT_RETENTION_DAYS_AFTER_GRADED: int = 30
 # Extension whitelist (lower-case, no dot) for the teacher-set per-assignment
 # allowed_ext filter — separate from the system attachment whitelist above.
 ASSIGNMENT_ALLOWED_EXTENSIONS: tuple[str, ...] = (
