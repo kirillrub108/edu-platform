@@ -376,6 +376,7 @@ class QuizAnswerStudentResult(BaseModel):
     max_score: Decimal
     is_correct: bool | None
     needs_review: bool
+    graded_by_ai: bool = False
     llm_feedback: str | None = None
     # Filled only when show_answers && attempts_allowed == 1 — never otherwise.
     correct_payload: dict[str, Any] | None = None
@@ -393,6 +394,7 @@ class QuizAttemptResult(BaseModel):
     submitted_at: datetime | None
     graded_at: datetime | None
     grading_task_id: str | None
+    ai_graded: bool = False
     # Question definitions as the student saw them — never with reference answers.
     questions: list[QuizQuestionStudentRead]
     # User's submitted responses + per-question grading outcome.
@@ -438,10 +440,12 @@ class QuizAnswerTeacherRead(BaseModel):
     needs_review: bool
     llm_feedback: str | None
     manually_overridden: bool
+    graded_by_ai: bool
 
 
 class QuizAttemptTeacherDetail(QuizAttemptTeacherRead):
     answers: list[QuizAnswerTeacherRead]
+    ai_graded: bool = False
 
 
 class AnswerOverride(BaseModel):

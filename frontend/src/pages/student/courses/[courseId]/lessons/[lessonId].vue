@@ -134,6 +134,8 @@ onMounted(loadLesson)
           @has-quiz="onHasQuiz"
           @quiz-passed="onQuizPassed"
         />
+
+        <AssignmentsStudentPanel :lesson-id="lessonId" />
       </div>
 
       <!-- Right column: comments -->

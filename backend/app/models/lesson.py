@@ -134,3 +134,8 @@ class Lesson(Base):
         back_populates="lesson",
         cascade="all, delete-orphan",
     )
+    assignments = relationship(
+        "Assignment",
+        back_populates="lesson",
+        cascade="all, delete-orphan",
+    )

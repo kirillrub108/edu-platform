@@ -37,6 +37,7 @@ export interface AnswerResult {
   max_score: string
   is_correct: boolean | null
   needs_review: boolean
+  graded_by_ai: boolean
   llm_feedback: string | null
   correct_payload: Record<string, any> | null
 }
@@ -52,6 +53,7 @@ export interface AttemptResult {
   submitted_at: string | null
   graded_at: string | null
   grading_task_id: string | null
+  ai_graded: boolean
   questions: StudentQuestion[]
   answers: AnswerResult[]
 }

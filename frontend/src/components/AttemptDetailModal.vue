@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertCircle, Check, X } from 'lucide-vue-next'
+import { AlertCircle, Check, Sparkles, X } from 'lucide-vue-next'
 import type { TeacherQuizAnswer, TeacherQuizAttemptDetail } from '~/types/analytics'
 
 const props = defineProps<{
@@ -200,6 +200,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
               v-else
               class="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full"
             >на проверке</span>
+            <span
+              v-if="detail.ai_graded"
+              class="inline-flex items-center gap-1 text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full"
+              title="Развёрнутые ответы проверены ИИ"
+            >
+              <Sparkles class="w-3 h-3" />
+              Проверено ИИ
+            </span>
           </span>
         </footer>
       </div>

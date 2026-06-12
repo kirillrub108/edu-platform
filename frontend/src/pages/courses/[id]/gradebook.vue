@@ -14,17 +14,34 @@ interface GradebookCell {
   progress_id: string | null
 }
 
+interface GradebookAssignmentColumn {
+  assignment_id: string
+  title: string
+  lesson_id: string
+  max_points: number
+}
+
+interface GradebookAssignmentCell {
+  assignment_id: string
+  status: string | null
+  points_awarded: number | null
+  score: number | null
+  submission_id: string | null
+}
+
 interface GradebookStudentRow {
   student_id: string
   student_name: string
   student_email: string
   lessons: GradebookCell[]
+  assignments: GradebookAssignmentCell[]
 }
 
 interface GradebookData {
   course_id: string
   course_title: string
   students: GradebookStudentRow[]
+  assignments: GradebookAssignmentColumn[]
 }
 
 const route = useRoute()
@@ -77,6 +94,20 @@ const scoreBandClasses = (score: number | null): string => {
 
 const cellByLesson = (row: GradebookStudentRow, lessonId: string): GradebookCell | null =>
   row.lessons.find(l => l.lesson_id === lessonId) ?? null
+
+const assignmentColumns = computed<GradebookAssignmentColumn[]>(
+  () => gradebook.value?.assignments ?? [],
+)
+
+const assignmentCell = (
+  row: GradebookStudentRow,
+  assignmentId: string,
+): GradebookAssignmentCell | null =>
+  row.assignments?.find(a => a.assignment_id === assignmentId) ?? null
+
+// Reuse the quiz colour bands by mapping the 0..1 assignment score to 0..100.
+const assignmentBandClasses = (score: number | null): string =>
+  scoreBandClasses(score === null ? null : score * 100)
 
 const averageFor = (row: GradebookStudentRow): number | null => {
   const scores = row.lessons
@@ -219,8 +250,8 @@ onMounted(load)
       </p>
     </div>
 
-    <div v-if="!quizLessons.length" class="text-sm text-gray-500 bg-white border rounded-xl p-6 text-center">
-      В курсе ещё нет уроков-квизов. Журнал отобразится после их добавления.
+    <div v-if="!quizLessons.length && !assignmentColumns.length" class="text-sm text-gray-500 bg-white border rounded-xl p-6 text-center">
+      В курсе ещё нет квизов или заданий. Журнал отобразится после их добавления.
     </div>
 
     <div v-else-if="!gradebook.students.length" class="text-sm text-gray-500 bg-white border rounded-xl p-6 text-center">
@@ -248,6 +279,17 @@ onMounted(load)
             >
               <span class="block max-w-[8rem] truncate" :title="lesson.lesson_title">
                 {{ lesson.lesson_title }}
+              </span>
+            </th>
+            <th
+              v-for="col in assignmentColumns"
+              :key="col.assignment_id"
+              scope="col"
+              class="sticky top-0 z-10 bg-violet-50/70 border-b border-r border-gray-200 px-3 py-2.5 text-center font-medium text-gray-600 whitespace-nowrap"
+            >
+              <span class="block max-w-[8rem] truncate" :title="col.title">{{ col.title }}</span>
+              <span class="block text-[10px] font-normal text-violet-500 uppercase tracking-wide">
+                задание
               </span>
             </th>
             <th
@@ -306,6 +348,26 @@ onMounted(load)
                 title="Студент ещё не проходил урок"
                 aria-label="Студент не проходил урок"
               >—</span>
+            </td>
+
+            <td
+              v-for="col in assignmentColumns"
+              :key="col.assignment_id"
+              class="border-b border-r border-gray-100 px-2 py-1.5 text-center align-middle bg-violet-50/20"
+            >
+              <template v-if="assignmentCell(row, col.assignment_id)?.points_awarded != null">
+                <span
+                  :class="['inline-block px-2 py-0.5 rounded-lg font-medium tabular-nums', assignmentBandClasses(assignmentCell(row, col.assignment_id)!.score)]"
+                  :title="`${assignmentCell(row, col.assignment_id)!.points_awarded} из ${col.max_points}`"
+                >
+                  {{ assignmentCell(row, col.assignment_id)!.points_awarded }}/{{ col.max_points }}
+                </span>
+              </template>
+              <AssignmentsStatusPill
+                v-else-if="assignmentCell(row, col.assignment_id)?.status"
+                :status="assignmentCell(row, col.assignment_id)!.status!"
+              />
+              <span v-else class="text-gray-300">—</span>
             </td>
 
             <td class="border-b border-gray-100 px-3 py-1.5 text-center align-middle">

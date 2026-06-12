@@ -310,6 +310,7 @@ def grade_attempt_task(self, attempt_id: str) -> dict:
                             ans.is_correct = score >= 0.999
                             ans.needs_review = False
                             ans.llm_feedback = feedback
+                            ans.graded_by_ai = True
                         else:
                             # Keep needs_review=True so the teacher reviews it.
                             ans.llm_feedback = feedback

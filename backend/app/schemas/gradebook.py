@@ -19,17 +19,37 @@ class GradebookCellRead(BaseModel):
     progress_id: UUID | None
 
 
+class GradebookAssignmentColumn(BaseModel):
+    """One column in the assignment axis (live-read from AssignmentSubmission,
+    independent of the per-lesson LessonProgress cells)."""
+
+    assignment_id: UUID
+    title: str
+    lesson_id: UUID
+    max_points: float
+
+
+class GradebookAssignmentCell(BaseModel):
+    assignment_id: UUID
+    status: str | None  # submission status, or None if the student has none
+    points_awarded: float | None
+    score: float | None  # normalized 0..1
+    submission_id: UUID | None
+
+
 class GradebookStudentRow(BaseModel):
     student_id: UUID
     student_name: str
     student_email: str
     lessons: list[GradebookCellRead]
+    assignments: list[GradebookAssignmentCell] = []
 
 
 class GradebookRead(BaseModel):
     course_id: UUID
     course_title: str
     students: list[GradebookStudentRow]
+    assignments: list[GradebookAssignmentColumn] = []
 
 
 class ProgressUpdate(BaseModel):

@@ -13,6 +13,13 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.constants import ASSIGNMENT_ALLOWED_EXTENSIONS
+from app.models.assignment import (
+    Assignment,
+    AssignmentStatus,
+    AssignmentSubmission,
+    SubmissionStatus,
+)
 from app.models.course import Course
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import (
@@ -209,3 +216,49 @@ async def make_published_course_with_lesson(
     module = await make_module(db, course)
     lesson = await make_lesson(db, module, status=LessonStatus.published)
     return course, module, lesson
+
+
+async def make_assignment(
+    db: AsyncSession, lesson: Lesson, *, published: bool = False, **overrides: Any
+) -> Assignment:
+    defaults: dict[str, Any] = {
+        "lesson_id": lesson.id,
+        "title": f"Assignment {uuid.uuid4().hex[:6]}",
+        "prompt": "Write an essay.",
+        "max_points": 100,
+        "status": AssignmentStatus.published if published else AssignmentStatus.draft,
+        "attachments_enabled": True,
+        "max_files": 5,
+        "allowed_ext": list(ASSIGNMENT_ALLOWED_EXTENSIONS),
+        "max_file_mb": 10,
+        "pass_threshold": None,
+    }
+    defaults.update(overrides)
+    assignment = Assignment(**defaults)
+    db.add(assignment)
+    await db.commit()
+    await db.refresh(assignment)
+    return assignment
+
+
+async def make_assignment_submission(
+    db: AsyncSession,
+    assignment: Assignment,
+    enrollment: Enrollment,
+    *,
+    status: SubmissionStatus = SubmissionStatus.submitted,
+    text_content: str | None = "my answer",
+    **overrides: Any,
+) -> AssignmentSubmission:
+    defaults: dict[str, Any] = {
+        "assignment_id": assignment.id,
+        "enrollment_id": enrollment.id,
+        "status": status,
+        "text_content": text_content,
+    }
+    defaults.update(overrides)
+    submission = AssignmentSubmission(**defaults)
+    db.add(submission)
+    await db.commit()
+    await db.refresh(submission)
+    return submission

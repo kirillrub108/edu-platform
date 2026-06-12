@@ -169,6 +169,7 @@ async def _build_result(
                 max_score=a.max_score,
                 is_correct=a.is_correct,
                 needs_review=a.needs_review,
+                graded_by_ai=a.graded_by_ai,
                 llm_feedback=a.llm_feedback,
                 correct_payload=correct_payload,
             )
@@ -184,6 +185,7 @@ async def _build_result(
         submitted_at=attempt.submitted_at,
         graded_at=attempt.graded_at,
         grading_task_id=attempt.grading_task_id,
+        ai_graded=any(a.graded_by_ai for a in answers_out),
         questions=snap_questions,
         answers=answers_out,
     )

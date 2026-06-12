@@ -108,8 +108,10 @@ export interface TeacherQuizAnswer {
   needs_review: boolean
   llm_feedback: string | null
   manually_overridden: boolean
+  graded_by_ai: boolean
 }
 
 export interface TeacherQuizAttemptDetail extends TeacherQuizAttempt {
   answers: TeacherQuizAnswer[]
+  ai_graded: boolean
 }

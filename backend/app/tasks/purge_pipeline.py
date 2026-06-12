@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
 from app.constants import SOFT_DELETE_PURGE_DAYS
+from app.models.assignment import Assignment, AssignmentAttachment, AssignmentSubmission
 from app.models.course import Course
 from app.models.lesson import Lesson, Module
 from app.models.lesson_video import LessonVideo
@@ -79,6 +80,40 @@ def _remove_lesson_dirs(lesson_id) -> None:
             shutil.rmtree(full, ignore_errors=True)
 
 
+def _purge_assignment_files(session: Session, lesson: Lesson) -> None:
+    """Remove attachment files (and their per-submission dirs) for every
+    assignment of the lesson, before the row cascade wipes the DB records."""
+    import shutil
+
+    submission_ids = (
+        session.execute(
+            select(AssignmentSubmission.id)
+            .join(Assignment, AssignmentSubmission.assignment_id == Assignment.id)
+            .where(Assignment.lesson_id == lesson.id)
+            .execution_options(include_deleted=True)
+        )
+        .scalars()
+        .all()
+    )
+    if not submission_ids:
+        return
+    paths = (
+        session.execute(
+            select(AssignmentAttachment.file_path)
+            .where(AssignmentAttachment.submission_id.in_(submission_ids))
+            .execution_options(include_deleted=True)
+        )
+        .scalars()
+        .all()
+    )
+    for path in paths:
+        _remove_file(path)
+    for sid in submission_ids:
+        full = storage_service.get_full_path(f"assignments/{sid}")
+        if os.path.isdir(full):
+            shutil.rmtree(full, ignore_errors=True)
+
+
 def _purge_lesson_files(session: Session, lesson: Lesson) -> None:
     _remove_file(_rel_from_url(lesson.video_url))
     _remove_file(lesson.pptx_path)
@@ -104,6 +139,7 @@ def _purge_lesson_files(session: Session, lesson: Lesson) -> None:
     )
     for slide in slides:
         _remove_file(slide.image_path)
+    _purge_assignment_files(session, lesson)
     _remove_lesson_dirs(lesson.id)
 
 

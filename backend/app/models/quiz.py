@@ -225,6 +225,7 @@ class QuizAnswer(Base):
     needs_review = Column(Boolean, nullable=False, default=False)
     llm_feedback = Column(Text, nullable=True)
     manually_overridden = Column(Boolean, nullable=False, default=False)
+    graded_by_ai = Column(Boolean, nullable=False, server_default="false")
     updated_at = Column(
         DateTime(timezone=True),
         server_default=func.now(),

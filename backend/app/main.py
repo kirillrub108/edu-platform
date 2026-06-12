@@ -24,6 +24,8 @@ from app.logging_config import configure_logging
 from app.redis_client import close_redis
 from app.routers import (
     analytics,
+    assignment_student,
+    assignment_teacher,
     auth,
     billing,
     comments,
@@ -269,6 +271,8 @@ app.include_router(analytics.router)
 app.include_router(analytics.lesson_results_router)
 app.include_router(comments.router)
 app.include_router(billing.router)
+app.include_router(assignment_teacher.router)
+app.include_router(assignment_student.router)
 
 
 @app.get("/", tags=["meta"])

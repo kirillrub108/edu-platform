@@ -8,9 +8,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.assignment import Assignment, AssignmentStatus, AssignmentSubmission
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import Lesson, Module
 from app.schemas.gradebook import (
+    GradebookAssignmentCell,
+    GradebookAssignmentColumn,
     GradebookCellRead,
     GradebookRead,
     GradebookStudentRow,
@@ -47,6 +50,29 @@ def _cell_from_progress(
     )
 
 
+def _assignment_cell(
+    assignment: Assignment,
+    submission: AssignmentSubmission | None,
+) -> GradebookAssignmentCell:
+    if submission is None:
+        return GradebookAssignmentCell(
+            assignment_id=assignment.id,
+            status=None,
+            points_awarded=None,
+            score=None,
+            submission_id=None,
+        )
+    return GradebookAssignmentCell(
+        assignment_id=assignment.id,
+        status=submission.status.value,
+        points_awarded=float(submission.points_awarded)
+        if submission.points_awarded is not None
+        else None,
+        score=float(submission.score) if submission.score is not None else None,
+        submission_id=submission.id,
+    )
+
+
 async def get_gradebook(
     course_id: UUID,
     course_title: str,
@@ -70,6 +96,30 @@ async def get_gradebook(
     )
     enrollments = list(enrollment_rows.all())
 
+    # Assignment axis: published assignments of the course + their submissions,
+    # read live (never denormalized onto LessonProgress, so quiz_score is untouched).
+    assignment_rows = await db.scalars(
+        select(Assignment)
+        .join(Lesson, Assignment.lesson_id == Lesson.id)
+        .join(Module, Lesson.module_id == Module.id)
+        .where(
+            Module.course_id == course_id,
+            Assignment.status == AssignmentStatus.published,
+        )
+        .order_by(Module.order, Lesson.order, Assignment.created_at)
+    )
+    assignments = list(assignment_rows.all())
+    submissions_by_key: dict[tuple[UUID, UUID], AssignmentSubmission] = {}
+    if assignments:
+        sub_rows = await db.scalars(
+            select(AssignmentSubmission).where(
+                AssignmentSubmission.assignment_id.in_([a.id for a in assignments])
+            )
+        )
+        submissions_by_key = {
+            (s.enrollment_id, s.assignment_id): s for s in sub_rows.all()
+        }
+
     student_rows: list[GradebookStudentRow] = []
     for enrollment in enrollments:
         progress_by_lesson: dict[UUID, LessonProgress] = {
@@ -79,12 +129,17 @@ async def get_gradebook(
             _cell_from_progress(lesson, progress_by_lesson.get(lesson.id))
             for lesson in lessons
         ]
+        assignment_cells = [
+            _assignment_cell(a, submissions_by_key.get((enrollment.id, a.id)))
+            for a in assignments
+        ]
         student_rows.append(
             GradebookStudentRow(
                 student_id=enrollment.student.id,
                 student_name=enrollment.student.full_name,
                 student_email=enrollment.student.email,
                 lessons=cells,
+                assignments=assignment_cells,
             )
         )
 
@@ -92,6 +147,15 @@ async def get_gradebook(
         course_id=course_id,
         course_title=course_title,
         students=student_rows,
+        assignments=[
+            GradebookAssignmentColumn(
+                assignment_id=a.id,
+                title=a.title,
+                lesson_id=a.lesson_id,
+                max_points=float(a.max_points),
+            )
+            for a in assignments
+        ],
     )
 
 

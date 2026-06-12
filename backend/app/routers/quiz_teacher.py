@@ -664,6 +664,7 @@ async def get_attempt_detail(
             "needs_review": a.needs_review,
             "llm_feedback": a.llm_feedback,
             "manually_overridden": a.manually_overridden,
+            "graded_by_ai": a.graded_by_ai,
         }
         for a in attempt.answers
     ]
@@ -682,6 +683,7 @@ async def get_attempt_detail(
         submitted_at=attempt.submitted_at,
         graded_at=attempt.graded_at,
         has_pending_review=needs_review_count > 0,
+        ai_graded=any(a.graded_by_ai for a in attempt.answers),
         answers=answers,  # type: ignore[arg-type]
     )
 
@@ -720,6 +722,7 @@ async def override_answer_score(
     answer.is_correct = bool(data.awarded_score >= answer.max_score)
     answer.needs_review = False
     answer.manually_overridden = True
+    answer.graded_by_ai = False
     if data.feedback is not None:
         answer.llm_feedback = data.feedback
 

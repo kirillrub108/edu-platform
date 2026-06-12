@@ -1,3 +1,12 @@
+from app.models.assignment import (
+    Assignment,
+    AssignmentAttachment,
+    AssignmentMessage,
+    AssignmentStatus,
+    AssignmentSubmission,
+    AttachmentKind,
+    SubmissionStatus,
+)
 from app.models.comment import Comment
 from app.models.course import AccessMode, Course
 from app.models.credit import (
@@ -54,4 +63,11 @@ __all__ = [
     "PaymentStatus",
     "GenerationUsage",
     "UsageCounter",
+    "Assignment",
+    "AssignmentSubmission",
+    "AssignmentAttachment",
+    "AssignmentMessage",
+    "AssignmentStatus",
+    "SubmissionStatus",
+    "AttachmentKind",
 ]

@@ -9,6 +9,7 @@
  *
  * The composable owns all server I/O — this component is pure presentation.
  */
+import { Sparkles } from 'lucide-vue-next'
 import type { StudentQuestion, AnswerResult } from '~/composables/useQuizAttempt'
 
 interface AttemptRow {
@@ -211,6 +212,14 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
           v-if="gradingPending"
           class="text-xs text-gray-500"
         >ИИ оценивает развёрнутые ответы…</span>
+        <span
+          v-if="result.ai_graded"
+          class="inline-flex items-center gap-1 text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full"
+          title="Развёрнутые ответы проверены ИИ"
+        >
+          <Sparkles class="w-3 h-3" />
+          Проверено ИИ
+        </span>
       </div>
 
       <div class="space-y-3">
