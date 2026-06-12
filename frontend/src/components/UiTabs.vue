@@ -2,6 +2,9 @@
 interface Tab {
   id: string
   label: string
+  // Optional status pill rendered after the label (e.g. "Сдан"/"Пройден").
+  // Omitted by callers that don't need it (the teacher view), so it's inert there.
+  badge?: { text: string; tone: string } | null
 }
 
 const props = defineProps<{ tabs: Tab[]; modelValue: string }>()
@@ -49,6 +52,15 @@ const onKeydown = (e: KeyboardEvent, idx: number) => {
       @keydown="onKeydown($event, idx)"
     >
       {{ tab.label }}
+      <span
+        v-if="tab.badge"
+        :class="[
+          'ml-2 inline-flex items-center px-1.5 py-0.5 rounded-full text-[11px] font-semibold leading-none',
+          tab.badge.tone,
+        ]"
+      >
+        {{ tab.badge.text }}
+      </span>
     </button>
   </div>
 </template>
