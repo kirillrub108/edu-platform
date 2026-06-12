@@ -10,18 +10,16 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
 from app.constants import (
     ASSIGNMENT_ALLOWED_EXTENSIONS,
-    ASSIGNMENT_DEFAULT_MAX_FILE_MB,
-    ASSIGNMENT_DEFAULT_MAX_FILES,
     ASSIGNMENT_DEFAULT_MAX_POINTS,
-    ASSIGNMENT_MAX_FILE_MB,
-    ASSIGNMENT_MAX_FILES,
     ASSIGNMENT_MAX_MESSAGE_CHARS,
     ASSIGNMENT_MAX_PROMPT_CHARS,
     ASSIGNMENT_MAX_TEXT_CHARS,
+    MAX_ATTACHMENT_FILES,
+    MAX_ATTACHMENT_SIZE_MB,
 )
 from app.models.assignment import AssignmentStatus, AttachmentKind, SubmissionStatus
 from app.models.user import UserRole
@@ -57,11 +55,7 @@ class AssignmentCreate(BaseModel):
     max_points: float = Field(default=ASSIGNMENT_DEFAULT_MAX_POINTS, gt=0, le=100000)
     due_at: datetime | None = None
     attachments_enabled: bool = True
-    max_files: int = Field(default=ASSIGNMENT_DEFAULT_MAX_FILES, ge=1, le=ASSIGNMENT_MAX_FILES)
     allowed_ext: list[str] | None = None
-    max_file_mb: int = Field(
-        default=ASSIGNMENT_DEFAULT_MAX_FILE_MB, ge=1, le=ASSIGNMENT_MAX_FILE_MB
-    )
     pass_threshold: float | None = Field(default=None, ge=0, le=1)
 
     _strip_title = field_validator("title", mode="before")(_strip_before)
@@ -74,9 +68,7 @@ class AssignmentUpdate(BaseModel):
     max_points: float | None = Field(default=None, gt=0, le=100000)
     due_at: datetime | None = None
     attachments_enabled: bool | None = None
-    max_files: int | None = Field(default=None, ge=1, le=ASSIGNMENT_MAX_FILES)
     allowed_ext: list[str] | None = None
-    max_file_mb: int | None = Field(default=None, ge=1, le=ASSIGNMENT_MAX_FILE_MB)
     pass_threshold: float | None = Field(default=None, ge=0, le=1)
 
     _strip_title = field_validator("title", mode="before")(_strip_before)
@@ -94,14 +86,23 @@ class AssignmentTeacherRead(BaseModel):
     due_at: datetime | None
     status: AssignmentStatus
     attachments_enabled: bool
-    max_files: int
     allowed_ext: list[str]
-    max_file_mb: int
     pass_threshold: float | None
     created_at: datetime
     updated_at: datetime
     submission_count: int = 0
     pending_count: int = 0  # submitted, awaiting grading
+
+    # System attachment limits, surfaced so the client can show them (read-only).
+    @computed_field
+    @property
+    def max_files(self) -> int:
+        return MAX_ATTACHMENT_FILES
+
+    @computed_field
+    @property
+    def max_file_mb(self) -> int:
+        return MAX_ATTACHMENT_SIZE_MB
 
 
 class AssignmentTeacherListResponse(BaseModel):
@@ -217,11 +218,20 @@ class AssignmentStudentRead(BaseModel):
     max_points: float
     due_at: datetime | None
     attachments_enabled: bool
-    max_files: int
     allowed_ext: list[str]
-    max_file_mb: int
     pass_threshold: float | None
     my_submission: SubmissionStudentRead | None = None
+
+    # System attachment limits, surfaced so the client can show them (read-only).
+    @computed_field
+    @property
+    def max_files(self) -> int:
+        return MAX_ATTACHMENT_FILES
+
+    @computed_field
+    @property
+    def max_file_mb(self) -> int:
+        return MAX_ATTACHMENT_SIZE_MB
 
 
 class AssignmentStudentListResponse(BaseModel):

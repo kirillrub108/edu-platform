@@ -18,7 +18,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.constants import ASSIGNMENT_ALLOWED_EXTENSIONS
+from app.constants import (
+    ASSIGNMENT_ALLOWED_EXTENSIONS,
+    MAX_ATTACHMENT_FILES,
+    MAX_ATTACHMENT_SIZE_BYTES,
+    MAX_ATTACHMENT_SIZE_MB,
+)
 from app.models.assignment import (
     Assignment,
     AssignmentAttachment,
@@ -227,9 +232,7 @@ async def create_assignment(
         max_points=Decimal(str(data.max_points)),
         due_at=data.due_at,
         attachments_enabled=data.attachments_enabled,
-        max_files=data.max_files,
         allowed_ext=data.allowed_ext or list(ASSIGNMENT_ALLOWED_EXTENSIONS),
-        max_file_mb=data.max_file_mb,
         pass_threshold=Decimal(str(data.pass_threshold))
         if data.pass_threshold is not None
         else None,
@@ -560,10 +563,10 @@ async def add_attachment(
         _ensure_editable(submission)
 
     existing = sum(1 for a in submission.attachments if a.kind == kind)
-    if existing >= assignment.max_files:
+    if existing >= MAX_ATTACHMENT_FILES:
         raise HTTPException(
             status_code=400,
-            detail={"code": "too_many_files", "max_files": assignment.max_files},
+            detail={"code": "too_many_files", "max_files": MAX_ATTACHMENT_FILES},
         )
 
     ext = os.path.splitext(file.filename or "")[1].lower().lstrip(".")
@@ -579,11 +582,10 @@ async def add_attachment(
         data = await file.read()
         size = len(data)
         await file.seek(0)
-    max_bytes = assignment.max_file_mb * 1024 * 1024
-    if size > max_bytes:
+    if size > MAX_ATTACHMENT_SIZE_BYTES:
         raise HTTPException(
             status_code=400,
-            detail={"code": "file_too_large", "max_file_mb": assignment.max_file_mb},
+            detail={"code": "file_too_large", "max_file_mb": MAX_ATTACHMENT_SIZE_MB},
         )
 
     # Deep safety: magic-byte + zip-bomb/zip-slip checks (no XML parsing).

@@ -94,9 +94,7 @@ export interface AssignmentCreatePayload {
   max_points: number
   due_at?: string | null
   attachments_enabled?: boolean
-  max_files?: number
   allowed_ext?: string[] | null
-  max_file_mb?: number
   pass_threshold?: number | null
 }
 

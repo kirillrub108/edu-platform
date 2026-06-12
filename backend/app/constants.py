@@ -25,13 +25,11 @@ MAX_VIDEO_UPLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
 
 # Assignment attachments (teacher-set text tasks + student submissions). Files
 # are only STORED, never parsed server-side (avoids XXE/zip-bomb from office
-# docs). These are the hard ceilings; per-assignment max_files / max_file_mb /
-# allowed_ext are validated to stay within them.
-ASSIGNMENT_MAX_FILES: int = 10                 # ceiling on files per submission
-ASSIGNMENT_MAX_FILE_MB: int = 25               # ceiling on per-file size (MB)
-ASSIGNMENT_MAX_FILE_BYTES: int = ASSIGNMENT_MAX_FILE_MB * 1024 * 1024
-ASSIGNMENT_DEFAULT_MAX_FILES: int = 5
-ASSIGNMENT_DEFAULT_MAX_FILE_MB: int = 10
+# docs). The per-submission file count and per-file size are SYSTEM limits —
+# enforced from these constants on upload, not configurable per assignment.
+MAX_ATTACHMENT_FILES: int = 5                  # max files per submission
+MAX_ATTACHMENT_SIZE_MB: int = 10               # max per-file size (MB)
+MAX_ATTACHMENT_SIZE_BYTES: int = MAX_ATTACHMENT_SIZE_MB * 1024 * 1024
 # Extension whitelist (lower-case, no dot). A per-assignment allowed_ext must be
 # a subset of this; uploads are checked against the per-assignment list.
 ASSIGNMENT_ALLOWED_EXTENSIONS: tuple[str, ...] = (

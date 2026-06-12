@@ -27,8 +27,6 @@ const passThresholdPct = ref<number | null>(
   a?.pass_threshold != null ? Math.round(a.pass_threshold * 100) : null,
 )
 const attachmentsEnabled = ref(a?.attachments_enabled ?? true)
-const maxFiles = ref<number>(a?.max_files ?? 5)
-const maxFileMb = ref<number>(a?.max_file_mb ?? 10)
 
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -51,8 +49,6 @@ const onSave = async () => {
     max_points: Number(maxPoints.value),
     due_at: dueAt.value ? new Date(dueAt.value).toISOString() : null,
     attachments_enabled: attachmentsEnabled.value,
-    max_files: Number(maxFiles.value),
-    max_file_mb: Number(maxFileMb.value),
     pass_threshold: hasThreshold ? Number(pct) / 100 : null,
   }
   try {
@@ -110,20 +106,14 @@ const numberClass =
       </div>
     </div>
 
-    <label class="flex items-center gap-2 text-sm text-gray-700">
-      <input v-model="attachmentsEnabled" type="checkbox" class="rounded border-gray-300 text-violet-600" />
-      Разрешить вложения
-    </label>
-
-    <div v-if="attachmentsEnabled" class="grid grid-cols-2 gap-3">
-      <div class="space-y-1.5">
-        <label class="block text-sm font-medium text-gray-700">Макс. файлов</label>
-        <input v-model.number="maxFiles" type="number" min="1" max="10" :class="numberClass" />
-      </div>
-      <div class="space-y-1.5">
-        <label class="block text-sm font-medium text-gray-700">Макс. размер, МБ</label>
-        <input v-model.number="maxFileMb" type="number" min="1" max="25" :class="numberClass" />
-      </div>
+    <div>
+      <label class="flex items-center gap-2 text-sm text-gray-700">
+        <input v-model="attachmentsEnabled" type="checkbox" class="rounded border-gray-300 text-violet-600" />
+        Разрешить вложения
+      </label>
+      <p v-if="attachmentsEnabled" class="mt-1.5 text-xs text-gray-500">
+        До 5 файлов, до 10 МБ каждый
+      </p>
     </div>
 
     <p v-if="error" class="text-sm text-rose-600">{{ error }}</p>

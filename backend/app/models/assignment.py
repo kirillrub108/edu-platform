@@ -64,11 +64,9 @@ class Assignment(Base):
         nullable=False,
     )
     attachments_enabled = Column(Boolean, nullable=False, default=True)
-    max_files = Column(Integer, nullable=False, default=5)
     # List[str] of lower-case extensions without the dot (subset of
     # ASSIGNMENT_ALLOWED_EXTENSIONS); validated on create/update.
     allowed_ext = Column(JSONB, nullable=False, default=list)
-    max_file_mb = Column(Integer, nullable=False, default=10)
     # 0..1 normalized; null = no auto-completion on grade.
     pass_threshold = Column(Numeric(5, 4), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

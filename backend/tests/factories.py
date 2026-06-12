@@ -228,9 +228,7 @@ async def make_assignment(
         "max_points": 100,
         "status": AssignmentStatus.published if published else AssignmentStatus.draft,
         "attachments_enabled": True,
-        "max_files": 5,
         "allowed_ext": list(ASSIGNMENT_ALLOWED_EXTENSIONS),
-        "max_file_mb": 10,
         "pass_threshold": None,
     }
     defaults.update(overrides)
