@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GraduationCap, AlertCircle } from 'lucide-vue-next'
+import { AlertCircle } from 'lucide-vue-next'
 
 const route = useRoute()
 const auth = useAuthStore()
@@ -31,8 +31,8 @@ onMounted(restoreScroll)
   <div class="px-6 py-12 sm:py-16 flex justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-6 text-center">
-        <div class="mx-auto mb-3 grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-violet-600 to-purple-500 shadow-sm">
-          <GraduationCap class="h-6 w-6 text-white" />
+        <div class="mb-3 flex justify-center">
+          <AppLogo :with-text="false" size="lg" />
         </div>
         <h1 class="text-xl font-semibold text-gray-900">С возвращением</h1>
         <p class="mt-1 text-sm text-gray-500">Войдите, чтобы продолжить в Edllm</p>

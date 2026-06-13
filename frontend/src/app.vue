@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-gray-50 text-gray-900 font-sans antialiased">
+  <div class="min-h-screen bg-brand-surface text-gray-900 font-sans antialiased">
     <NuxtLayout>
       <NuxtPage />
     </NuxtLayout>
@@ -49,5 +49,26 @@
   --c-violet-700: 0.55 0.215 282;
   --c-violet-800: 0.4 0.19 270;
   --c-violet-900: 0.34 0.16 268;
+
+  /* Brand gradient anchors — the landing's --accent-deep / --accent-bright
+     (oklch, hue 270→282). Single source for every brand surface (logo mark,
+     primary CTAs, accent cards) via the .bg-brand-gradient utility below. */
+  --brand-deep: oklch(0.46 0.19 270);
+  --brand-bright: oklch(0.63 0.235 282);
+}
+
+/* Brand gradient — logo mark, primary CTAs, accent surfaces. Mirrors the
+   landing's .btn-primary / .brand .mark fill so every screen shares one ramp. */
+.bg-brand-gradient {
+  background-image: linear-gradient(120deg, var(--brand-deep), var(--brand-bright));
+}
+
+/* Soft lavender page wash — mirrors the landing's fixed .bg radial, pinned to the
+   viewport so dashboards/auth share the landing backdrop instead of flat gray. */
+.bg-brand-surface {
+  background-color: oklch(0.985 0.01 282);
+  background-image: radial-gradient(125% 80% at 50% -10%, oklch(0.97 0.03 282) 0%, transparent 55%);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
 }
 </style>

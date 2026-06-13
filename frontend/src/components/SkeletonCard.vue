@@ -1,6 +1,6 @@
 <template>
   <div class="bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-soft">
-    <div class="h-20 bg-gradient-to-br from-violet-100 to-purple-100 animate-pulse"></div>
+    <div class="h-20 bg-gradient-to-br from-violet-100 to-fuchsia-100 animate-pulse"></div>
     <div class="p-5 space-y-3">
       <div class="h-4 w-3/4 bg-gray-200 rounded animate-pulse"></div>
       <div class="space-y-2">

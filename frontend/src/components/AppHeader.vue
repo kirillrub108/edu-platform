@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { GraduationCap, LogOut, Menu, MailWarning, Coins } from 'lucide-vue-next'
+import { LogOut, Menu, MailWarning, Coins } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const { user, isAuthenticated, isEmailVerified } = storeToRefs(auth)
@@ -33,13 +33,8 @@ const dashboardLink = computed(() =>
 <template>
   <header class="bg-white border-b border-violet-100 sticky top-0 z-30">
     <div class="px-6 h-16 flex items-center justify-between">
-      <NuxtLink to="/" class="flex items-center gap-2.5">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-600 to-purple-500 grid place-items-center shadow-sm">
-          <GraduationCap class="w-5 h-5 text-white" />
-        </div>
-        <span class="font-semibold text-lg bg-gradient-to-r from-violet-600 to-purple-500 bg-clip-text text-transparent">
-          Edllm
-        </span>
+      <NuxtLink to="/" class="flex items-center">
+        <AppLogo />
       </NuxtLink>
 
 <div v-if="isAuthenticated" class="hidden md:flex items-center gap-3">
@@ -91,7 +86,7 @@ const dashboardLink = computed(() =>
         </NuxtLink>
         <NuxtLink
           to="/register"
-          class="px-5 py-2.5 rounded-xl text-sm font-medium bg-violet-700 hover:bg-violet-600 text-white shadow-sm transition"
+          class="px-5 py-2.5 rounded-xl text-sm font-medium bg-brand-gradient text-white shadow-sm hover:brightness-110 transition"
         >
           Создать аккаунт
         </NuxtLink>

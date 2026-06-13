@@ -33,8 +33,8 @@ const archived = computed(() => props.course.is_archived === true)
 const gradients = [
   'from-violet-500 via-purple-500 to-fuchsia-500',
   'from-indigo-500 via-violet-500 to-purple-500',
-  'from-purple-500 via-fuchsia-500 to-pink-500',
-  'from-violet-600 via-indigo-500 to-blue-500',
+  'from-purple-500 via-fuchsia-500 to-violet-500',
+  'from-violet-600 via-indigo-500 to-purple-500',
 ]
 const gradient = computed(() => gradients[(props.course.gradient_idx ?? 0) % gradients.length])
 

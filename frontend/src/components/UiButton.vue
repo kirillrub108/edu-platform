@@ -14,7 +14,7 @@ withDefaults(
 )
 
 const variants = {
-  primary:   'bg-violet-700 hover:bg-violet-600 active:bg-violet-800 text-white shadow-sm hover:shadow',
+  primary:   'bg-brand-gradient text-white shadow-soft hover:shadow-soft-hover hover:brightness-110 active:brightness-95',
   secondary: 'border border-violet-200 text-violet-700 hover:bg-violet-50 active:bg-violet-100 bg-white',
   ghost:     'hover:bg-gray-100 text-gray-600 active:bg-gray-200',
   danger:    'bg-rose-600 hover:bg-rose-500 text-white shadow-sm',

@@ -194,7 +194,7 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
 
       <!-- Balance hero -->
       <section
-        class="rounded-3xl bg-gradient-to-br from-violet-600 via-violet-600 to-purple-500 text-white p-6 lg:p-7 shadow-soft mb-6"
+        class="rounded-3xl bg-brand-gradient text-white p-6 lg:p-7 shadow-soft mb-6"
       >
         <div class="flex flex-wrap items-start justify-between gap-6">
           <div>

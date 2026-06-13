@@ -57,7 +57,7 @@ const choose = (mode: CreationModeValue, available: boolean) => {
         </div>
 
         <div
-          class="w-11 h-11 rounded-xl bg-gradient-to-br from-violet-500 to-purple-500 grid place-items-center mb-3 shadow-sm text-white text-lg"
+          class="w-11 h-11 rounded-xl bg-brand-gradient grid place-items-center mb-3 shadow-sm text-white text-lg"
         >
           {{ card.emoji }}
         </div>

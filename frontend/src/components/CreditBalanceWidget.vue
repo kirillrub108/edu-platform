@@ -26,7 +26,7 @@ watch(isTeacher, (val) => {
       v-if="props.collapsed"
       to="/billing"
       title="Баланс кредитов"
-      class="w-10 h-10 rounded-xl bg-gradient-to-br from-violet-600 to-purple-500 flex flex-col items-center justify-center text-white hover:opacity-90 transition"
+      class="w-10 h-10 rounded-xl bg-brand-gradient flex flex-col items-center justify-center text-white hover:opacity-90 transition"
     >
       <Coins class="w-4 h-4" />
       <span class="text-[10px] font-semibold tabular-nums leading-none mt-0.5">{{ available }}</span>
@@ -36,7 +36,7 @@ watch(isTeacher, (val) => {
     <NuxtLink
       v-else
       to="/billing"
-      class="block p-4 rounded-2xl bg-gradient-to-br from-violet-600 to-purple-500 text-white hover:shadow-lg hover:shadow-violet-500/20 transition group"
+      class="block p-4 rounded-2xl bg-brand-gradient text-white hover:shadow-lg hover:shadow-violet-500/20 transition group"
     >
       <div class="flex items-center">
         <span class="text-xs opacity-80 inline-flex items-center gap-1.5">

@@ -11,14 +11,14 @@ defineProps<{ value?: number; total?: number; label?: string; indeterminate?: bo
     <div class="h-2 rounded-full bg-violet-100 overflow-hidden relative">
       <div
         v-if="!indeterminate"
-        class="h-full bg-gradient-to-r from-violet-500 to-purple-500 transition-all duration-500 relative"
+        class="h-full bg-brand-gradient transition-all duration-500 relative"
         :style="{ width: ((value ?? 0) / (total ?? 1) * 100) + '%' }"
       >
         <div class="absolute inset-0 bg-[linear-gradient(90deg,transparent,rgba(255,255,255,.55),transparent)] bg-[length:200%_100%] animate-shimmer"></div>
       </div>
       <div
         v-else
-        class="absolute h-full w-1/3 bg-gradient-to-r from-violet-500 to-purple-500 rounded-full animate-indeterminate"
+        class="absolute h-full w-1/3 bg-brand-gradient rounded-full animate-indeterminate"
       ></div>
     </div>
   </div>

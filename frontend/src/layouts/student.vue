@@ -27,8 +27,8 @@ const handleEnroll = async () => {
 const gradients = [
   'from-violet-500 to-fuchsia-500',
   'from-indigo-500 to-purple-500',
-  'from-purple-500 to-pink-500',
-  'from-violet-600 to-blue-500',
+  'from-purple-500 to-fuchsia-500',
+  'from-violet-600 to-indigo-500',
 ]
 const gradientClass = (idx: number) => `bg-gradient-to-r ${gradients[idx % gradients.length]}`
 
@@ -216,7 +216,7 @@ onMounted(async () => {
           </button>
         </div>
 
-        <main class="flex-1 overflow-y-auto bg-gray-50">
+        <main class="flex-1 overflow-y-auto bg-transparent">
           <slot />
         </main>
       </div>
