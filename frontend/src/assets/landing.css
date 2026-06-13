@@ -801,14 +801,6 @@ html:has(.ldg) {
   text-align: center;
   box-shadow: 0 40px 80px -40px var(--accent);
 }
-.ldg .banner::before {
-  /* conic glint behind */
-  content: "";
-  position: absolute;
-  inset: -40%;
-  background: conic-gradient(from 0deg, transparent, oklch(1 0 0 / 0.14), transparent 30%);
-  animation: ldg-spin calc(28s / var(--anim-speed)) linear infinite;
-}
 .ldg .banner::after {
   /* dot texture */
   content: "";
