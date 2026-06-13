@@ -16,6 +16,10 @@ const store = useAssignmentsStore()
 
 const sub = ref<StudentSubmission | null>(props.assignment.my_submission)
 const text = ref(sub.value?.text_content ?? '')
+const snapshot = ref({
+  text: sub.value?.text_content ?? '',
+  fileIds: sub.value?.attachments.filter(a => a.kind === 'submission').map(a => a.id) ?? [],
+})
 const error = ref<string | null>(null)
 const fileError = ref<string | null>(null)
 const saving = ref(false)
@@ -37,6 +41,16 @@ const feedbackFiles = computed(
 const canSubmit = computed(
   () => submissionIsComplete(text.value, submissionFiles.value.length) && !locked.value,
 )
+const isSubmitted = computed(() => sub.value?.status === 'submitted')
+const hasChanges = computed(() => {
+  const textChanged = text.value !== snapshot.value.text
+  const currentIds = submissionFiles.value.map(f => f.id)
+  const snapshotIds = snapshot.value.fileIds
+  const filesChanged =
+    currentIds.length !== snapshotIds.length ||
+    currentIds.some((id, i) => id !== snapshotIds[i])
+  return textChanged || filesChanged
+})
 const scorePct = computed(() =>
   sub.value?.score != null ? Math.round(sub.value.score * 100) : null,
 )
@@ -51,6 +65,10 @@ const onSaveDraft = async () => {
   error.value = null
   try {
     sub.value = await store.saveDraft(props.assignment.id, text.value || null)
+    snapshot.value = {
+      text: sub.value.text_content ?? '',
+      fileIds: sub.value.attachments.filter(a => a.kind === 'submission').map(a => a.id),
+    }
   } catch (err) {
     error.value = assignmentErrorMessage(err, 'Не удалось сохранить черновик')
   } finally {
@@ -63,6 +81,10 @@ const onSubmit = async () => {
   error.value = null
   try {
     sub.value = await store.submitStudent(props.assignment.id, text.value || null)
+    snapshot.value = {
+      text: sub.value.text_content ?? '',
+      fileIds: sub.value.attachments.filter(a => a.kind === 'submission').map(a => a.id),
+    }
   } catch (err) {
     error.value = assignmentErrorMessage(err, 'Не удалось отправить')
   } finally {
@@ -228,10 +250,10 @@ const onSendMessage = async (body: string) => {
     <p v-if="error" class="text-sm text-rose-600">{{ error }}</p>
 
     <div v-if="!locked" class="flex items-center gap-2">
-      <UiButton variant="secondary" size="sm" :loading="saving" @click="onSaveDraft">
+      <UiButton variant="secondary" size="sm" :loading="saving" :disabled="isSubmitted && !hasChanges" @click="onSaveDraft">
         Сохранить черновик
       </UiButton>
-      <UiButton size="sm" :loading="submitting" :disabled="!canSubmit" @click="onSubmit">
+      <UiButton size="sm" :loading="submitting" :disabled="!canSubmit || (isSubmitted && !hasChanges)" @click="onSubmit">
         Сдать работу
       </UiButton>
     </div>
