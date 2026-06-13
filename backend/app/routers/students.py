@@ -32,6 +32,7 @@ from app.schemas.student import (
     StudentResultRead,
 )
 from app.services import gradebook_service
+from app.services.progress_service import get_or_create_lesson_progress
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/students", tags=["students"])
@@ -206,17 +207,9 @@ async def _get_progress(user: User, lesson_id: UUID, db: AsyncSession) -> Lesson
     if not enrollment:
         raise HTTPException(status_code=403, detail="Not enrolled")
 
-    progress = await db.scalar(
-        select(LessonProgress).where(
-            LessonProgress.enrollment_id == enrollment.id,
-            LessonProgress.lesson_id == lesson_id,
-        )
+    return await get_or_create_lesson_progress(
+        db, enrollment_id=enrollment.id, lesson_id=lesson_id
     )
-    if not progress:
-        progress = LessonProgress(enrollment_id=enrollment.id, lesson_id=lesson_id)
-        db.add(progress)
-        await db.flush()
-    return progress
 
 
 @router.post("/lessons/{lesson_id}/complete")

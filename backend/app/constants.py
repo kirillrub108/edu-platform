@@ -20,6 +20,12 @@ SLIDE_DPI: int = 150  # indistinguishable from 300 DPI on 1080p, 4× smaller PNG
 
 # Upload limits
 MAX_SCRIPT_BYTES: int = 10 * 1024 * 1024  # 10 MB
+# Hard cap on the DECOMPRESSED size of an uploaded .docx (a zip package).
+# MAX_SCRIPT_BYTES only bounds the compressed upload; a small zip whose parts
+# inflate to gigabytes (zip-bomb) would still OOM the parser. python-docx pins
+# lxml with resolve_entities=False (no XXE / billion-laughs), so this is the
+# remaining DoS vector — checked in uploads._extract_docx_text before parsing.
+MAX_DECOMPRESSED_DOCX_BYTES: int = 100 * 1024 * 1024  # 100 MB
 # Ready-made video uploaded directly to a lesson (no generation pipeline).
 MAX_VIDEO_UPLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
 

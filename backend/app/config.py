@@ -1,8 +1,19 @@
 from functools import lru_cache
 from typing import List, Literal
 
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# SECRET_KEY values shipped in templates / earlier defaults. Allowed in dev (so
+# `cp .env.example .env` still boots), rejected when ENVIRONMENT=production.
+_WEAK_SECRET_KEYS: frozenset[str] = frozenset(
+    {
+        "change-me",
+        "your-super-secret-key-change-in-production",
+        "CHANGE_ME_OPENSSL_RAND_HEX_32",
+    }
+)
+_MIN_SECRET_KEY_LENGTH: int = 32
 
 
 class Settings(BaseSettings):
@@ -21,8 +32,10 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://redis:6379/0"
 
-    # JWT
-    SECRET_KEY: str = "change-me"
+    # JWT — required (no default). pydantic-settings fails fast at boot if unset,
+    # so the app can never sign forgeable tokens with a known key. It also signs
+    # email-verify tokens and HMAC /files/* URLs (see signed_url_service).
+    SECRET_KEY: str
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     REFRESH_TOKEN_EXPIRE_DAYS: int = 14
@@ -195,6 +208,23 @@ class Settings(BaseSettings):
                 return v
             return [s.strip() for s in stripped.split(",") if s.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _validate_production_secret(self) -> "Settings":
+        """In production, reject a blank, placeholder, or too-short SECRET_KEY.
+
+        SECRET_KEY is already required everywhere (no default), so this only
+        adds a prod guard against shipping a template placeholder. Dev keeps the
+        permissive behavior so `cp .env.example .env` boots without edits.
+        """
+        if self.ENVIRONMENT == "production":
+            key = self.SECRET_KEY.strip()
+            if not key or key in _WEAK_SECRET_KEYS or len(key) < _MIN_SECRET_KEY_LENGTH:
+                raise ValueError(
+                    "SECRET_KEY must be a strong, non-default value "
+                    f"(>= {_MIN_SECRET_KEY_LENGTH} chars) when ENVIRONMENT=production"
+                )
+        return self
 
 
 @lru_cache

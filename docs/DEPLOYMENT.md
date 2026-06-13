@@ -402,21 +402,28 @@ docker-compose up
 
 ## 7. Production deployment — что НЕ реализовано
 
-> Текущий проект — MVP. Для прода понадобится сделать дополнительно. Здесь — список того, чего не хватает, без готовых конфигов.
+> Текущий проект — MVP. Базовый прод-рантайм уже собран в [docker-compose.prod.yml](../docker-compose.prod.yml) (self-contained, НЕ override dev-compose) + [frontend/Dockerfile.prod](../frontend/Dockerfile.prod). Ниже — что уже реализовано (✅) и что ещё понадобится при росте.
+>
+> **Порядок деплоя** (из шапки `docker-compose.prod.yml`):
+> ```
+> docker compose -f docker-compose.prod.yml --env-file .env.prod build
+> docker compose -f docker-compose.prod.yml --env-file .env.prod --profile migrate run --rm migrate
+> docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+> ```
+> **Восстановление из backup:** `... run --rm db_backup sh -c 'pg_restore -c -d "$PGDATABASE" /backups/<file>.dump'`.
 
-| Что нужно | Зачем |
+| Что нужно | Зачем / статус |
 |---|---|
-| **nginx / cloud LB** перед backend и frontend | TLS termination, gzip/br, `/files/*` через `X-Accel-Redirect`, rate-limiting |
-| **build production frontend** | сейчас в compose `nuxt dev`. Для прода: `nuxt build` → `node .output/server/index.mjs` (или статика, если генерить). Меняется Dockerfile и compose-команда |
-| **production uvicorn** | сейчас `--reload`. Для прода: `uvicorn app.main:app --workers N --host 0.0.0.0 --port 8000` без `--reload`, желательно через `gunicorn -k uvicorn.workers.UvicornWorker` |
-| **миграции отдельным шагом деплоя** | сейчас `alembic upgrade head` в `lifespan`. В проде это опасно (тяжёлая миграция → backend не стартует). Нужен kubectl Job или ci-step |
+| **nginx / cloud LB** перед backend и frontend | TLS termination, gzip/br, `/files/*` через `X-Accel-Redirect`, rate-limiting (nginx есть в prod-compose; `X-Accel-Redirect`/CDN — post-MVP) |
+| ✅ **production frontend** | реализовано в [frontend/Dockerfile.prod](../frontend/Dockerfile.prod): `nuxt build` → `node .output/server/index.mjs`. Dev-compose остаётся на `nuxt dev` |
+| ✅ **production uvicorn** | реализовано в `docker-compose.prod.yml`: `gunicorn app.main:app -k uvicorn.workers.UvicornWorker --workers N`, без `--reload`. Dev остаётся на `--reload` |
+| ✅ **миграции отдельным шагом деплоя** | `RUN_MIGRATIONS_ON_STARTUP=false` (prod) + one-shot сервис `migrate` (`alembic upgrade head`) в `docker-compose.prod.yml`, запускается ДО `up`. Dev: авто-`upgrade head` в lifespan |
+| ✅ **Backup БД** | сайдкар `db_backup`: периодический `pg_dump -Fc` → volume `db_backups`, ретенция `BACKUP_RETENTION_DAYS`. Off-host копия в Object Storage — post-MVP |
 | **S3 / Yandex Object Storage** | заменить локальный `storage_service.save_upload` на S3-bucket. Структура `pptx/<uuid>_*.pptx`, `videos/<uuid>.mp4` останется, ссылки — presigned URLs |
 | **Sentry** | для error-tracking. Подключается через `sentry-sdk[fastapi]` |
 | **Prometheus / Grafana** | для метрик. Хотя бы `prometheus-fastapi-instrumentator` |
 | **Secret manager** | `SECRET_KEY`, `REDIS_PASSWORD`, `YANDEX_API_KEY` — сейчас в `.env`. В проде: AWS Secrets Manager / Yandex Lockbox / Vault |
 | **CI/CD** | сейчас нет. Нужен пайплайн: lint (ruff) → tests (pytest) → docker build → push → deploy |
-| **HTTPS-only cookies** | для миграции с localStorage на httpOnly cookie (см. AUTH_FLOW.md) |
-| **Backup БД** | автоматический pg_dump в S3 / Object Storage по расписанию |
 | **Volume для Ollama** | в проде Ollama не должна быть на хосте. Запускать в отдельном контейнере с GPU или вообще выносить на отдельный inference-сервер |
 
 ---

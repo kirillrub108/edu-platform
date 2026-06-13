@@ -49,6 +49,7 @@ from app.schemas.quiz import (
     to_student_payload,
 )
 from app.services import quota_service
+from app.services.progress_service import get_or_create_lesson_progress
 from app.services.grading_service import (
     ResolvedQuestion,
     aggregate_score,
@@ -566,17 +567,9 @@ async def _mark_progress_passed(
     if not attempt.passed:
         return
     lesson, enrollment = await _ensure_enrolled(db, user, lesson_id)
-    progress = await db.scalar(
-        select(LessonProgress).where(
-            LessonProgress.enrollment_id == enrollment.id,
-            LessonProgress.lesson_id == lesson.id,
-        )
+    progress = await get_or_create_lesson_progress(
+        db, enrollment_id=enrollment.id, lesson_id=lesson.id
     )
-    if progress is None:
-        progress = LessonProgress(
-            enrollment_id=enrollment.id, lesson_id=lesson.id
-        )
-        db.add(progress)
     new_score = float(attempt.score) if attempt.score is not None else 0.0
     if progress.quiz_score is None or new_score > progress.quiz_score:
         progress.quiz_score = new_score

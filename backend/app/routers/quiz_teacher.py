@@ -434,24 +434,47 @@ async def generate_quiz(
 async def quiz_generation_status(
     lesson_id: UUID,
     task_id: str,
-    _lesson: Lesson = Depends(get_owned_lesson),
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
 ) -> QuizGenerationStatus:
+    # generate_quiz_task clears Quiz.generation_task_id on finish (success AND
+    # failure), so "generation_task_id != this task" is a DB-authoritative
+    # "this task is done" signal that survives a Redis restart — unlike
+    # AsyncResult, which reports PENDING for a finished task once Redis is wiped.
+    # Success vs failure is told apart by whether current questions exist;
+    # AsyncResult is consulted only for live progress and the failure error text.
+    quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson.id))
     result = AsyncResult(task_id, app=celery_app)
+
+    if quiz is not None and quiz.generation_task_id != task_id:
+        current_questions = await db.scalar(
+            select(func.count())
+            .select_from(QuizQuestion)
+            .where(
+                QuizQuestion.quiz_id == quiz.id,
+                QuizQuestion.superseded_at.is_(None),
+            )
+        )
+        if current_questions and current_questions > 0:
+            return QuizGenerationStatus(task_id=task_id, status="SUCCESS")
+        error: str | None = None
+        if result.failed():
+            error = str(result.result) if result.result is not None else None
+        elif isinstance(result.result, dict):
+            error = result.result.get("error")
+        return QuizGenerationStatus(
+            task_id=task_id,
+            status="FAILURE",
+            error=error or "Quiz generation failed",
+        )
+
+    # Still running (or just queued): live detail from the result backend.
     payload = QuizGenerationStatus(task_id=task_id, status=result.status)
     if result.state == "PROGRESS":
         info = result.info or {}
         payload.step = info.get("step")
         payload.done = info.get("done")
         payload.total = info.get("total")
-    elif result.ready():
-        if result.failed():
-            payload.error = (
-                str(result.result) if result.result is not None else "Quiz generation failed"
-            )
-        elif isinstance(result.result, dict):
-            err = result.result.get("error")
-            if err:
-                payload.error = err
     return payload
 
 

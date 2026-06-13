@@ -388,7 +388,7 @@
   - Если миграция тяжёлая (десятки секунд) — readiness probe k8s упадёт.
   - Если в одной реплике миграция начала выполняться, а вторая стартовала параллельно — race condition (Alembic берёт advisory lock, но всё равно).
   - Если миграция упадёт — backend не стартует, рестарт-цикл.
-- **Фикс:** для прода — отдельный `kubectl Job` или CI-step с миграцией перед роллаутом backend. В коде убрать `_ensure_schema_at_head` или сделать опциональным через env-переменную `AUTO_MIGRATE=true`.
+- **Статус: РЕШЕНО.** Авто-`upgrade head` спрятан за флагом `RUN_MIGRATIONS_ON_STARTUP` ([config.py](../backend/app/config.py), дефолт `true` — dev не меняется). В проде `.env.prod` ставит `false`, а миграция запускается one-shot сервисом `migrate` в [docker-compose.prod.yml](../docker-compose.prod.yml) ДО роллаута. Multi-replica race остаётся актуальным только при горизонтальном масштабировании.
 
 ### 5.2 Нет healthcheck для celery_worker
 
@@ -408,7 +408,7 @@
 
 - **Где:** инфра.
 - **Что не так:** `postgres_data` — единственный volume с данными пользователей. Удалили docker volume = потеряли всё.
-- **Фикс:** cron-job (хотя бы раз в день) с `pg_dump` в S3 или локальный архив.
+- **Статус: РЕШЕНО (single-instance).** Сайдкар `db_backup` в [docker-compose.prod.yml](../docker-compose.prod.yml) периодически делает `pg_dump -Fc` в volume `db_backups` (интервал `BACKUP_INTERVAL_SECONDS`, ретенция `BACKUP_RETENTION_DAYS`). Восстановление — `pg_restore` (см. DEPLOYMENT §7). Off-host копия в Object Storage — post-MVP.
 
 ### 5.4 `host.docker.internal` не работает на Linux по умолчанию
 

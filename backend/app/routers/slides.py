@@ -41,6 +41,21 @@ logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/v1/lessons", tags=["slides"])
 
+# Vision/analysis status is authoritative from lesson.status (DB), NOT the Celery
+# result backend (Redis): AsyncResult.state is wiped on a Redis restart and would
+# report PENDING for an analysis that actually finished, hanging the UI spinner.
+# Unlike the video map in lessons.py, analysis success lands on ready_for_edit
+# (analyzing -> ready_for_edit), so it maps to SUCCESS here.
+_ANALYSIS_STATUS_TO_CELERY: dict[LessonStatus, str] = {
+    LessonStatus.draft: "PENDING",
+    LessonStatus.analyzing: "PROGRESS",
+    LessonStatus.ready_for_edit: "SUCCESS",
+    LessonStatus.processing: "SUCCESS",
+    LessonStatus.published: "SUCCESS",
+    LessonStatus.error: "FAILURE",
+    LessonStatus.cancelled: "REVOKED",
+}
+
 
 def _row_to_out(row: SlideText, user_id: str) -> SlideTextOut:
     image_url: str | None = None
@@ -177,30 +192,35 @@ async def cancel_analysis(
 async def analysis_status(
     lesson_id: UUID,
     task_id: str,
-    _lesson: Lesson = Depends(get_owned_lesson),
+    lesson: Lesson = Depends(get_owned_lesson),
 ):
-    result = AsyncResult(task_id, app=celery_app)
+    # Terminal decision comes from the DB (survives a Redis restart); the result
+    # backend is consulted only for live progress / error detail, best-effort.
+    status = _ANALYSIS_STATUS_TO_CELERY.get(lesson.status, "PENDING")
+    payload: dict = {"status": status, "task_id": task_id}
 
-    payload: dict = {"status": result.status, "task_id": task_id}
-    if result.state == "PROGRESS":
-        info = result.info or {}
-        payload.update(
-            {
-                "step": info.get("step"),
-                "done": info.get("done"),
-                "total": info.get("total"),
-            }
-        )
-    elif result.ready():
+    if status == "PROGRESS":
+        result = AsyncResult(task_id, app=celery_app)
+        if result.state == "PROGRESS":
+            info = result.info or {}
+            payload.update(
+                {
+                    "step": info.get("step"),
+                    "done": info.get("done"),
+                    "total": info.get("total"),
+                }
+            )
+    elif status == "FAILURE":
+        result = AsyncResult(task_id, app=celery_app)
         if result.failed():
             payload["error"] = (
                 str(result.result) if result.result is not None else "Analysis failed"
             )  # noqa: E501
             payload["traceback"] = result.traceback
-        elif isinstance(result.result, dict):
-            err = result.result.get("error")
-            if err:
-                payload["error"] = err
+        elif isinstance(result.result, dict) and result.result.get("error"):
+            payload["error"] = result.result["error"]
+        else:
+            payload["error"] = "Analysis failed"
 
     return payload
 

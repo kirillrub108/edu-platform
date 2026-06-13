@@ -74,6 +74,50 @@ services:
       - edu-network
     logging: *default-logging
 
+  # Periodic pg_dump → db_backups volume. Single-instance MVP backup: a small
+  # loop in the version-matched postgres image (so pg_dump never warns about a
+  # server/client mismatch). Custom format (-Fc) → restore with
+  #   docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm \
+  #     db_backup sh -c 'pg_restore -c -d "$PGDATABASE" /backups/<file>.dump'
+  # Retention prunes dumps older than BACKUP_RETENTION_DAYS. An off-host copy
+  # (Object Storage) is a post-MVP follow-up; this keeps backups on a volume.
+  db_backup:
+    image: postgres:17-alpine
+    environment:
+      PGHOST: postgres
+      PGUSER: ${POSTGRES_USER}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB}
+      BACKUP_INTERVAL_SECONDS: ${BACKUP_INTERVAL_SECONDS:-86400}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-7}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -eu
+        echo "db_backup: interval=$${BACKUP_INTERVAL_SECONDS}s retention=$${BACKUP_RETENTION_DAYS}d db=$${PGDATABASE}"
+        while true; do
+          ts=$$(date +%Y%m%d-%H%M%S)
+          out="/backups/$${PGDATABASE}-$${ts}.dump"
+          if pg_dump -Fc -f "$$out"; then
+            echo "db_backup: wrote $$out"
+          else
+            echo "db_backup: pg_dump FAILED at $$ts" >&2
+            rm -f "$$out"
+          fi
+          find /backups -name "$${PGDATABASE}-*.dump" -type f -mtime +$${BACKUP_RETENTION_DAYS} -delete
+          sleep "$${BACKUP_INTERVAL_SECONDS}"
+        done
+    volumes:
+      - db_backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - edu-network
+    logging: *default-logging
+
   redis:
     image: redis:8-alpine
     command: redis-server --requirepass ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env.prod}
@@ -376,6 +420,8 @@ services:
 
 volumes:
   postgres_data:
+  # Timestamped pg_dump archives written by the db_backup sidecar.
+  db_backups:
   # Generated PPTX/PNG/WAV/MP4 + caches. Shared RW by backend + all workers,
   # mounted RO into nginx for direct /files/* delivery. Replaces the dev host
   # bind-mount ./backend/storage.

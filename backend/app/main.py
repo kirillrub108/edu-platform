@@ -217,8 +217,32 @@ async def request_id_middleware(request: Request, call_next):
     return response
 
 
+def _assert_cors_allowlist_safe(cors_origins: list[str], environment: str) -> bool:
+    """Return True if '*' is configured (forcing credentials off), else False.
+
+    Auth runs on cookies, so allow_credentials=True with a wildcard origin is
+    forbidden by the CORS spec — the code below already downgrades credentials
+    to False when '*' is present. Here we make that downgrade loud (warn) and,
+    in production, fatal: a wildcard would silently disable cookie auth
+    cross-origin, so we fail fast instead of shipping it.
+    """
+    allow_all = "*" in cors_origins
+    if allow_all:
+        logger.warning(
+            "cors_wildcard_origin",
+            detail="CORS_ORIGINS contains '*'; cross-origin cookie credentials are disabled",
+            environment=environment,
+        )
+        if environment == "production":
+            raise RuntimeError(
+                "CORS_ORIGINS must be an explicit allowlist in production; "
+                "wildcard '*' disables cookie-based auth cross-origin"
+            )
+    return allow_all
+
+
 _cors_origins = settings.CORS_ORIGINS
-_allow_all = "*" in _cors_origins
+_allow_all = _assert_cors_allowlist_safe(_cors_origins, settings.ENVIRONMENT)
 
 app.add_middleware(
     CORSMiddleware,

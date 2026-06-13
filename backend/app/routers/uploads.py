@@ -16,7 +16,7 @@ from app.models.course import Course
 from app.models.lesson import Lesson, LessonStatus
 from app.models.slide_text import SlideText
 from app.models.user import User
-from app.constants import MAX_SCRIPT_BYTES
+from app.constants import MAX_DECOMPRESSED_DOCX_BYTES, MAX_SCRIPT_BYTES
 from app.services.file_validation_service import validate_upload
 from app.services.storage_service import storage_service
 
@@ -47,46 +47,40 @@ def _extract_pdf_text(content: bytes) -> str:
 
 
 def _extract_docx_text(content: bytes) -> str:
-    """Extract paragraphs and table cells from a DOCX. Images/embedded objects are skipped."""
-    import xml.etree.ElementTree as _ET
+    """Extract paragraphs and table cells from a DOCX. Images/embedded objects are skipped.
 
-    from defusedxml.ElementTree import fromstring as _safe_fromstring
-    from defusedxml.ElementTree import iterparse as _safe_iterparse
-    from defusedxml.ElementTree import parse as _safe_parse
+    python-docx (pinned 1.1.2) parses the package XML via lxml with
+    resolve_entities=False, which already blocks XXE (external entities) and
+    entity-expansion / billion-laughs DoS. The remaining vector is a zip-bomb —
+    a small upload (within MAX_SCRIPT_BYTES) whose parts inflate to gigabytes —
+    so we cap the DECOMPRESSED total before handing the buffer to python-docx.
+    """
+    import zipfile
+
     from docx import Document
 
-    # python-docx parses the DOCX's internal XML parts via stdlib
-    # xml.etree.ElementTree when lxml is unavailable. The stdlib parser
-    # resolves external entities and expands internal ones unboundedly, so a
-    # crafted DOCX can mount XXE (file:///etc/passwd) or Billion Laughs DoS.
-    # Patch is scoped to this call — `finally` restores stdlib for the rest of
-    # the process so unrelated XML usage is unaffected.
-    _orig_fromstring = _ET.fromstring
-    _orig_parse = _ET.parse
-    _orig_iterparse = _ET.iterparse
-    _ET.fromstring = _safe_fromstring
-    _ET.parse = _safe_parse
-    _ET.iterparse = _safe_iterparse
-
     buf = io.BytesIO(content)
-    buf.seek(0)
     try:
-        doc = Document(buf)
-        parts: list[str] = []
-        for para in doc.paragraphs:
-            text = para.text.strip()
-            if text:
-                parts.append(text)
-        for table in doc.tables:
-            for row in table.rows:
-                cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
-                if cells:
-                    parts.append(" | ".join(cells))
-        return "\n\n".join(parts)
-    finally:
-        _ET.fromstring = _orig_fromstring
-        _ET.parse = _orig_parse
-        _ET.iterparse = _orig_iterparse
+        with zipfile.ZipFile(buf) as zf:
+            decompressed = sum(info.file_size for info in zf.infolist())
+    except zipfile.BadZipFile as exc:
+        raise ValueError("Файл не является корректным DOCX") from exc
+    if decompressed > MAX_DECOMPRESSED_DOCX_BYTES:
+        raise ValueError("Содержимое DOCX слишком велико после распаковки")
+
+    buf.seek(0)
+    doc = Document(buf)
+    parts: list[str] = []
+    for para in doc.paragraphs:
+        text = para.text.strip()
+        if text:
+            parts.append(text)
+    for table in doc.tables:
+        for row in table.rows:
+            cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+            if cells:
+                parts.append(" | ".join(cells))
+    return "\n\n".join(parts)
 
 
 def _extract_rtf_text(content: bytes) -> str:
