@@ -118,8 +118,8 @@ onBeforeUnmount(() => {
       <p v-if="state.loading && !state.items.length" class="text-sm text-gray-500">
         Загрузка…
       </p>
-      <p v-else-if="!state.items.length" class="text-sm text-gray-500 text-center py-6">
-        Будьте первым, кто оставит комментарий
+      <p v-else-if="!state.items.length" class="text-sm text-gray-400 text-center py-6">
+        Комментариев пока нет
       </p>
       <CommentItem
         v-for="c in state.items"
