@@ -1,0 +1,14 @@
+# Twice-daily renewal check (Let's Encrypt's recommended cadence). The renewal
+# is a no-op until the cert is near expiry; the paired .service does the work
+# and reloads nginx. See certbot-renew.service for install steps.
+
+[Unit]
+Description=Run certbot-renew for Edllm twice daily
+
+[Timer]
+OnCalendar=*-*-* 03,15:00:00
+RandomizedDelaySec=3600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,23 @@
+# Renews the Edllm TLS cert and reloads the dockerized nginx.
+#
+# Install on the VM (adjust WorkingDirectory to where docker-compose.prod.yml
+# and .env.prod live):
+#   sudo cp deploy/systemd/certbot-renew.* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now certbot-renew.timer
+#
+# Test once:  sudo systemctl start certbot-renew.service ; journalctl -u certbot-renew
+
+[Unit]
+Description=Renew Let's Encrypt cert for Edllm and reload nginx
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/edllm
+# certbot renew is a no-op until the cert is within 30 days of expiry.
+ExecStart=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.prod --profile certbot run --rm certbot renew --webroot -w /var/www/certbot
+# CRITICAL: a dockerized nginx does NOT re-read a renewed cert on its own.
+# Reload it after every renew run (cheap and harmless when nothing changed).
+ExecStartPost=/usr/bin/docker compose -f docker-compose.prod.yml --env-file .env.prod exec -T nginx nginx -s reload

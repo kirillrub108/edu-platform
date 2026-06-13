@@ -113,12 +113,17 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.error("db_connection_failed", error=str(exc))
 
-    try:
-        await _ensure_schema_at_head()
-        logger.info("alembic_migrations_applied")
-    except Exception:
-        logger.exception("alembic_upgrade_failed")
-        raise
+    if settings.RUN_MIGRATIONS_ON_STARTUP:
+        try:
+            await _ensure_schema_at_head()
+            logger.info("alembic_migrations_applied")
+        except Exception:
+            logger.exception("alembic_upgrade_failed")
+            raise
+    else:
+        # Prod: migrations run as a separate one-shot deploy step before the
+        # app rolls out (see docker-compose.prod.yml `migrate` service).
+        logger.info("alembic_migrations_skipped_on_startup")
 
     yield
     await engine.dispose()

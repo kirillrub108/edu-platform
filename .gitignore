@@ -16,6 +16,8 @@ env/
 # Environment
 .env
 .env.local
+# Production secrets — only the .example template is committed.
+.env.prod
 
 # IDE
 .idea/

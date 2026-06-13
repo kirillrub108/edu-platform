@@ -163,6 +163,13 @@ class Settings(BaseSettings):
     APP_VERSION: str = "dev"
     SENTRY_TRACES_SAMPLE_RATE: float = 0.1
 
+    # Run `alembic upgrade head` inside the FastAPI lifespan on startup.
+    # True (dev): convenient auto-migrate on `docker-compose up`.
+    # False (prod): migrations are a separate one-shot deploy step (the
+    # `migrate` service), so a heavy or failing migration can't take the app
+    # down on boot and gunicorn's N workers don't each race to upgrade.
+    RUN_MIGRATIONS_ON_STARTUP: bool = True
+
     # Flower — Celery monitoring UI
     CELERY_FLOWER_USER: str = "admin"
     CELERY_FLOWER_PASSWORD: str = "change-me"
