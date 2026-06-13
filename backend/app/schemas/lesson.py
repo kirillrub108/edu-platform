@@ -51,6 +51,7 @@ class LessonOut(BaseModel):
     text_content: str | None
     script: str | None
     status: LessonStatus
+    is_published: bool
     creation_mode: CreationMode
     analyze_task_id: str | None = None
     video_task_id: str | None = None

@@ -15,6 +15,7 @@ from app.models.enrollment import Enrollment
 from app.models.lesson import Lesson, Module
 from app.models.user import User, UserRole
 from app.redis_client import get_redis
+from app.services import visibility_service
 from app.services.auth_service import decode_token
 
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
@@ -200,6 +201,12 @@ async def require_lesson_access(
             )
         )
         if enrolled is not None:
+            # Drafts anywhere in the chain are hidden — 404 (not 403) so we don't
+            # reveal that an unpublished lesson exists, matching the course flow.
+            if not visibility_service.lesson_visible_to_student(
+                course, lesson.module, lesson
+            ):
+                raise HTTPException(status_code=404, detail="Lesson not found")
             return user, lesson, False
 
     raise HTTPException(status_code=403, detail="No access to this lesson")

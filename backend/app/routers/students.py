@@ -31,7 +31,7 @@ from app.schemas.student import (
     StudentQuizRead,
     StudentResultRead,
 )
-from app.services import gradebook_service
+from app.services import gradebook_service, visibility_service
 from app.services.progress_service import get_or_create_lesson_progress
 from app.services.storage_service import storage_service
 
@@ -97,7 +97,13 @@ async def my_courses(
     result = []
     for enrollment in enrollments.all():
         course = enrollment.course
-        course.lessons_count = sum(len(m.lessons) for m in course.modules)
+        # Count only lessons the student can actually see (full publish chain).
+        course.lessons_count = sum(
+            1
+            for module in course.modules
+            for lesson in module.lessons
+            if visibility_service.lesson_visible_to_student(course, module, lesson)
+        )
         out = StudentCourseOut.model_validate(course)
         out.completed_lessons = sum(1 for p in enrollment.progress if p.is_completed)
         result.append(out)
@@ -166,6 +172,8 @@ async def course_details(
     }
 
     resp = StudentCourseDetailRead.model_validate(course)
+    # Students only see modules/lessons whose full publish chain is published.
+    resp.modules = visibility_service.visible_module_tree(course)
     resp.lesson_progress = lesson_progress
     return resp
 
@@ -187,6 +195,11 @@ async def get_lesson_for_student(
     )
     if not enrollment:
         raise HTTPException(status_code=403, detail="Not enrolled")
+
+    # A draft anywhere in the chain hides the lesson — 404, never leak a draft.
+    course = await db.get(Course, module.course_id)
+    if not visibility_service.lesson_visible_to_student(course, module, lesson):
+        raise HTTPException(status_code=404, detail="Lesson not found")
 
     out = LessonOut.model_validate(lesson)
     if out.video_url is not None:

@@ -21,6 +21,29 @@ const canDeleteComment = (_c: Comment): boolean => true
 
 const showSlideEditor = ref(false)
 const warningDismissed = ref(false)
+
+// Lesson-level publish flag (student visibility) — independent of the generation
+// `status` badge and of per-video publish. Mirrors the toggle in the course editor.
+const togglingPublish = ref(false)
+const publishError = ref('')
+
+const toggleLessonPublish = async () => {
+  if (!lesson.value || togglingPublish.value) return
+  togglingPublish.value = true
+  publishError.value = ''
+  try {
+    const action = lesson.value.is_published ? 'unpublish' : 'publish'
+    const updated = await apiFetch<{ is_published: boolean }>(
+      `/lessons/${lessonId.value}/${action}`,
+      { method: 'POST' },
+    )
+    lesson.value = { ...lesson.value, is_published: updated.is_published }
+  } catch (e: any) {
+    publishError.value = e?.data?.detail ?? 'Не удалось изменить публикацию урока'
+  } finally {
+    togglingPublish.value = false
+  }
+}
 const visionPanelRef = ref<{
   takeSnapshot(): void
   clearSnapshot(): void
@@ -389,7 +412,29 @@ watch(lessonId, (newId, oldId) => {
   </div>
 
   <div v-else-if="lesson" class="space-y-6">
-    <LessonHeader :title="lesson.title" :status="lessonStatusForBadge" />
+    <LessonHeader
+      :title="lesson.title"
+      :status="lessonStatusForBadge"
+      :is-published="lesson.is_published"
+    >
+      <template #actions>
+        <button
+          type="button"
+          class="text-sm px-3 py-1.5 rounded-lg border transition disabled:opacity-50"
+          :class="lesson.is_published
+            ? 'border-gray-200 text-gray-600 hover:bg-gray-50'
+            : 'border-violet-300 text-violet-700 hover:bg-violet-50'"
+          :title="lesson.is_published
+            ? 'Урок виден студентам — скрыть'
+            : 'Опубликовать урок для студентов'"
+          :disabled="togglingPublish"
+          @click="toggleLessonPublish"
+        >
+          {{ togglingPublish ? '…' : lesson.is_published ? 'Снять с публикации' : 'Опубликовать' }}
+        </button>
+        <span v-if="publishError" class="text-sm text-rose-600">{{ publishError }}</span>
+      </template>
+    </LessonHeader>
 
     <div
       v-if="lesson.last_warning && !warningDismissed"

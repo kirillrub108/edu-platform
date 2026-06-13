@@ -61,10 +61,13 @@ async def make_course(
 async def make_module(
     db: AsyncSession, course: Course, **overrides: Any
 ) -> Module:
+    # Default published so an enrolled student sees the lesson through the
+    # course→module→lesson AND-chain; pass is_published=False for draft tests.
     defaults: dict[str, Any] = {
         "title": f"Module {uuid.uuid4().hex[:6]}",
         "order": 0,
         "course_id": course.id,
+        "is_published": True,
     }
     defaults.update(overrides)
     module = Module(**defaults)
@@ -77,6 +80,8 @@ async def make_module(
 async def make_lesson(
     db: AsyncSession, module: Module, **overrides: Any
 ) -> Lesson:
+    # Published by default (see make_module) so visibility tests can opt into a
+    # draft explicitly with is_published=False.
     defaults: dict[str, Any] = {
         "title": f"Lesson {uuid.uuid4().hex[:6]}",
         "order": 0,
@@ -84,6 +89,7 @@ async def make_lesson(
         "content_type": ContentType.video,
         "creation_mode": CreationMode.presentation_and_text,
         "status": LessonStatus.draft,
+        "is_published": True,
     }
     defaults.update(overrides)
     lesson = Lesson(**defaults)

@@ -5,6 +5,7 @@ definePageMeta({ middleware: ['auth', 'teacher'] })
 
 const route = useRoute()
 const { apiFetch } = useApi()
+const courseEditor = useCourseEditorStore()
 
 const course = ref<any>(null)
 const loading = ref(true)
@@ -23,6 +24,8 @@ const archivingCourse = ref(false)
 const restoringCourse = ref(false)
 const deletingModule = ref<Record<string, boolean>>({})
 const deletingLesson = ref<Record<string, boolean>>({})
+const togglingModule = ref<Record<string, boolean>>({})
+const togglingLesson = ref<Record<string, boolean>>({})
 
 const activeTab = ref<'content' | 'access'>('content')
 const accessLoading = ref(false)
@@ -248,6 +251,52 @@ const deleteLesson = async (lessonId: string) => {
   }
 }
 
+const toggleModulePublish = async (m: any) => {
+  togglingModule.value[m.id] = true
+  actionError.value = ''
+  try {
+    const action = m.is_published ? 'unpublish' : 'publish'
+    const updated = await apiFetch<any>(
+      `/courses/${route.params.id}/modules/${m.id}/${action}`,
+      { method: 'POST' },
+    )
+    m.is_published = updated.is_published
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Ошибка при изменении публикации модуля'
+  } finally {
+    togglingModule.value[m.id] = false
+  }
+}
+
+const toggleLessonPublish = async (l: any) => {
+  togglingLesson.value[l.id] = true
+  actionError.value = ''
+  try {
+    const action = l.is_published ? 'unpublish' : 'publish'
+    const updated = await apiFetch<any>(`/lessons/${l.id}/${action}`, { method: 'POST' })
+    l.is_published = updated.is_published
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Ошибка при изменении публикации урока'
+  } finally {
+    togglingLesson.value[l.id] = false
+  }
+}
+
+const hasUnpublishedContent = (): boolean => {
+  const modules = course.value?.modules ?? []
+  if (!modules.length) return false
+  return modules.some(
+    (m: any) => !m.is_published || (m.lessons ?? []).some((l: any) => !l.is_published),
+  )
+}
+
+// On leaving the editor, nudge once per session if drafts remain. Never blocks
+// navigation (no confirm dialog) — the toast lives in a Pinia-backed root component.
+onBeforeRouteLeave(() => {
+  courseEditor.maybeShowDraftReminder(String(route.params.id), hasUnpublishedContent())
+  return true
+})
+
 onMounted(async () => {
   await load()
   await restoreScroll()
@@ -408,13 +457,31 @@ onMounted(async () => {
           <div class="font-medium text-gray-800 mb-3 flex items-center gap-2">
             <span class="text-brand/60 text-xs font-mono">M</span>
             {{ m.title }}
-            <button
-              class="ml-auto text-gray-300 hover:text-red-500 transition disabled:opacity-40"
-              :disabled="deletingModule[m.id] || loading"
-              @click="deleteModule(m.id)"
+            <span
+              v-if="!m.is_published"
+              class="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500"
             >
-              <Trash2 class="w-4 h-4" />
-            </button>
+              Черновик
+            </span>
+            <div class="ml-auto flex items-center gap-2">
+              <button
+                class="text-xs px-2 py-1 rounded-lg border transition disabled:opacity-40 whitespace-nowrap"
+                :class="m.is_published
+                  ? 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                  : 'border-brand/40 text-brand hover:bg-brand/5'"
+                :disabled="togglingModule[m.id]"
+                @click="toggleModulePublish(m)"
+              >
+                {{ togglingModule[m.id] ? '…' : m.is_published ? 'Снять с публикации' : 'Опубликовать' }}
+              </button>
+              <button
+                class="text-gray-300 hover:text-red-500 transition disabled:opacity-40"
+                :disabled="deletingModule[m.id] || loading"
+                @click="deleteModule(m.id)"
+              >
+                <Trash2 class="w-4 h-4" />
+              </button>
+            </div>
           </div>
 
           <ul class="space-y-1 mb-3">
@@ -427,13 +494,31 @@ onMounted(async () => {
                   <span class="text-gray-300 text-xs">▶</span>
                   {{ l.title }}
                 </span>
-                <span
-                  class="text-xs px-2 py-0.5 rounded-full font-medium"
-                  :class="statusColor[l.status] ?? 'bg-gray-100 text-gray-500'"
-                >
-                  {{ statusLabel[l.status] ?? l.status }}
+                <span class="flex items-center gap-2">
+                  <span
+                    v-if="!l.is_published"
+                    class="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500"
+                  >
+                    Черновик
+                  </span>
+                  <span
+                    class="text-xs px-2 py-0.5 rounded-full font-medium"
+                    :class="statusColor[l.status] ?? 'bg-gray-100 text-gray-500'"
+                  >
+                    {{ statusLabel[l.status] ?? l.status }}
+                  </span>
                 </span>
               </NuxtLink>
+              <button
+                class="text-xs px-2 py-1 rounded-lg border transition disabled:opacity-40 whitespace-nowrap"
+                :class="l.is_published
+                  ? 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                  : 'border-brand/40 text-brand hover:bg-brand/5'"
+                :disabled="togglingLesson[l.id]"
+                @click="toggleLessonPublish(l)"
+              >
+                {{ togglingLesson[l.id] ? '…' : l.is_published ? 'Снять' : 'Опубликовать' }}
+              </button>
               <button
                 class="text-gray-300 hover:text-red-500 transition opacity-0 group-hover/lesson:opacity-100 disabled:opacity-40 px-1"
                 :disabled="deletingLesson[l.id] || loading"

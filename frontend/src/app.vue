@@ -4,6 +4,7 @@
       <NuxtPage />
     </NuxtLayout>
     <VerifyEmailModal />
+    <DraftReminderToast />
   </div>
 </template>
 

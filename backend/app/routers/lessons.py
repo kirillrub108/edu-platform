@@ -209,6 +209,10 @@ async def upload_lesson_video(
     lesson.video_url = storage_service.get_url(relative, str(user.id))
     lesson.creation_mode = CreationMode.video_upload
     lesson.status = LessonStatus.published
+    # Direct upload "publishes immediately" (see the UI copy) — make the lesson
+    # student-visible right away so the new is_published gate doesn't silently
+    # hide it. The teacher can still unpublish from the lesson header.
+    lesson.is_published = True
     await db.commit()
     await db.refresh(lesson)
     return _lesson_out(lesson, str(user.id))
@@ -760,6 +764,37 @@ async def list_videos(
         .order_by(LessonVideo.created_at.desc())
     )
     return [_video_out(v, str(user.id)) for v in result.scalars().all()]
+
+
+@router.post("/{lesson_id}/publish", response_model=LessonOut)
+async def publish_lesson(
+    lesson_id: UUID,
+    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    """Publish a lesson. Independent of course/module flags; idempotent."""
+    if not lesson.is_published:
+        lesson.is_published = True
+        await db.commit()
+        await db.refresh(lesson)
+    return _lesson_out(lesson, str(user.id))
+
+
+@router.post("/{lesson_id}/unpublish", response_model=LessonOut)
+async def unpublish_lesson(
+    lesson_id: UUID,
+    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unpublish a lesson. Idempotent; hiding from students is the read-time
+    AND in visibility_service, so nothing cascades."""
+    if lesson.is_published:
+        lesson.is_published = False
+        await db.commit()
+        await db.refresh(lesson)
+    return _lesson_out(lesson, str(user.id))
 
 
 @router.post("/{lesson_id}/videos/{video_id}/publish", response_model=LessonVideoOut)

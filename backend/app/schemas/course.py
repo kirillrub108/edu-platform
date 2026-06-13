@@ -36,6 +36,7 @@ class LessonShort(BaseModel):
     order: int
     content_type: str
     status: str
+    is_published: bool
 
 
 class ModuleOut(BaseModel):
@@ -44,6 +45,7 @@ class ModuleOut(BaseModel):
     id: UUID
     title: str
     order: int
+    is_published: bool
     lessons: list[LessonShort] = []
 
 

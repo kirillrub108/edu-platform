@@ -58,6 +58,16 @@ async def _get_owned_course(course_id: UUID, owner: User, db: AsyncSession) -> C
     return course
 
 
+async def _get_owned_module(
+    course_id: UUID, module_id: UUID, owner: User, db: AsyncSession
+) -> Module:
+    await _get_owned_course(course_id, owner, db)
+    module = await db.get(Module, module_id)
+    if not module or module.course_id != course_id:
+        raise HTTPException(status_code=404, detail="Module not found")
+    return module
+
+
 @router.get("/", response_model=list[CourseOut])
 async def list_courses(
     user: User = Depends(require_teacher),
@@ -234,6 +244,37 @@ async def delete_module(
         raise HTTPException(status_code=404, detail="Module not found")
     await db.delete(module)
     await db.commit()
+
+
+@router.post("/{course_id}/modules/{module_id}/publish", response_model=ModuleOut)
+async def publish_module(
+    course_id: UUID,
+    module_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    """Publish a module. Independent of course/lesson flags; idempotent."""
+    module = await _get_owned_module(course_id, module_id, user, db)
+    module.is_published = True
+    await db.commit()
+    await db.refresh(module, attribute_names=["lessons"])
+    return module
+
+
+@router.post("/{course_id}/modules/{module_id}/unpublish", response_model=ModuleOut)
+async def unpublish_module(
+    course_id: UUID,
+    module_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    """Unpublish a module. Lesson flags are left untouched — hiding is the
+    read-time AND in visibility_service. Idempotent."""
+    module = await _get_owned_module(course_id, module_id, user, db)
+    module.is_published = False
+    await db.commit()
+    await db.refresh(module, attribute_names=["lessons"])
+    return module
 
 
 @router.put("/{course_id}/publish", response_model=CourseOut)

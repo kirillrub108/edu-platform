@@ -28,7 +28,8 @@ async def test_upload_video_publishes_and_replaces(
 ) -> None:
     course = await make_course(db_session, owner=teacher_user)
     module = await make_module(db_session, course)
-    lesson = await make_lesson(db_session, module)
+    # Start as a draft to prove the upload flips it to student-visible.
+    lesson = await make_lesson(db_session, module, is_published=False)
 
     resp = await client.post(
         f"/api/v1/lessons/{lesson.id}/upload-video",
@@ -39,6 +40,7 @@ async def test_upload_video_publishes_and_replaces(
     body = resp.json()
     assert body["status"] == "published"
     assert body["creation_mode"] == "video_upload"
+    assert body["is_published"] is True
     assert body["video_url"]
     first_url = body["video_url"]
 
@@ -48,6 +50,7 @@ async def test_upload_video_publishes_and_replaces(
     assert refreshed is not None
     assert refreshed.status == LessonStatus.published
     assert refreshed.creation_mode == CreationMode.video_upload
+    assert refreshed.is_published is True
     assert refreshed.video_url is not None
 
     # Re-upload replaces the previous video.
