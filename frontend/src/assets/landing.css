@@ -801,6 +801,18 @@ html:has(.ldg) {
   text-align: center;
   box-shadow: 0 40px 80px -40px var(--accent);
 }
+.ldg .banner::before {
+  /* glossy sheen — diagonal light stripe that sweeps left→right periodically */
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 50%;
+  background: linear-gradient(115deg, transparent 30%, rgba(255,255,255,.32) 50%, transparent 70%);
+  transform: translateX(-150%);
+  animation: banner-sheen 5s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 1;
+}
 .ldg .banner::after {
   /* dot texture */
   content: "";
@@ -810,6 +822,14 @@ html:has(.ldg) {
   background-size: 26px 26px;
   -webkit-mask-image: radial-gradient(80% 80% at 50% 50%, #000, transparent 75%);
   mask-image: radial-gradient(80% 80% at 50% 50%, #000, transparent 75%);
+}
+@keyframes banner-sheen {
+  0%   { transform: translateX(-150%); }
+  25%  { transform: translateX(300%); }
+  100% { transform: translateX(300%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ldg .banner::before { animation: none; }
 }
 .ldg .banner .blabel {
   position: relative;
