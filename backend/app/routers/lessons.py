@@ -586,15 +586,21 @@ async def progress_stream(
     EventSource sends cookies when `withCredentials: true` is set.
     """
     # Capture terminal state before the generator starts (DB session is still alive here).
+    # Only when NO task is active — both pipelines clear their *_task_id on finish, so a
+    # set task_id means a job is queued/running (e.g. a regeneration whose status still
+    # reads as the prior run's `published`). Replaying that stale terminal would make the
+    # client think the new job already finished and hide the live pipeline until reload.
+    has_active_task = lesson.video_task_id is not None or lesson.analyze_task_id is not None
     terminal_payload: dict | None = None
-    if lesson.status == LessonStatus.published:
-        terminal_payload = {"status": "published", "video_url": lesson.video_url}
-    elif lesson.status == LessonStatus.error:
-        terminal_payload = {"status": "error"}
-    elif lesson.status == LessonStatus.ready_for_edit:
-        terminal_payload = {"status": "ready_for_edit"}
-    elif lesson.status == LessonStatus.cancelled:
-        terminal_payload = {"status": "cancelled", "credits_spent": lesson.credits_spent}
+    if not has_active_task:
+        if lesson.status == LessonStatus.published:
+            terminal_payload = {"status": "published", "video_url": lesson.video_url}
+        elif lesson.status == LessonStatus.error:
+            terminal_payload = {"status": "error"}
+        elif lesson.status == LessonStatus.ready_for_edit:
+            terminal_payload = {"status": "ready_for_edit"}
+        elif lesson.status == LessonStatus.cancelled:
+            terminal_payload = {"status": "cancelled", "credits_spent": lesson.credits_spent}
 
     # Probe Redis before committing to streaming (only needed for live path).
     # Must happen here — once EventSourceResponse is returned, HTTP headers are

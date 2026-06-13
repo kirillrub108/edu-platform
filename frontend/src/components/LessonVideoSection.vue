@@ -21,12 +21,16 @@ defineProps<{
   billedVia: string | null
   needTopup: boolean
   cancelled: boolean
+  latestPublished: boolean
+  publishing: boolean
 }>()
 
 const emit = defineEmits<{
   'update:selectedVoice': [voice: string]
   generate: []
   cancel: []
+  publish: []
+  viewHistory: []
 }>()
 </script>
 
@@ -53,8 +57,12 @@ const emit = defineEmits<{
     :billed-via="billedVia"
     :need-topup="needTopup"
     :cancelled="cancelled"
+    :latest-published="latestPublished"
+    :publishing="publishing"
     @update:selected-voice="emit('update:selectedVoice', $event)"
     @generate="emit('generate')"
     @cancel="emit('cancel')"
+    @publish="emit('publish')"
+    @view-history="emit('viewHistory')"
   />
 </template>

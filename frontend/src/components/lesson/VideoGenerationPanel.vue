@@ -23,12 +23,16 @@ const props = defineProps<{
   billedVia: string | null
   needTopup: boolean
   cancelled: boolean
+  latestPublished: boolean
+  publishing: boolean
 }>()
 
 const emit = defineEmits<{
   'update:selectedVoice': [voice: string]
   generate: []
   cancel: []
+  publish: []
+  viewHistory: []
 }>()
 
 const isProcessing = computed(() => props.generating || props.lessonStatus === 'processing')
@@ -173,20 +177,43 @@ const hint = computed(() => {
       </p>
     </section>
 
-    <!-- Video player -->
+    <!-- Video player — only once the pipeline is truly done (published + URL).
+         Hidden while (re)generating so the old result disappears until the new one lands. -->
     <section
-      v-if="lessonStatus === 'published' && videoUrl"
+      v-if="lessonStatus === 'published' && videoUrl && !isProcessing"
       class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft"
     >
-      <h2 class="text-lg font-semibold text-gray-900 mb-3">Готовое видео</h2>
-      <video :src="videoUrl" controls class="w-full rounded-xl bg-black" />
-      <a
-        :href="videoUrl"
-        target="_blank"
-        class="mt-3 inline-block text-sm text-violet-700 hover:text-violet-600 font-medium transition"
-      >
-        Открыть в новой вкладке →
-      </a>
+      <h2 class="text-lg font-semibold text-gray-900 mb-1">Последнее сгенерированное видео</h2>
+      <p class="text-sm text-gray-500 mb-3">
+        Предпросмотр последнего результата. Опубликуйте его, чтобы показать студентам.
+      </p>
+      <video :key="videoUrl" :src="videoUrl" controls class="w-full rounded-xl bg-black" />
+      <div class="mt-3 flex flex-wrap items-center gap-2">
+        <UiButton
+          v-if="!latestPublished"
+          variant="primary"
+          size="sm"
+          :loading="publishing"
+          type="button"
+          @click="emit('publish')"
+        >
+          Опубликовать
+        </UiButton>
+        <span
+          v-else
+          class="text-xs bg-violet-100 text-violet-700 px-2.5 py-1 rounded-full font-medium"
+        >Опубликовано</span>
+        <UiButton variant="secondary" size="sm" type="button" @click="emit('viewHistory')">
+          Все генерации →
+        </UiButton>
+        <a
+          :href="videoUrl"
+          target="_blank"
+          class="ml-auto text-sm text-violet-700 hover:text-violet-600 font-medium transition"
+        >
+          Открыть в новой вкладке →
+        </a>
+      </div>
     </section>
   </div>
 </template>

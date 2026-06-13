@@ -300,6 +300,17 @@ const loadVideos = async () => {
   } catch { /* ignore — no history if endpoint fails */ }
 }
 
+// The pipeline records each run in history (is_published=false) and only sets
+// lesson.video_url on explicit publish, so the inline preview shows the newest
+// generated video (history is ordered newest-first).
+const latestVideo = computed<VideoItem | null>(() => videoHistory.value[0] ?? null)
+const latestVideoUrl = computed(
+  () => latestVideo.value?.video_url ?? lesson.value?.video_url ?? null,
+)
+
+// Publish the just-previewed (latest) generation straight from the player.
+const publishLatest = () => { if (latestVideo.value) void publishVideo(latestVideo.value) }
+
 const publishVideo = async (video: VideoItem) => {
   if (video.is_published || publishingVideoId.value) return
   publishingVideoId.value = video.id
@@ -500,7 +511,7 @@ watch(lessonId, (newId, oldId) => {
               :current-stage-idx="currentStageIdx"
               :task-error="taskError"
               :can-generate-video="canGenerateVideo"
-              :video-url="lesson.video_url ?? null"
+              :video-url="latestVideoUrl"
               :analyzing="analyzing"
               :has-pptx="!!lesson.pptx_path"
               :is-auto="isAuto"
@@ -511,8 +522,12 @@ watch(lessonId, (newId, oldId) => {
               :billed-via="billedVia"
               :need-topup="needTopup"
               :cancelled="cancelled"
+              :latest-published="latestVideo?.is_published ?? false"
+              :publishing="!!latestVideo && publishingVideoId === latestVideo.id"
               @generate="generateVideo"
               @cancel="cancelVideo"
+              @publish="publishLatest"
+              @view-history="activeStep = 'history'"
             />
           </div>
 
