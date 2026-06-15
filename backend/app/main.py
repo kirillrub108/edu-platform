@@ -81,6 +81,12 @@ def _init_sentry() -> bool:
 
 _init_sentry()
 
+if settings.ENVIRONMENT == "production" and not (settings.SENTRY_DSN or "").strip():
+    logger.warning(
+        "sentry_disabled_in_production",
+        detail="SENTRY_DSN is empty — error monitoring is OFF. Set it in .env.prod.",
+    )
+
 
 async def _ensure_schema_at_head() -> None:
     """Run any pending Alembic migrations on startup so the schema always
