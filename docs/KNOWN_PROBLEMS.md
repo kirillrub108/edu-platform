@@ -77,14 +77,13 @@
   - **Простой:** ограничить `password: str = Field(min_length=6, max_length=72)` в `UserRegister` и убрать `sha256`-обёртку. Минус: пользователи не могут вводить эмодзи-пароли длиннее 18 символов.
   - **Правильный:** перейти на argon2id через `passlib[argon2]` или `argon2-cffi`. Изменить `hash_password`/`verify_password` чтобы пробовали оба алгоритма (для миграции старых юзеров).
 
-### 1.4 ⚠ `/files/*` отдаётся без авторизации
+### 1.4 ⚠ `/files/*` отдаётся без авторизации — accepted-with-mitigation (MVP)
 
-- **Где:** [backend/app/main.py:161](../backend/app/main.py) — `app.mount("/files", StaticFiles(...))`.
-- **Что не так:** любой со ссылкой на `http://host:8000/files/videos/<lesson>.mp4` может скачать файл, не будучи ни преподавателем-владельцем, ни enrolled-студентом. То же — про PNG слайдов в `lessons/<id>/slides/`.
-- **Почему опасно:** утечка контента курса. Особенно критично для платных курсов в будущем.
-- **Фикс:**
-  - Простой: добавить авторизованный proxy-эндпоинт `GET /api/v1/files/{relative_path}`, который проверяет права и затем стримит файл (через `FileResponse`).
-  - Лучший: presigned URLs (если перейти на S3 — встроено). Каждый раз при возврате `video_url` или `image_url` генерировать short-lived подпись.
+- **Где:** `services/signed_url_service.py`, `routers/files.py`.
+- **Что не так (residual):** подписи bearer-style — uid/sig в URL, без session-binding. Утёкшая ссылка валидна у любого до истечения TTL.
+- **Митигация (2026-06):** TTL сокращён с 3600 до 1800 с для видео, 600 с для слайдов. Фронтенд прозрачно перезапрашивает свежий URL при 403. HMAC-алгоритм и nginx `auth_request`-контракт не тронуты. Подробнее: [DECISIONS.md §38](DECISIONS.md#38-сокращение-ttl-подписанных-url--403-resilience-плеера-known_problems-14-partial).
+- **Остаточный риск:** окно эксплуатации — 30 мин для видео. Принято для MVP.
+- **Будущий путь:** per-request signed URLs (mint at API-request time) — правильное решение для платного контента. Session-binding отклонён (убивает CDN-кеш). Переход на S3 даёт presigned URLs из коробки.
 
 ### 1.5 SECRET_KEY имеет дефолт
 

@@ -193,12 +193,12 @@ class StorageService:
         await asyncio.to_thread(self._backend.save, relative, bytes(buffer))
         return relative, len(buffer)
 
-    def get_url(self, relative_path: str, user_id: str) -> str:
+    def get_url(self, relative_path: str, user_id: str, expires_in: int | None = None) -> str:
         if isinstance(self._backend, LocalBackend):
-            return f"{self._backend.base_url}{generate_signed_url(relative_path, user_id)}"
+            return f"{self._backend.base_url}{generate_signed_url(relative_path, user_id, expires_in=expires_in)}"
         return self._backend.get_url(relative_path)
 
-    def resign_url(self, stored_url: str | None, user_id: str) -> str | None:
+    def resign_url(self, stored_url: str | None, user_id: str, expires_in: int | None = None) -> str | None:
         if not stored_url:
             return stored_url
         if isinstance(self._backend, LocalBackend):
@@ -208,7 +208,7 @@ class StorageService:
                 return stored_url
             rel_and_query = stored_url[idx + len(marker):]
             rel = rel_and_query.split("?", 1)[0]
-            return self.get_url(rel, user_id)
+            return self.get_url(rel, user_id, expires_in=expires_in)
         # S3: extract the object key from the presigned URL and issue a fresh one.
         # Presigned URL path is /{bucket}/{key}, so strip the bucket prefix.
         rel = self._extract_s3_relative(stored_url)

@@ -88,6 +88,69 @@ if settings.ENVIRONMENT == "production" and not (settings.SENTRY_DSN or "").stri
     )
 
 
+def _reconcile_stuck_lessons() -> None:
+    """Idempotent startup sweep: mark lessons stuck in a non-terminal status as error.
+
+    A lesson is "stuck" when its status is analyzing or processing, a task_id is set
+    (so a Celery task was dispatched), and updated_at is older than
+    STUCK_LESSON_GRACE_MINUTES. The grace window must exceed the worst-case pipeline
+    runtime so that legitimately in-flight tasks during a rolling restart are not
+    disturbed — only truly orphaned tasks (Redis flushdb, crash without AOF) will have
+    a stale updated_at.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import and_, create_engine, or_, select
+    from sqlalchemy.orm import sessionmaker
+
+    from app.constants import STUCK_LESSON_GRACE_MINUTES
+    from app.models import Lesson, LessonStatus
+    from app.tasks.video_pipeline import _set_status as _video_set_status
+    from app.tasks.vision_pipeline import _set_status as _vision_set_status
+
+    sync_url = settings.DATABASE_URL.replace("+asyncpg", "+psycopg2")
+    engine = create_engine(sync_url, pool_size=1, max_overflow=0, pool_pre_ping=True)
+    SyncSession = sessionmaker(bind=engine, expire_on_commit=False)
+    cutoff = datetime.now(timezone.utc) - timedelta(minutes=STUCK_LESSON_GRACE_MINUTES)
+
+    try:
+        with SyncSession() as session:
+            stuck: list[Lesson] = (
+                session.execute(
+                    select(Lesson).where(
+                        or_(
+                            and_(
+                                Lesson.status == LessonStatus.analyzing,
+                                Lesson.analyze_task_id.isnot(None),
+                            ),
+                            and_(
+                                Lesson.status == LessonStatus.processing,
+                                Lesson.video_task_id.isnot(None),
+                            ),
+                        ),
+                        Lesson.updated_at < cutoff,
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            for lesson in stuck:
+                logger.warning(
+                    "reconciling_stuck_lesson",
+                    lesson_id=str(lesson.id),
+                    status=lesson.status,
+                    updated_at=lesson.updated_at.isoformat() if lesson.updated_at else None,
+                )
+                if lesson.status == LessonStatus.analyzing:
+                    _vision_set_status(session, lesson.id, LessonStatus.error)
+                else:
+                    _video_set_status(session, lesson.id, LessonStatus.error)
+            if stuck:
+                logger.info("startup_reconciliation_complete", count=len(stuck))
+    finally:
+        engine.dispose()
+
+
 async def _ensure_schema_at_head() -> None:
     """Run any pending Alembic migrations on startup so the schema always
     matches the latest revision in code. Replaces the old metadata.create_all
@@ -130,6 +193,11 @@ async def lifespan(app: FastAPI):
         # Prod: migrations run as a separate one-shot deploy step before the
         # app rolls out (see docker-compose.prod.yml `migrate` service).
         logger.info("alembic_migrations_skipped_on_startup")
+
+    try:
+        await asyncio.to_thread(_reconcile_stuck_lessons)
+    except Exception:
+        logger.exception("startup_reconciliation_failed")
 
     yield
     await engine.dispose()

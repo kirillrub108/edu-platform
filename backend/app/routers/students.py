@@ -33,6 +33,7 @@ from app.schemas.student import (
 )
 from app.services import gradebook_service, visibility_service
 from app.services.progress_service import get_or_create_lesson_progress
+from app.constants import SIGNED_URL_TTL_VIDEO
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/students", tags=["students"])
@@ -203,7 +204,7 @@ async def get_lesson_for_student(
 
     out = LessonOut.model_validate(lesson)
     if out.video_url is not None:
-        out.video_url = storage_service.resign_url(out.video_url, str(user.id))
+        out.video_url = storage_service.resign_url(out.video_url, str(user.id), expires_in=SIGNED_URL_TTL_VIDEO)
     return out
 
 

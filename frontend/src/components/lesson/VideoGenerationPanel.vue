@@ -33,9 +33,19 @@ const emit = defineEmits<{
   cancel: []
   publish: []
   viewHistory: []
+  'video-url-expired': []
 }>()
 
 const isProcessing = computed(() => props.generating || props.lessonStatus === 'processing')
+
+const videoRetried = ref(false)
+watch(() => props.videoUrl, () => { videoRetried.value = false })
+const onVideoError = () => {
+  if (!videoRetried.value) {
+    videoRetried.value = true
+    emit('video-url-expired')
+  }
+}
 
 // Two-step cancel: first click flips into confirm mode, which resets after 5s
 // of inactivity.
@@ -187,7 +197,7 @@ const hint = computed(() => {
       <p class="text-sm text-gray-500 mb-3">
         Предпросмотр последнего результата. Опубликуйте его, чтобы показать студентам.
       </p>
-      <video :key="videoUrl" :src="videoUrl" controls class="w-full rounded-xl bg-black" />
+      <video :key="videoUrl" :src="videoUrl" controls class="w-full rounded-xl bg-black" @error="onVideoError" />
       <div class="mt-3 flex flex-wrap items-center gap-2">
         <UiButton
           v-if="!latestPublished"

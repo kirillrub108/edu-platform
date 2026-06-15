@@ -31,6 +31,7 @@ const emit = defineEmits<{
   cancel: []
   publish: []
   viewHistory: []
+  'video-url-expired': []
 }>()
 </script>
 
@@ -64,5 +65,6 @@ const emit = defineEmits<{
     @cancel="emit('cancel')"
     @publish="emit('publish')"
     @view-history="emit('viewHistory')"
+    @video-url-expired="emit('video-url-expired')"
   />
 </template>

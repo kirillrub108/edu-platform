@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
-from app.constants import CREDIT_WEIGHTS, TRIAL_MAX_SLIDES
+from app.constants import CREDIT_WEIGHTS, SIGNED_URL_TTL_SLIDE, TRIAL_MAX_SLIDES
 from app.database import get_db
 from app.dependencies import (
     get_owned_lesson,
@@ -60,7 +60,7 @@ _ANALYSIS_STATUS_TO_CELERY: dict[LessonStatus, str] = {
 def _row_to_out(row: SlideText, user_id: str) -> SlideTextOut:
     image_url: str | None = None
     if row.image_path:
-        image_url = storage_service.get_url(row.image_path, user_id)
+        image_url = storage_service.get_url(row.image_path, user_id, expires_in=SIGNED_URL_TTL_SLIDE)
     return SlideTextOut(
         id=row.id,
         slide_number=row.slide_number,

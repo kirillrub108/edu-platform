@@ -1,3 +1,10 @@
+# Signed URL lifetimes (seconds). SIGNED_URL_EXPIRES_IN in config.py is the
+# env-override cap for uncategorised files; these per-type values are tighter.
+# Videos need to outlive a full viewing session; slides only need to cover the
+# duration of an active editor session.
+SIGNED_URL_TTL_VIDEO: int = 1800   # 30 min
+SIGNED_URL_TTL_SLIDE: int = 600    # 10 min
+
 # TTS
 SILERO_MAX_CHARS: int = 800  # conservative limit: Silero returns 500 on very long inputs
 # polza.ai caps the openai/tts-1 `input` at 4096 chars (probed 2026-06-10: longer
@@ -127,6 +134,13 @@ ASSIGNMENT_MAX_MESSAGE_CHARS: int = 4000       # one private-thread message
 # How long a soft-deleted (archived) record lingers before the daily
 # purge_soft_deleted Celery task physically removes it and its files.
 SOFT_DELETE_PURGE_DAYS: int = 30
+
+# Startup reconciliation: lessons stuck in non-terminal status (analyzing /
+# processing) for longer than this window are presumed to have lost their Celery
+# task (Redis flushdb or crash without AOF) and are marked error on backend
+# startup. Must exceed the worst-case pipeline runtime so that legitimately
+# in-flight tasks during a rolling restart are not disturbed.
+STUCK_LESSON_GRACE_MINUTES: int = 120
 
 # Worker concurrency
 TTS_WORKERS: int = 4     # matches NUMBER_OF_THREADS in silero-tts docker-compose service

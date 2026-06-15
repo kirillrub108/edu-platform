@@ -46,6 +46,7 @@ from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
 from app.constants import (
     CREDIT_WEIGHTS,
     MAX_VIDEO_UPLOAD_BYTES,
+    SIGNED_URL_TTL_VIDEO,
     TRIAL_MAX_SCRIPT_CHARS,
     TRIAL_MAX_SLIDES,
 )
@@ -59,14 +60,14 @@ def _lesson_out(
     lesson: Lesson, user_id: str, published_video: LessonVideoOut | None = None
 ) -> LessonOut:
     out = LessonOut.model_validate(lesson)
-    out.video_url = storage_service.resign_url(out.video_url, user_id)
+    out.video_url = storage_service.resign_url(out.video_url, user_id, expires_in=SIGNED_URL_TTL_VIDEO)
     out.published_video = published_video
     return out
 
 
 def _video_out(video: LessonVideo, user_id: str) -> LessonVideoOut:
     out = LessonVideoOut.model_validate(video)
-    out.video_url = storage_service.resign_url(out.video_url, user_id)
+    out.video_url = storage_service.resign_url(out.video_url, user_id, expires_in=SIGNED_URL_TTL_VIDEO)
     return out
 
 

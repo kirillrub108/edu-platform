@@ -69,6 +69,12 @@ const loadLesson = async () => {
   }
 }
 
+const onVideoUrlExpired = async () => {
+  try {
+    fullLesson.value = await apiFetch<FullLesson>(`/students/lessons/${lessonId.value}`)
+  } catch { /* non-critical — stale URL remains until next navigation */ }
+}
+
 const markComplete = async () => {
   if (isCompleted.value) return
   try {
@@ -196,7 +202,7 @@ onMounted(loadLesson)
           class="space-y-5"
         >
           <div class="mx-auto w-full max-w-[720px]">
-            <LessonPlayer :lesson="fullLesson" />
+            <LessonPlayer :lesson="fullLesson" @video-url-expired="onVideoUrlExpired" />
           </div>
 
           <div class="bg-white border border-gray-100 rounded-2xl p-5 space-y-3">

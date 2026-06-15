@@ -160,7 +160,9 @@ class Settings(BaseSettings):
     S3_PRESIGNED_URL_EXPIRE_SECONDS: int = 3600
 
     # Signed URLs (HMAC-protected /files/*). Lifetime, in seconds.
-    SIGNED_URL_EXPIRES_IN: int = 3600
+    # Per-content overrides (video/slide) are in constants.py; this value is
+    # the env-override cap / fallback for uncategorised files.
+    SIGNED_URL_EXPIRES_IN: int = 1800
 
     # In-memory slide-PNG cache (TTLCache). Keyed by MD5+DPI of the source file.
     SLIDES_CACHE_TTL_SECONDS: int = 86400

@@ -929,6 +929,24 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## 38. Сокращение TTL подписанных URL + 403-resilience плеера (KNOWN_PROBLEMS 1.4, partial)
+
+**Контекст.** `/files/*` раздаётся через HMAC-SHA256-подписанные URL (bearer-style: подпись в query-параметрах, без session-binding). Утёкшая ссылка валидна у любого до истечения TTL. Предыдущий дефолт — 3600 с.
+
+**Решение:**
+- **TTL сокращён**: дефолт `SIGNED_URL_EXPIRES_IN` снижен с 3600 до 1800 с. Добавлены per-content константы в `constants.py`: `SIGNED_URL_TTL_VIDEO = 1800` (видео, ≈ один просмотр), `SIGNED_URL_TTL_SLIDE = 600` (PNG слайдов, только на время редактирования). `storage_service.get_url` / `resign_url` принимают `expires_in`, роутеры явно передают нужный тип. `SIGNED_URL_EXPIRES_IN` остаётся в `config.py` как env-override-cap для некатегоризованных файлов.
+- **403-resilience во фронтенде**: `LessonPlayer.vue` и `VideoGenerationPanel.vue` ловят `@error` на `<video>` и эмитят `video-url-expired` (once per URL, guard через `retried`-ref со сбросом по `watch`). Родительские страницы перезапрашивают урок/видеоисторию — получают свежую подпись без перезагрузки. Параллельные 403 не устраивают шторм re-fetch (один retry на URL-change).
+
+**Что отклонено:**
+- **Session-binding (привязка подписи к cookie-сессии)** — убивает CDN-кеш (каждый пользователь получает уникальный URL) и ломает bearer-загрузку медиа в `<video>` (без credentials). Deferred.
+- **Per-request signed URLs (mint at request time, TTL = сcession)** — правильный путь для платного контента: URL виден только тому, кто сделал API-запрос. Сложнее стриминга (range-запросы в середине просмотра требуют re-mint). Deferred на этап платного контента.
+
+**Влияние на CDN:** `X-Signed-TTL` → `Cache-Control: max-age` теперь ≤ 1800 с для видео. На cache-hit CDN отдаёт сам; на cache-miss — хит в origin. Для слайдов max-age = 600 с — чаще origin-хиты при редактировании, но слайды малы и быстро кешируются.
+
+**Residual risk:** подпись по-прежнему bearer-style; окно эксплуатации сужено с 60 до 30 мин для видео. Принято как MVP trade-off — зафиксировано в [KNOWN_PROBLEMS.md §1.4](KNOWN_PROBLEMS.md#14--files-отдаётся-без-авторизации).
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.

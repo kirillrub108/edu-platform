@@ -1,5 +1,5 @@
 <script setup lang="ts">
-defineProps<{
+const props = defineProps<{
   lesson: {
     id: string
     title: string
@@ -9,6 +9,24 @@ defineProps<{
     status: string
   }
 }>()
+
+const emit = defineEmits<{ 'video-url-expired': [] }>()
+
+// One retry per URL: once emitted, suppress further error events until the
+// parent provides a new URL (which resets this guard via the watch below).
+const retried = ref(false)
+
+watch(
+  () => props.lesson.video_url,
+  () => { retried.value = false },
+)
+
+const onVideoError = () => {
+  if (!retried.value) {
+    retried.value = true
+    emit('video-url-expired')
+  }
+}
 </script>
 
 <template>
@@ -18,9 +36,11 @@ defineProps<{
   >
     <video
       v-if="lesson.video_url"
+      :key="lesson.video_url"
       :src="lesson.video_url"
       controls
       class="w-full h-full object-contain"
+      @error="onVideoError"
     />
     <div
       v-else

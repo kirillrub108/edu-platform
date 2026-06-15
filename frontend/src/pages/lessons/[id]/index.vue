@@ -573,6 +573,7 @@ watch(lessonId, (newId, oldId) => {
               @cancel="cancelVideo"
               @publish="publishLatest"
               @view-history="activeStep = 'history'"
+              @video-url-expired="loadVideos"
             />
           </div>
 
