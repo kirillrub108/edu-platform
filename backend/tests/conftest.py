@@ -123,6 +123,7 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
     celery_app.conf.update(
         task_always_eager=True,
         task_eager_propagates=True,
+        task_store_eager_result=True,
         broker_url="memory://",
         result_backend="cache+memory://",
     )

@@ -53,6 +53,33 @@ def test_strong_secret_key_accepted_in_production() -> None:
     assert settings.SECRET_KEY == strong
 
 
+def test_weak_key_longer_than_32_chars_rejected_in_production() -> None:
+    # "your-super-secret-key-change-in-production" is 42 chars (>= 32) but is
+    # in _WEAK_SECRET_KEYS — length alone must not be the sole guard.
+    with pytest.raises(ValidationError):
+        _settings(
+            SECRET_KEY="your-super-secret-key-change-in-production",
+            ENVIRONMENT="production",
+        )
+
+
+def test_exactly_32_chars_accepted_in_production() -> None:
+    # Boundary: len == 32 is the minimum valid length (< 32 is rejected).
+    settings = _settings(SECRET_KEY="x" * 32, ENVIRONMENT="production")
+    assert len(settings.SECRET_KEY) == 32
+
+
+def test_exactly_31_chars_rejected_in_production() -> None:
+    # Off-by-one: len == 31 must be rejected.
+    with pytest.raises(ValidationError):
+        _settings(SECRET_KEY="x" * 31, ENVIRONMENT="production")
+
+
+def test_empty_secret_key_rejected_in_production() -> None:
+    with pytest.raises(ValidationError):
+        _settings(SECRET_KEY="", ENVIRONMENT="production")
+
+
 # ── CORS wildcard + credentials guard ────────────────────────────────────────
 
 
