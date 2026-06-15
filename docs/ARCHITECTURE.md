@@ -47,9 +47,9 @@
 
 ### Инфраструктура
 
-- **docker-compose** с шестью сервисами (см. секцию 4).
-- Внешняя зависимость на хосте: **Ollama** с двумя моделями (`qwen3:8b` для текста, `qwen2.5vl:7b` для vision). Контейнер backend обращается к ним через `host.docker.internal:11434`.
-- Локальное файловое хранилище в `backend/storage/` (volume), раздаётся через FastAPI `StaticFiles` на префиксе `/files/*`.
+- **docker-compose** (dev) с ~12 сервисами (см. секцию 4); отдельный self-contained **`docker-compose.prod.yml`** для прода (gunicorn, nginx+TLS, one-shot `migrate`, сайдкар `db_backup`, certbot) — см. [DEPLOYMENT.md](DEPLOYMENT.md) §7.
+- Внешняя зависимость — **LLM+vision провайдер**. По умолчанию (`.env.example`) это **Polza AI** (облако, OpenAI-совместимый) и для текста, и для vision. Альтернатива — **Ollama на хосте** (`qwen3` + `qwen2.5vl:7b`) через `host.docker.internal:11434`. Переключение — правка env, кода не трогает (см. §14, [DECISIONS.md](DECISIONS.md)).
+- Локальное файловое хранилище в `backend/storage/` (volume). `/files/*` отдаётся **кастомным `files`-роутером с HMAC-подписанными URL** (`signed_url_service.py`), а не голым `StaticFiles`; в проде (`SERVE_STATIC_VIA_NGINX=true`) байты отдаёт nginx, FastAPI лишь верифицирует подпись. Альтернатива хранилища — S3 (`STORAGE_BACKEND=s3`).
 
 ---
 
@@ -67,10 +67,12 @@
 │   middleware:  CORS → request_id → log_and_catch → Prometheus   │
 │   routers:     auth · courses · lessons · slides · uploads ·    │
 │                students · quiz_teacher · quiz_student · comments │
-│                · gradebook · analytics · billing · files        │
+│                · gradebook · analytics · billing · files ·      │
+│                assignment_teacher · assignment_student          │
 │   services:    auth · llm · tts · storage · video · vision ·    │
 │                quiz · grading · gradebook · comment · billing · │
-│                email · email_token · signed_url · analytics     │
+│                email · email_token · signed_url · analytics ·   │
+│                assignment · visibility · file_validation        │
 │   tasks (Celery): video · vision · quiz · email · purge          │
 └──────┬──────────────────────────────────┬───────────────────────┘
        │                                  │
@@ -124,10 +126,13 @@
 | `celery_vision` | образ backend | — | queue `vision`, `-c 1` — vision-LLM анализ слайдов |
 | `celery_quiz` | образ backend | — | queue `quiz`, `-c 2`, **`--beat`** — генерация/проверка тестов + суточный `purge_soft_deleted` |
 | `celery_email_worker` | образ backend | — | queue `celery_email`, `-c 2` — транзакционные письма |
+| `nginx` | nginx:1.27-alpine | 8080 | в dev простаивает (FastAPI сам отдаёт `/files/*`); в проде отдаёт `/files/*` + TLS-термирование |
 | `prometheus` | prom/prometheus | 9090 | сбор метрик с backend |
 | `grafana` | grafana/grafana | 3001 | дашборды поверх Prometheus |
 | `flower` | образ backend | 5555 | мониторинг Celery (basic-auth) |
 | `frontend` | (build ./frontend) | 3000 | Nuxt dev server (`nuxt dev --host 0.0.0.0`) |
+
+> **Прод (`docker-compose.prod.yml`, self-contained):** backend через `gunicorn` (uvicorn-воркеры, без `--reload`), фронт через `Dockerfile.prod` (`nuxt build` → node-сервер), one-shot сервис `migrate` (`alembic upgrade head` до роллаута), сайдкар `db_backup` (периодический `pg_dump -Fc`), nginx с TLS + `certbot`. Подробности и порядок деплоя — [DEPLOYMENT.md](DEPLOYMENT.md) §7.
 
 Все в общей сети `edu-network` — общаются по DNS-именам контейнеров (`backend → postgres:5432`, `celery_video → silero-tts:9898`, и т.д.).
 
@@ -283,10 +288,10 @@ frontend/src/
 - **Trade-off:** нужен CSRF-механизм и аккуратные `path`/`samesite` у кук. Полная картина — в
   [AUTH_FLOW.md](AUTH_FLOW.md).
 
-### 8.11 Auto-applied миграции в `lifespan`
-- **Решение:** `app/main.py:_ensure_schema_at_head` запускает `alembic upgrade head` на старте.
-- **Почему:** в dev-режиме это удобно — перезапустил контейнер, схема актуальна. Заменяет старый «бутстрап через `Base.metadata.create_all`», который рассинхронизировался с историей миграций.
-- **Trade-off:** в проде так делать опасно (миграция может быть тяжёлой и должна быть отдельным шагом деплоя). Для прода нужно вынести в `kubectl Job` или CI-step.
+### 8.11 Миграции: авто в dev, отдельный шаг в проде
+- **Решение:** `app/main.py:_ensure_schema_at_head` запускает `alembic upgrade head` на старте, **но только если `RUN_MIGRATIONS_ON_STARTUP=true`** (дефолт dev). Заменяет старый «бутстрап через `Base.metadata.create_all`», который рассинхронизировался с историей миграций.
+- **Почему:** в dev удобно — перезапустил контейнер, схема актуальна. В проде авто-миграция на старте опасна (тяжёлая миграция роняет readiness-пробу; параллельные реплики гонятся за advisory-lock).
+- **Trade-off (решено для прода):** `.env.prod` ставит `RUN_MIGRATIONS_ON_STARTUP=false`, а миграция выполняется one-shot сервисом `migrate` в `docker-compose.prod.yml` **до** роллапа приложения; упавшая миграция валит деплой, не трогая работающую версию. См. [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md) §5.1.
 
 ---
 
@@ -314,7 +319,10 @@ frontend/src/
 | **Биллинг/кредиты** | `models/credit.py`, `services/billing_service.py`, `routers/billing.py`, `constants.py` (`CREDIT_WEIGHTS`, `PLAN_CONFIGS`) | Кредитный счёт на пользователя: `balance` + `reserved`. Генерация резервирует кредиты (`RESERVE`) и списывает/возвращает по факту (`RELEASE`). Планы free/starter/pro/school, топапы. Админ-эндпоинты за `X-Admin-Token`. |
 | **Email** | `services/email_service.py`, `email_token_service.py`, `tasks/email_pipeline.py`, `templates/email/` | Транзакционные письма (верификация, «видео готово») через Resend в отдельном воркере. Подписанные stateless-токены + одноразовое потребление через Redis. |
 | **Soft-delete** | глоб. фильтр для `User`/`Lesson`, явный для `Course`; `tasks/purge_pipeline.py` | Архивация вместо `DELETE`; суточный `purge_soft_deleted` (beat в `celery_quiz`) физически удаляет строки и файлы спустя `SOFT_DELETE_PURGE_DAYS`. |
-| **Комментарии** | `models/comment.py`, `services/comment_service.py`, `routers/comments.py` | Треды комментариев к урокам. |
+| **Комментарии** | `models/comment.py`, `services/comment_service.py`, `routers/comments.py` | Плоские (без вложенности) комментарии к урокам; teacher-владелец модерирует любые. |
+| **Задания (assignments)** | `models/assignment.py`, `services/assignment_service.py`, `routers/assignment_teacher.py`/`assignment_student.py`, `file_validation_service.py`, `constants.py` (`ATTACHMENT_*`) | Текстовое задание + сдача студентом (текст и/или файлы), оценка с нормировкой в 0..1, приватный тред teacher↔student. Вложения только **хранятся**, не парсятся (whitelist MIME/расширений + лимиты размера/числа). Файлы сдач авто-удаляются через `ATTACHMENT_RETENTION_DAYS_AFTER_GRADED` после оценки (`purge_pipeline`). |
+| **Публикация / видимость** | `services/visibility_service.py`, `routers/courses.py` (module publish), `routers/lessons.py` (lesson publish), `dependencies.py` (`require_lesson_access`) | Независимые флаги `is_published` на Course/Module/Lesson; студент видит урок только если опубликована **вся цепочка** (AND). Скрытие — read-time эффект (черновик → **404**, не 403). Снятие публикации родителя НЕ сбрасывает флаги детей. |
+| **Версии видео урока** | `models/lesson_video.py`, `tasks/video_pipeline.py`, `routers/lessons.py` (`/videos`, `/videos/{id}/publish`) | Каждая успешная генерация создаёт строку `LessonVideo` (`is_published=False`). Учитель смотрит список версий и публикует одну (`POST /videos/{id}/publish`) — остальные снимаются, `lesson.video_url` синхронизируется. Прямая загрузка видео публикуется сразу. |
 | **Журнал оценок / аналитика** | `services/gradebook_service.py`, `analytics_service.py`, `routers/gradebook.py`, `analytics.py` | Сводки по курсу/уроку, ручные override оценок, аналитика по квизам. |
 | **S3-бэкенд хранилища** | `services/storage_service.py`, `signed_url_service.py`, `config.py` (`STORAGE_BACKEND`) | Хранилище переключается `local`↔`s3` (Yandex Object Storage/совместимое). При `local` отдаётся через `/files/*` с HMAC-подписанными URL; `files`-роутер регистрируется только в `local`-режиме. |
 | **Наблюдаемость** | `main.py`, `celery_app.py`, `logging_config.py`, `monitoring/` | Sentry (FastAPI+Celery+SQLAlchemy), Prometheus-метрики (HTTP + Celery-сигналы) → Grafana, Flower для Celery, structlog с `request_id`. |

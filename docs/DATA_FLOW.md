@@ -9,9 +9,11 @@
 > - **Прогресс задач** стримится по **SSE** (`/lessons/{id}/progress-stream`, `useProgressStream.ts`),
 >   поллинг `/task-status/{id}` — fallback. Где в тексте сказано «фронт поллит каждые N сек» — читать
 >   как «SSE + поллинг-fallback».
-> - **Ещё не описаны здесь** сценарии: квизы (создание/прохождение/проверка), биллинг/списание
+> - **Добавлено (2026-06-15):** §7 расширен публикацией модулей/уроков и правилом видимости;
+>   §9 описывает задания (assignments); §5.2 учитывает версии видео (`LessonVideo`).
+> - **Ещё не описаны здесь** пошагово: квизы (создание/прохождение/проверка), биллинг/списание
 >   кредитов при генерации, email-верификация и AI-гейтинг, soft-delete. См.
->   [ARCHITECTURE.md](ARCHITECTURE.md) §9b и [DECISIONS.md](DECISIONS.md).
+>   [ARCHITECTURE.md](ARCHITECTURE.md) §9b и [DECISIONS.md](DECISIONS.md) §31–37.
 
 ---
 
@@ -23,8 +25,9 @@
 4. [Загрузка текста доклада из файла](#4-загрузка-текста-доклада-из-файла)
 5. [Генерация видео — режим `presentation_and_text`](#5-генерация-видео--режим-presentation_and_text)
 6. [Генерация видео — режим `presentation_auto` (vision)](#6-генерация-видео--режим-presentation_auto-vision)
-7. [Публикация курса (toggle)](#7-публикация-курса-toggle)
+7. [Публикация: курс, модуль, урок и правило видимости](#7-публикация-курс-модуль-урок-и-правило-видимости)
 8. [Студент: enroll → просмотр → отметка пройденным](#8-студент-enroll--просмотр--отметка-пройденным)
+9. [Задания: создание → сдача → оценка → тред](#9-задания-создание--сдача--оценка--тред)
 
 ---
 
@@ -208,8 +211,10 @@
      - `ffmpeg -f concat -safe 0 -i list -c copy -movflags +faststart {output}.mp4` — без перекодирования (быстро).
      - Удаляет промежуточные `.mkv` сегменты.
 9. **Финал.**
-   - `_set_status(lesson, published, video_url=storage_service.get_url("videos/<id>.mp4"))`.
-   - Возвращает `{"status": "ok", "video_url": ...}`.
+   - Создаётся строка **`LessonVideo`** (`is_published=False`, со `voice`/`creation_mode`/подписанным `video_url`) — каждая успешная генерация добавляет новую версию, старые сохраняются (`tasks/video_pipeline.py:~618`).
+   - `_set_status(lesson, published)` (один commit персистит и `LessonVideo`), SSE-событие `{"status":"published","video_url":...}`, постановка письма «видео готово» в `celery_email`.
+   - Возвращает `{"status": "ok", "video_id": ..., "video_url": ...}`.
+   - **Выбор активной версии:** `GET /lessons/{id}/videos` отдаёт все версии (новые сверху); `POST /lessons/{id}/videos/{video_id}/publish` помечает одну `is_published=True`, снимает остальные и синхронит `lesson.video_url` — её и видит студент. Прямая загрузка готового видео (`/upload-video`) публикуется сразу.
 10. **Cleanup.**
     - `finally: rmtree(work_dir)` — удаляет `storage/video_jobs/<lesson_id>/` со всеми временными файлами.
 
@@ -305,17 +310,36 @@
 
 ---
 
-## 7. Публикация курса (toggle)
+## 7. Публикация: курс, модуль, урок и правило видимости
 
-1. На странице курса ([courses/[id].vue](../frontend/src/pages/courses/[id].vue)) — кнопка «Опубликовать»/«Снять с публикации».
-2. `PUT /api/v1/courses/{course_id}/publish` (без body).
-3. На бэкенде ([routers/courses.py:toggle_publish](../backend/app/routers/courses.py)):
-   - `_get_owned_course(...)`.
-   - `course.is_published = not course.is_published` → `await db.commit()`.
-   - `await db.refresh(course, attribute_names=["owner"])` — подгружает связь owner для ответа.
-   - Благодаря `__mapper_args__ = {"eager_defaults": True}` на `Course` — `updated_at` подтягивается через RETURNING сразу при commit, без отдельного refresh.
-   - Возвращает `CourseOut`.
-4. Frontend: `await load()` → курс перезагружается с новым `is_published`.
+Публикация — **три независимых флага** `is_published` на разных уровнях: `Course`, `Module`, `Lesson`.
+
+### 7.1 Эндпоинты публикации
+
+| Уровень | Эндпоинт | Семантика |
+|---|---|---|
+| Курс | `PUT /api/v1/courses/{course_id}/publish` | **toggle** (флип `is_published`) |
+| Модуль | `POST /api/v1/courses/{course_id}/modules/{module_id}/publish` · `…/unpublish` | set true / false, идемпотентно |
+| Урок | `POST /api/v1/lessons/{lesson_id}/publish` · `…/unpublish` | set true / false, идемпотентно |
+
+Все за `require_teacher` + проверкой владения. На курсе используется `__mapper_args__ = {"eager_defaults": True}` → `updated_at` приходит через RETURNING сразу при commit.
+
+### 7.2 Правило видимости (AND) — `services/visibility_service.py`
+
+Это **единственный источник истины** по видимости для студента:
+
+```
+lesson_visible_to_student = course.is_published AND module.is_published AND lesson.is_published
+```
+
+- Учитель-владелец **обходит** правило и видит черновики; студент — только полностью опубликованную цепочку.
+- Скрытие — **read-time эффект AND**, а не каскад: снятие публикации родителя **НЕ сбрасывает** флаги детей. Снял курс с публикации → дети остаются `is_published=true` в БД, студент 404-ит из-за AND; опубликовал курс снова → урок сразу виден (флаги детей не трогались).
+- Черновик скрывается через **404, а не 403** (`dependencies.require_lesson_access`) — чтобы не раскрывать сам факт существования неопубликованного ресурса. 403 отдаётся только если студент не записан на курс.
+- `visibility_service.visible_module_tree(course)` обрезает дерево модулей/уроков под студента, возвращая DTO (не мутируя ORM-коллекции).
+
+### 7.3 Фронт
+
+На странице курса ([courses/[id].vue](../frontend/src/pages/courses/[id].vue)) — кнопки публикации на курсе/модуле/уроке; карточки курса показывают статус публикации, после действия `await load()` перезагружает данные с новыми флагами.
 
 ---
 
@@ -361,6 +385,38 @@
    - `await db.commit()`.
    - Возвращает `{lesson_id, completed: true}`.
 4. (Аналогично работает `/students/lessons/{id}/quiz-result` с `{score: float}` — если `score >= 0.6` урок автоматически становится completed.)
+
+---
+
+## 9. Задания: создание → сдача → оценка → тред
+
+Задание (`Assignment`) живёт на уроке. Модели — `models/assignment.py`; логика — `services/assignment_service.py`; роутеры — `assignment_teacher.py` (`/api/v1`) и `assignment_student.py` (`/api/v1/students`). Сущности: `Assignment` → `AssignmentSubmission` (1 на пару `enrollment×assignment`, UNIQUE) → `AssignmentAttachment` (kind=`submission`|`feedback`) и `AssignmentMessage` (приватный тред).
+
+### 9.1 Преподаватель: создать и опубликовать
+
+1. `POST /api/v1/lessons/{lesson_id}/assignments` с `{title, prompt, max_points, due_at?, attachments_enabled, allowed_ext?, pass_threshold?}` → `AssignmentTeacherRead`.
+2. Правка — `PATCH /assignments/{id}`; публикация — `POST /assignments/{id}/publish` (`status=draft→published`), `…/unpublish` — обратно. Черновое задание студенту отдаётся как **404**.
+
+### 9.2 Студент: сдать
+
+1. `GET /api/v1/students/lessons/{lesson_id}/assignments` — только опубликованные + своя `my_submission` (или `null`).
+2. Черновик: `PUT /assignments/{id}/submission` (`{text_content}`) — авто-создаёт сабмишн (`get_or_create_submission`, race-safe на UNIQUE). Файлы: `POST /assignments/{id}/submission/files` (multipart).
+3. **Валидация вложения** (`services/file_validation_service.py` + `constants.py:ATTACHMENT_*`): расширение из whitelist → MIME-категория → magic-байты / zip-slip / zip-bomb; лимиты — per-category размер (`ATTACHMENT_CATEGORY_MAX_SIZE_MB`), число файлов (`ATTACHMENT_MAX_FILES=10`), суммарный размер (`ATTACHMENT_MAX_TOTAL_SIZE_MB`). Файл только **сохраняется** (`assignments/<submission_id>/<uuid>_<name>`), не парсится. Стрим обрывается при превышении hard-cap.
+4. Сдача: `POST /assignments/{id}/submission/submit` — требует текст **или** хотя бы один файл, `status=draft→submitted`.
+
+### 9.3 Преподаватель: оценить
+
+1. `GET /assignments/{id}/submissions` (список со счётчиками) → `GET /submissions/{sid}` (полный вид с оценкой/фидбеком).
+2. `POST /submissions/{sid}/grade` с `{points_awarded, feedback?}` — **атомарно**: нормирует `points→score` в 0..1 (`grading_service.aggregate_score`), `status→returned`, ставит `graded_at`/`graded_by`, при заданном `assignment.pass_threshold` и проходе — отмечает урок пройденным. До статуса `returned` оценка/фидбек студенту **скрыты** (видны только после возврата).
+3. `POST /submissions/{sid}/reopen` (`returned→submitted`) — разрешить пересдачу; учитель может приложить файлы-фидбека (`/feedback-files`).
+
+### 9.4 Приватный тред
+
+`POST /submissions/{sid}/messages` (обе стороны, лимит 30/мин) — `AssignmentMessage`. Учитель видит/пишет в любой тред своих заданий, студент — только в свой сабмишн.
+
+### 9.5 Ретеншн
+
+Строки сабмишнов/оценок хранятся как аудит. **Файлы** вложений авто-удаляются через `ATTACHMENT_RETENTION_DAYS_AFTER_GRADED` (30 дн) после `graded_at` — суточный `purge_pipeline._purge_expired_submission_attachments` сносит файлы + записи `AssignmentAttachment`, оставляя оценку/фидбек/тред.
 
 ---
 

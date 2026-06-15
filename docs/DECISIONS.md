@@ -43,6 +43,16 @@
 28. [Замена эмодзи-шрифтов в LibreOffice через .xcu](#28-замена-эмодзи-шрифтов-в-libreoffice-через-xcu)
 29. [Зеркало Yandex Debian в backend Dockerfile](#29-зеркало-yandex-debian-в-backend-dockerfile)
 30. [Bind-mount `node_modules` для VS Code типов](#30-bind-mount-node_modules-для-vs-code-типов)
+31. [AI-генерация и редактирование тестов](#31-ai-генерация-и-редактирование-тестов-quiz-authoring)
+32. [Полноценный модуль тестирования: polymorphic JSONB + snapshot + hybrid grading](#32-полноценный-модуль-тестирования-polymorphic-jsonb--snapshot--hybrid-grading)
+33. [Versioned quiz_questions + pointer-snapshots](#33-versioned-quiz_questions--pointer-snapshots-вместо-full-snapshot)
+34. [Публикация: независимые флаги + read-time AND-видимость](#34-публикация-независимые-флаги--read-time-and-видимость)
+35. [LessonVideo: версии вместо перезаписи](#35-lessonvideo-версии-вместо-перезаписи)
+36. [Задания: вложения только хранятся + ретеншн](#36-задания-вложения-только-хранятся--ретеншн)
+37. [Прод-стек: self-contained compose, миграции отдельным шагом, backup-сайдкар](#37-прод-стек-self-contained-compose-миграции-отдельным-шагом-backup-сайдкар)
+
+> Между §33 и §34 в теле идут несколько именованных (без номера) ADR — soft-delete, email-верификация,
+> раздача `/files/*` через nginx, приоритет Celery по тарифу, монетизация/ЮКасса. Они актуальны.
 
 ---
 
@@ -130,6 +140,9 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ## 5. `bcrypt(sha256(password))`
 
+> ⚠️ **Устарело (историческая запись).** Активный хешер теперь — **Argon2id** (`argon2-cffi`), bcrypt
+> и sha256-обёртка удалены; password-shucking больше неактуален. Источник истины — [AUTH_FLOW.md](AUTH_FLOW.md) §2.
+
 **Контекст:** хеширование паролей перед хранением в БД. У bcrypt лимит входа 72 байта.
 
 **Решение:** SHA-256 пре-хеш → 32 байта → bcrypt с автогенерацией соли.
@@ -205,6 +218,10 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 ---
 
 ## 9. Раздача файлов через `StaticFiles` без auth
+
+> ⚠️ **Устарело (историческая запись).** `/files/*` больше не публичный `StaticFiles`: байты отдаются
+> через кастомный `files`-роутер с **HMAC-подписанными URL** (`signed_url_service.py`), а в проде —
+> через nginx + `auth_request`. См. актуальную ADR «Раздача `/files/*` через nginx + `auth_request`» ниже.
 
 **Контекст:** студент должен видеть видео-файл в своём `<video src="...">`. Преподаватель — слайды-PNG в редакторе.
 
@@ -498,6 +515,10 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ## 25. `useState` Nuxt вместо Pinia
 
+> ⚠️ **Устарело (историческая запись).** Канонический слой состояния теперь — **Pinia** (`stores/auth.ts`,
+> `billing`, `comments`, `student`, `studentCabinet`, `assignments`). `useState`-синглтоны не используются
+> для нового shared-состояния; `useCreationMode.ts` остался модулем констант. См. [ARCHITECTURE.md](ARCHITECTURE.md) §8.9.
+
 **Контекст:** глобальное реактивное состояние во фронте.
 
 **Решение:** встроенный `useState('key', factory)`. Используется для:
@@ -518,6 +539,10 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 ---
 
 ## 26. Polling вместо WebSocket / SSE
+
+> ⚠️ **Частично устарело.** Прогресс долгих задач теперь стримится по **SSE**
+> (`sse-starlette`, `routers/lessons.py:progress_stream`, `composables/useProgressStream.ts`); поллинг
+> `/task-status/{id}` оставлен как fallback. Запись ниже — историческая аргументация чистого polling.
 
 **Контекст:** фронту нужно узнавать о завершении долгих задач (генерация видео, анализ слайдов).
 
@@ -819,6 +844,88 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 - − Цена авто-режима — норматив 600 симв/слайд, а не факт (предсказуемость до анализа дороже точности).
 - − Слайды PDF до рендера считаются эвристикой по байтам (`/Count`); экзотические PDF с object streams могут не посчитаться → 422 до запуска.
 - − Триал-слот квиза при двойном фейле с redelivery теоретически может вернуться дважды (клемп ≥0; у слотов нет леджера) — принято как редкий и дешёвый кейс.
+
+---
+
+## 34. Публикация: независимые флаги + read-time AND-видимость
+
+**Контекст.** Преподаватель готовит курс по частям и должен показывать студентам только то, что готово, на трёх уровнях: курс → модуль → урок. Нужна предсказуемая семантика «снял с публикации / вернул».
+
+**Решение** (`services/visibility_service.py`):
+- **Три независимых булевых флага** `is_published` — на `Course`, `Module`, `Lesson`. Каждый переключается своим эндпоинтом: курс — `PUT /courses/{id}/publish` (toggle); модуль — `POST /courses/{cid}/modules/{mid}/publish|unpublish`; урок — `POST /lessons/{id}/publish|unpublish` (set true/false, идемпотентно).
+- **Видимость = AND всей цепочки**, вычисляется в read-time: `lesson_visible_to_student = course.is_published AND module.is_published AND lesson.is_published`. Единственный источник истины; вызывается из `require_lesson_access` и `visible_module_tree`.
+- **Снятие публикации родителя НЕ трогает флаги детей** — скрытие чисто read-time-эффект AND. Опубликовал родителя обратно → потомки сразу видны (их флаги не сбрасывались).
+- Черновик в цепочке → студенту **404, а не 403** (не раскрываем существование неопубликованного). 403 — только «не записан на курс».
+
+**Альтернативы:**
+- *Каскадный флаг (unpublish курса → false у всех уроков)* — теряется состояние «что было опубликовано», повторная публикация требует заново пройтись по детям.
+- *Один флаг на урок без цепочки* — нельзя спрятать целый модуль/курс одним действием.
+
+**Trade-offs:**
+- + Гибкая ре-публикация, одно правило видимости, нет рассинхрона флагов.
+- − Видимость нельзя прочитать из одного поля — нужно тянуть всю цепочку (делается через `joinedload` в `require_lesson_access`).
+
+---
+
+## 35. LessonVideo: версии вместо перезаписи
+
+**Контекст.** Раньше у урока был один `video_url`; повторная генерация затирала предыдущий результат — нельзя было сравнить варианты и выбрать лучший перед показом студентам.
+
+**Решение** (`models/lesson_video.py`, коммит «latest video preview + publishing options»):
+- Отдельная таблица **`lesson_videos`** (`lesson_id`, `video_url`, `voice`, `creation_mode`, `is_published`, `created_at`). Каждая успешная генерация (и прямая загрузка) добавляет строку с `is_published=False` (`tasks/video_pipeline.py`).
+- `GET /lessons/{id}/videos` — список версий (новые сверху). `POST /lessons/{id}/videos/{video_id}/publish` помечает одну `is_published=True`, **снимает остальные** (`UPDATE … SET is_published=False`) и синхронит `lesson.video_url = video.video_url`, чтобы плеер студента продолжал работать без доп. запроса. Идемпотентно.
+- `LessonOut.published_video` отдаёт текущую опубликованную версию при чтении урока.
+- Прямая загрузка готового видео (`/upload-video`) сразу `is_published=True`.
+
+**Альтернативы:**
+- *Хранить только последнее видео в `lesson.video_url`* — нет превью/отката, гонка «генерю новое, студент смотрит старое».
+- *Версии как файлы без таблицы* — нет метаданных (voice/mode/время) и атомарного выбора активной версии.
+
+**Trade-offs:**
+- + Превью нескольких вариантов, явный выбор активной версии, откат.
+- − Старые неопубликованные версии копятся в storage (чистятся `purge_pipeline` вместе с уроком; отдельного GC версий нет).
+
+---
+
+## 36. Задания: вложения только хранятся + ретеншн
+
+**Контекст.** Студенты сдают задания текстом и/или файлами (вплоть до видео); нужны оценка, приватный тред с преподавателем и защита от вредоносных загрузок без раздувания хранилища.
+
+**Решение** (`models/assignment.py`, `services/assignment_service.py`, `file_validation_service.py`):
+- **Вложения только СОХРАНЯЮТСЯ, не парсятся** на сервере — это снимает классы XXE/zip-bomb из office-файлов. Допуск — whitelist расширение→MIME-категория (`ATTACHMENT_ALLOWED_TYPES`/`ATTACHMENT_EXTENSION_MIME` в `constants.py`) + проверка magic-байтов/zip-slip в `file_validation_service`; лимиты — per-category размер, число файлов (`ATTACHMENT_MAX_FILES`), суммарный размер сабмишна. Стрим в storage обрывается при превышении hard-cap.
+- **Один сабмишн на пару `(enrollment, assignment)`** (UNIQUE, race-safe `get_or_create`); статусы `draft → submitted → returned`, оценка/фидбек скрыты от студента до `returned`. Оценка нормируется в 0..1 через общий `grading_service.aggregate_score` (та же формула, что в квизах), при `pass_threshold` — отметка урока пройденным.
+- **Приватный тред** (`AssignmentMessage`) — обе стороны, лимит 30/мин; студент видит только свой сабмишн.
+- **Ретеншн:** строки-оценки хранятся как аудит, а **файлы** вложений авто-удаляются через `ATTACHMENT_RETENTION_DAYS_AFTER_GRADED` после `graded_at` (`purge_pipeline`), экономя storage.
+
+**Альтернативы:**
+- *Парсить/превьюшить office-вложения на сервере* — открывает XXE/zip-bomb; не нужно для сдачи.
+- *Хранить файлы вечно* — линейный рост storage на видео-вложениях.
+
+**Trade-offs:**
+- + Безопасный аплоад без парсинга; единая формула оценки с квизами; storage не растёт бесконечно.
+- − Перезалитый файл создаёт новую строку — старый лежит до purge; нет server-side превью содержимого.
+
+---
+
+## 37. Прод-стек: self-contained compose, миграции отдельным шагом, backup-сайдкар
+
+**Контекст.** Dev `docker-compose.yml` заточен под удобство (bind-mounts кода, `--reload`, авто-миграции в lifespan). Для прода это небезопасно, но и плодить хрупкий `-f base -f override` не хотелось.
+
+**Решение** (`docker-compose.prod.yml`):
+- **Self-contained, НЕ override.** Запускать только как `-f docker-compose.prod.yml` — Compose **мёржит списки** (volumes/ports), поэтому наложение на dev-файл протащило бы dev bind-mount'ы кода. Код берётся только из собранных образов.
+- **Миграции — отдельный one-shot сервис `migrate`** (`--profile migrate`, `alembic upgrade head`) до роллаута; в проде `RUN_MIGRATIONS_ON_STARTUP=false` (см. §7 / KNOWN_PROBLEMS §5.1). Упавшая миграция валит деплой, не трогая работающую версию.
+- **gunicorn** (uvicorn-воркеры, без `--reload`) для backend, `frontend/Dockerfile.prod` (`nuxt build` → node-сервер), **nginx** отдаёт `/files/*` + TLS, `certbot`-профиль для сертификатов.
+- **Backup БД — сайдкар `db_backup`** (постгрес-образ той же версии): цикл `pg_dump -Fc` → volume `db_backups`, ретенция `BACKUP_RETENTION_DAYS`; restore через `pg_restore` (DEPLOYMENT §7). Off-host копия в Object Storage — post-MVP.
+
+**Альтернативы:**
+- *`-f base -f prod` override* — тихий лик dev bind-mount'ов (Compose мёржит списки); поэтому self-contained.
+- *Миграции в lifespan и в проде* — тяжёлая миграция роняет readiness, гонка реплик за advisory-lock.
+- *Бэкап вручную/cron на хосте* — не воспроизводимо между окружениями; сайдкар везёт версию pg_dump вместе с БД.
+
+**Trade-offs:**
+- + Прод-конфиг воспроизводим и изолирован от dev; миграция — управляемый шаг деплоя; есть регулярный бэкап.
+- − Дублирование части определений между dev и prod compose (плата за self-contained).
+- − Single-instance backup на volume — не защищает от потери хоста до появления off-host копии.
 
 ---
 

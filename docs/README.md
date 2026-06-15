@@ -4,7 +4,7 @@
 и текста доклада собирает озвученную видеолекцию и публикует её студентам.
 
 > Источник истины — **код**. Доки сверяются с исходниками; расхождения отмечаются явно.
-> Сгенерировано/обновлено: **2026-06-09**.
+> Сгенерировано/обновлено: **2026-06-15**.
 
 ## С чего начать
 
@@ -41,7 +41,7 @@ Celery workers (sync, psycopg2):
    • vision  — vision-LLM анализ слайдов
    • quiz    — генерация/проверка тестов (+ beat: суточный purge)
    • email   — транзакционные письма
-   │   внешнее: LibreOffice · pdftoppm · FFmpeg · Ollama (LLM+vision) · Silero TTS
+   │   внешнее: LibreOffice · pdftoppm · FFmpeg · LLM+vision (Polza AI облако по умолчанию / Ollama локально) · Silero TTS
    ▼
 Local/S3 storage (PPTX, PNG, WAV, MP4)   ·   Monitoring: Prometheus/Grafana/Flower/Sentry
 ```
@@ -51,13 +51,16 @@ Local/S3 storage (PPTX, PNG, WAV, MP4)   ·   Monitoring: Prometheus/Grafana/Flo
 - **Аутентификация и роли** → [AUTH_FLOW.md](AUTH_FLOW.md)
 - **Пайплайн генерации видео** (двойной thread-pool, кеш слайдов) → [ARCHITECTURE.md](ARCHITECTURE.md) §8, [DATA_FLOW.md](DATA_FLOW.md) §5–6, [DECISIONS.md](DECISIONS.md)
 - **Тесты/квизы** (polymorphic JSONB, snapshot, hybrid grading) → [DECISIONS.md](DECISIONS.md) §31–33
-- **Биллинг и кредиты** (план, баланс, reserve/release) → [ARCHITECTURE.md](ARCHITECTURE.md) §11, `app/services/billing_service.py`
+- **Биллинг и кредиты** (план, баланс, reserve/release, YooKassa) → [ARCHITECTURE.md](ARCHITECTURE.md) §9b, [DECISIONS.md](DECISIONS.md), `app/services/billing_service.py`
+- **Задания (assignments)** (сдача файлов, оценка, приватный тред) → [DATA_FLOW.md](DATA_FLOW.md) §9, [DECISIONS.md](DECISIONS.md) §36, `app/services/assignment_service.py`
+- **Публикация и видимость** (course/module/lesson `is_published`, AND-правило) → [DATA_FLOW.md](DATA_FLOW.md) §7, [DECISIONS.md](DECISIONS.md) §34, `app/services/visibility_service.py`
+- **Версии видео урока** (`LessonVideo`, превью → публикация версии) → [DATA_FLOW.md](DATA_FLOW.md) §5.2, [DECISIONS.md](DECISIONS.md) §35
 - **Email-верификация** → [AUTH_FLOW.md](AUTH_FLOW.md) §8, [DECISIONS.md](DECISIONS.md)
 - **Soft-delete + суточный purge** → [DECISIONS.md](DECISIONS.md), [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md)
 - **Прогресс задач (SSE)** → `app/routers/lessons.py:progress-stream`, `composables/useProgressStream.ts`
-- **Деплой и эксплуатация** → [DEPLOYMENT.md](DEPLOYMENT.md)
+- **Деплой и эксплуатация** (dev + prod-compose) → [DEPLOYMENT.md](DEPLOYMENT.md)
 
 > Для повседневной работы в репозитории также см. [CLAUDE.md](../CLAUDE.md) в корне (команды,
-> грабли, конвенции). ⚠️ Раздел `CLAUDE.md` про `useApi` пока описывает старую Bearer/localStorage-схему —
-> актуальную (cookie+CSRF) см. в [AUTH_FLOW.md](AUTH_FLOW.md).
+> грабли, конвенции). Он синхронизирован с этими доками (cookie+CSRF-auth, очереди Celery,
+> биллинг, prod-деплой); по аутентификации канонический источник — [AUTH_FLOW.md](AUTH_FLOW.md).
 </content>

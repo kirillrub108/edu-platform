@@ -1,6 +1,6 @@
 # DEPLOYMENT — поднятие проекта с нуля
 
-> Только реальные команды, которые работают на текущем коде. Это **dev-флоу**: production-конфиг (nginx, k8s, S3, CI/CD) физически отсутствует в репозитории — про него отдельная секция в конце с пометкой «не реализовано».
+> Только реальные команды, которые работают на текущем коде. Основной фокус — **dev-флоу** (разделы 1–6). Базовый **production-рантайм уже есть** в репозитории — self-contained [docker-compose.prod.yml](../docker-compose.prod.yml) (gunicorn, nginx+TLS, one-shot `migrate`, сайдкар `db_backup`, certbot) + [frontend/Dockerfile.prod](../frontend/Dockerfile.prod); подробности и порядок деплоя — в разделе 7. То, что ещё НЕ реализовано (S3-переезд, secret manager, off-host backup, вынос Ollama), помечено там же.
 
 ---
 
