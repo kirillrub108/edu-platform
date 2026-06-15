@@ -6,7 +6,9 @@ import { FileText, X } from 'lucide-vue-next'
 const store = useCourseEditorStore()
 const { draftToast } = storeToRefs(store)
 
-const showCourse = async (): Promise<void> => {
+// "Опубликовать" takes the teacher back to the course editor, where the
+// per-module / per-lesson publish buttons live (the content tab is the default).
+const goToCourse = async (): Promise<void> => {
   const courseId = draftToast.value?.courseId
   store.dismissDraftToast()
   if (courseId) await navigateTo(`/courses/${courseId}`)
@@ -30,9 +32,9 @@ const showCourse = async (): Promise<void> => {
           <button
             type="button"
             class="mt-1 text-sm font-medium text-brand hover:underline"
-            @click="showCourse"
+            @click="goToCourse"
           >
-            Показать
+            Опубликовать
           </button>
         </div>
         <button

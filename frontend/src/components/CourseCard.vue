@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookOpen, ArrowRight, Archive, RotateCcw } from 'lucide-vue-next'
+import { BookOpen, ArrowRight, Archive, RotateCcw, Eye, EyeOff } from 'lucide-vue-next'
 import StatusBadge from './StatusBadge.vue'
 
 const props = withDefaults(
@@ -26,6 +26,7 @@ const props = withDefaults(
 const emit = defineEmits<{
   (e: 'archive', id: string): void
   (e: 'restore', id: string): void
+  (e: 'publish', id: string): void
 }>()
 
 const archived = computed(() => props.course.is_archived === true)
@@ -72,11 +73,12 @@ const onArchive = () => {
 }
 
 const onRestore = () => emit('restore', props.course.id)
+const onPublishToggle = () => emit('publish', props.course.id)
 </script>
 
 <template>
   <div
-    class="group relative bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-soft transition-all duration-150"
+    class="group relative bg-white rounded-2xl overflow-hidden border border-gray-100 shadow-soft transition-all duration-150 flex flex-col"
     :class="archived
       ? 'opacity-75 hover:opacity-100'
       : 'hover:scale-[1.01] hover:border-violet-200 hover:shadow-soft-hover'"
@@ -107,6 +109,14 @@ const onRestore = () => emit('restore', props.course.id)
         <Archive class="w-3 h-3" /> Архив
       </span>
 
+      <!-- Status badge pinned to the cover/body boundary -->
+      <div
+        v-if="!archived"
+        class="absolute bottom-2 left-3 z-20"
+      >
+        <StatusBadge :status="course.is_published ? 'published' : 'draft'" />
+      </div>
+
       <!-- Action buttons (above the stretched link) -->
       <div v-if="showActions" class="absolute top-2 right-2 z-20">
         <button
@@ -128,7 +138,7 @@ const onRestore = () => emit('restore', props.course.id)
       </div>
     </div>
 
-    <div class="p-5">
+    <div class="p-5 flex flex-col flex-1">
       <h3 class="font-semibold text-gray-900 text-lg leading-tight">{{ course.title }}</h3>
       <p v-if="course.description" class="text-sm text-gray-500 mt-1.5 line-clamp-2">
         {{ course.description }}
@@ -138,13 +148,30 @@ const onRestore = () => emit('restore', props.course.id)
           <BookOpen class="w-3.5 h-3.5" />
           {{ lessonsCount }} {{ lessonsLabel }}
         </div>
-        <StatusBadge :status="course.is_published ? 'published' : 'draft'" />
       </div>
-      <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between text-sm">
+      <div class="mt-auto pt-4 border-t border-gray-100 flex items-center justify-between text-sm">
         <template v-if="archived">
           <span class="inline-flex items-center gap-1.5 text-gray-500">
             <Archive class="w-3.5 h-3.5" />
             {{ purgeLabel }}
+          </span>
+        </template>
+        <template v-else-if="showActions">
+          <!-- Publish toggle sits above the stretched card link (relative z-20). -->
+          <button
+            type="button"
+            class="relative z-20 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition"
+            :class="course.is_published
+              ? 'border border-gray-200 text-gray-600 hover:bg-gray-50'
+              : 'bg-violet-600 text-white hover:bg-violet-700'"
+            @click.stop.prevent="onPublishToggle"
+          >
+            <component :is="course.is_published ? EyeOff : Eye" class="w-3.5 h-3.5" />
+            {{ course.is_published ? 'Снять с публикации' : 'Опубликовать' }}
+          </button>
+          <span class="inline-flex items-center gap-1 text-violet-700 font-medium group-hover:text-violet-600">
+            Открыть
+            <ArrowRight class="w-4 h-4 transform transition group-hover:translate-x-0.5" />
           </span>
         </template>
         <template v-else>

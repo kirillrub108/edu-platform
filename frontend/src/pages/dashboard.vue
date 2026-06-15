@@ -81,6 +81,27 @@ const archiveCourse = async (id: string) => {
   groups.archived.unshift(course)
 }
 
+const publishCourse = async (id: string) => {
+  actionError.value = ''
+  let updated: any
+  try {
+    // PUT /publish toggles is_published server-side; the response reflects it.
+    updated = await apiFetch<any>(`/courses/${id}/publish`, { method: 'PUT' })
+  } catch (e: any) {
+    actionError.value = e?.data?.detail ?? 'Не удалось изменить публикацию курса'
+    return
+  }
+  const course = removeFrom(groups.published, id) ?? removeFrom(groups.drafts, id)
+  if (!course) {
+    await load()
+    return
+  }
+  course.is_published = updated.is_published
+  const target = updated.is_published ? groups.published : groups.drafts
+  target.unshift(course)
+  sortByCreatedDesc(target)
+}
+
 const restoreCourse = async (id: string) => {
   actionError.value = ''
   let restored: any
@@ -210,6 +231,7 @@ onMounted(async () => {
                   :show-actions="true"
                   @archive="archiveCourse"
                   @restore="restoreCourse"
+                  @publish="publishCourse"
                 />
               </div>
             </section>
