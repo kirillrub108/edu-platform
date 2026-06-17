@@ -18,6 +18,7 @@ from app.constants import CREDIT_PACKAGES
 from app.models.credit import CreditOperation
 from app.models.payment import Payment, PaymentStatus
 from app.models.user import User
+from app.schemas.yookassa import YooKassaPayment
 from app.services import billing_service, yookassa_service
 
 pytestmark = pytest.mark.integration
@@ -26,21 +27,23 @@ pytestmark = pytest.mark.integration
 def _mock_create(monkeypatch: pytest.MonkeyPatch, yk_id: str = "yk-pay-1") -> list[dict]:
     calls: list[dict] = []
 
-    async def _fake_create(**kwargs: Any) -> dict:
+    async def _fake_create(**kwargs: Any) -> YooKassaPayment:
         calls.append(kwargs)
-        return {
-            "id": yk_id,
-            "status": "pending",
-            "confirmation": {"confirmation_url": "https://yookassa.test/confirm"},
-        }
+        return YooKassaPayment.model_validate(
+            {
+                "id": yk_id,
+                "status": "pending",
+                "confirmation": {"confirmation_url": "https://yookassa.test/confirm"},
+            }
+        )
 
     monkeypatch.setattr(yookassa_service, "create_payment", _fake_create)
     return calls
 
 
 def _mock_get(monkeypatch: pytest.MonkeyPatch, status: str) -> None:
-    async def _fake_get(yk_id: str) -> dict:
-        return {"id": yk_id, "status": status}
+    async def _fake_get(yk_id: str) -> YooKassaPayment:
+        return YooKassaPayment.model_validate({"id": yk_id, "status": status})
 
     monkeypatch.setattr(yookassa_service, "get_payment", _fake_get)
 

@@ -163,7 +163,8 @@ VISION_MAX_RETRIES: int = 3
 VISION_SUMMARY_CONCURRENCY: int = 4
 
 # Quiz
-QUIZ_PASS_THRESHOLD: float = 0.6  # default for new quizzes; per-quiz override in Quiz.pass_threshold
+# default for new quizzes; per-quiz override in Quiz.pass_threshold
+QUIZ_PASS_THRESHOLD: float = 0.6
 QUIZ_NUM_QUESTIONS: int = 5
 QUIZ_NUM_OPTIONS: int = 4
 QUIZ_MIN_QUESTIONS: int = 1
@@ -234,6 +235,15 @@ CREDIT_PACKAGES: dict[str, dict[str, int]] = {
 }
 
 CREDIT_CARRYOVER_RATIO: float = 0.5  # до 50% месячного объёма переносится на след. месяц
+
+# YooKassa HTTP client (services/yookassa_service.py). One AsyncClient per
+# process; retries cover ONLY network/timeout errors of idempotent calls
+# (POST /payments rides the same Idempotence-Key, GET re-fetch is idempotent) —
+# 4xx is never retried. Backoff grows as YOOKASSA_RETRY_BACKOFF * 2**attempt.
+YOOKASSA_CONNECT_TIMEOUT: float = 5.0
+YOOKASSA_READ_TIMEOUT: float = 20.0
+YOOKASSA_MAX_RETRIES: int = 2
+YOOKASSA_RETRY_BACKOFF: float = 0.5  # base seconds
 
 # ── Celery scheduling priority by tier ───────────────────────────────────────
 # A "tier" (free|paid|enterprise) is DERIVED from the billing CreditPlan via

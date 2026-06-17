@@ -121,14 +121,14 @@ async def create_payment(
         logger.error("payment_create_failed", payment_id=str(payment.id), error=str(exc))
         raise HTTPException(status_code=502, detail="Платёжный сервис недоступен")
 
-    confirmation_url = (yk.get("confirmation") or {}).get("confirmation_url")
+    confirmation_url = yk.confirmation.confirmation_url if yk.confirmation else None
     if not confirmation_url:
         payment.status = PaymentStatus.canceled
         await db.commit()
         logger.error("payment_no_confirmation_url", payment_id=str(payment.id))
         raise HTTPException(status_code=502, detail="Платёжный сервис недоступен")
 
-    payment.yookassa_payment_id = yk.get("id")
+    payment.yookassa_payment_id = yk.id
     await db.commit()
     return PaymentCreateOut(payment_id=payment.id, confirmation_url=confirmation_url)
 
@@ -142,7 +142,7 @@ async def _settle_from_yookassa(db: AsyncSession, payment: Payment) -> None:
         yk = await yookassa_service.get_payment(payment.yookassa_payment_id)
     except yookassa_service.YooKassaError:
         return
-    yk_status = yk.get("status")
+    yk_status = yk.status
     if yk_status == "succeeded":
         await billing_service.apply_purchase(db, payment.id)
     elif yk_status == "canceled":
@@ -215,7 +215,7 @@ async def yookassa_webhook(request: Request, db: AsyncSession = Depends(get_db))
         # Verification temporarily impossible — 503 makes YooKassa redeliver.
         raise HTTPException(status_code=503, detail="Verification unavailable")
 
-    yk_status = yk.get("status")
+    yk_status = yk.status
     if yk_status == "succeeded":
         await billing_service.apply_purchase(db, payment.id)
     elif yk_status == "canceled":

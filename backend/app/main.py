@@ -39,6 +39,7 @@ from app.routers import (
     students,
     uploads,
 )
+from app.services import yookassa_service
 
 logger = structlog.get_logger()
 
@@ -199,9 +200,14 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.exception("startup_reconciliation_failed")
 
+    # Build the shared YooKassa HTTP client up front so the first payment
+    # request doesn't pay the construction cost.
+    yookassa_service.get_client()
+
     yield
     await engine.dispose()
     await close_redis()
+    await yookassa_service.close_client()
 
 
 app = FastAPI(
