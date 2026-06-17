@@ -19,6 +19,7 @@ from app.models.enrollment import Enrollment, LessonProgress
 from app.models.generation_usage import GenerationUsage
 from app.models.lesson import ContentType, CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
+from app.models.password_reset_token import PasswordResetToken
 from app.models.payment import Payment, PaymentStatus
 from app.models.quiz import (
     AttemptStatus,
@@ -59,6 +60,7 @@ __all__ = [
     "CreditTransaction",
     "CreditPlan",
     "CreditOperation",
+    "PasswordResetToken",
     "Payment",
     "PaymentStatus",
     "GenerationUsage",

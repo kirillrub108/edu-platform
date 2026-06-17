@@ -55,10 +55,15 @@ onMounted(restoreScroll)
             autocomplete="current-password"
           />
 
-          <label class="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-600">
-            <input v-model="rememberMe" type="checkbox" class="h-4 w-4 rounded accent-violet-600 cursor-pointer" />
-            Запомнить меня
-          </label>
+          <div class="flex items-center justify-between">
+            <label class="flex cursor-pointer select-none items-center gap-2 text-sm text-gray-600">
+              <input v-model="rememberMe" type="checkbox" class="h-4 w-4 rounded accent-violet-600 cursor-pointer" />
+              Запомнить меня
+            </label>
+            <NuxtLink to="/forgot-password" class="text-sm font-medium text-violet-700 hover:underline">
+              Забыли пароль?
+            </NuxtLink>
+          </div>
 
           <p
             v-if="error"

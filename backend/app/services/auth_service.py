@@ -214,7 +214,13 @@ class AuthService:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         if not user.is_active:
             raise HTTPException(status_code=403, detail="User is inactive")
+        return await self.issue_session(user, remember_me=remember_me)
 
+    async def issue_session(self, user: User, *, remember_me: bool = True) -> TokenResponse:
+        """Start a fresh refresh family and mint the first access/refresh pair
+        for it. The credential check is the caller's responsibility — used by
+        login and by change_password (to re-establish the current session after
+        every family was wiped)."""
         family_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc)
         absolute_expires_at = now + timedelta(days=settings.REFRESH_TOKEN_ABSOLUTE_MAX_DAYS)
@@ -339,6 +345,30 @@ class AuthService:
                 await self.redis.delete(*keys)
             if cursor == 0:
                 break
+
+    # ── password reset / change ──────────────────────────────────────────────
+
+    async def reset_password(self, user: User, new_password: str) -> None:
+        """Set a new password hash and wipe every session. Commits the pending
+        transaction (which also includes the reset token's burn flagged by the
+        caller), then revokes all refresh families so any stolen session dies.
+        No session is reissued — the (anonymous) caller logs in afresh."""
+        user.hashed_password = hash_password(new_password)
+        await self.db.commit()
+        await self.logout_all_sessions(str(user.id))
+
+    async def change_password(
+        self, user: User, old_password: str, new_password: str
+    ) -> TokenResponse:
+        """Verify the current password, set the new hash, then revoke every
+        session and reissue a fresh one for the caller — so other devices are
+        logged out while this request stays authenticated on a rotated pair."""
+        if not verify_password(old_password, user.hashed_password):
+            raise HTTPException(status_code=400, detail="Invalid current password")
+        user.hashed_password = hash_password(new_password)
+        await self.db.commit()
+        await self.logout_all_sessions(str(user.id))
+        return await self.issue_session(user)
 
 
 async def get_auth_service(

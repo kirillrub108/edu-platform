@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LogOut, Menu, MailWarning, Coins } from 'lucide-vue-next'
+import { LogOut, Menu, MailWarning, Coins, Settings } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const { user, isAuthenticated, isEmailVerified } = storeToRefs(auth)
@@ -68,6 +68,14 @@ const dashboardLink = computed(() =>
             </div>
           </div>
         </div>
+        <NuxtLink
+          to="/account"
+          class="w-9 h-9 rounded-lg grid place-items-center text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
+          aria-label="Настройки аккаунта"
+          title="Настройки аккаунта"
+        >
+          <Settings class="w-4 h-4" />
+        </NuxtLink>
         <button
           class="w-9 h-9 rounded-lg grid place-items-center text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
           aria-label="Выйти"

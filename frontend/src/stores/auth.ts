@@ -68,6 +68,30 @@ export const useAuthStore = defineStore('auth', () => {
     await navigateTo('/login')
   }
 
+  // Anonymous: request a reset link. The server answers identically whether or
+  // not the email exists, so there is nothing to branch on here.
+  const forgotPassword = async (email: string) => {
+    await apiFetch('/auth/forgot-password', { method: 'POST', body: { email } })
+  }
+
+  // Anonymous: consume the reset token and set a new password. Throws on an
+  // invalid/expired/used token so the page can surface a single generic error.
+  const resetPassword = async (token: string, newPassword: string) => {
+    await apiFetch('/auth/reset-password', {
+      method: 'POST',
+      body: { token, new_password: newPassword },
+    })
+  }
+
+  // Authenticated: the server rotates this session's cookies on success, so no
+  // re-login or fetchMe is needed (the user object is unchanged).
+  const changePassword = async (oldPassword: string, newPassword: string) => {
+    await apiFetch('/auth/change-password', {
+      method: 'POST',
+      body: { old_password: oldPassword, new_password: newPassword },
+    })
+  }
+
   return {
     user,
     isAuthenticated,
@@ -80,5 +104,8 @@ export const useAuthStore = defineStore('auth', () => {
     logout,
     fetchMe,
     clearSession,
+    forgotPassword,
+    resetPassword,
+    changePassword,
   }
 })

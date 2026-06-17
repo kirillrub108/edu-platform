@@ -285,6 +285,15 @@ EMAIL_VERIFY_RESEND_COOLDOWN_SECONDS: int = 60
 EMAIL_SEND_MAX_RETRIES: int = 3
 EMAIL_SEND_RETRY_BACKOFF: int = 5  # base seconds; Celery grows it exponentially
 
+# Password reset
+# Lifetime of a one-time password-reset token (DB-backed, only its hash is
+# stored). Kept short — long enough to receive and click the email, no more.
+PASSWORD_RESET_TTL_SECONDS: int = 60 * 30  # 30 min
+# Entropy of the raw reset token (bytes handed to secrets.token_urlsafe).
+PASSWORD_RESET_TOKEN_BYTES: int = 32
+# SPA route that consumes the reset token; the raw token is appended as ?token=.
+PASSWORD_RESET_PATH: str = "/reset-password"
+
 # Access code generation
 ACCESS_CODE_LENGTH: int = 6
 # No I, O, 1, 0 — visually ambiguous characters excluded.

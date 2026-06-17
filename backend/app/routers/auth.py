@@ -10,13 +10,22 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
+from app.constants import PASSWORD_RESET_PATH
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.limiter import limiter
 from app.models.user import User
 from app.redis_client import get_redis
-from app.schemas.auth import UserLogin, UserOut, UserRegister, VerifyEmailRequest
-from app.services import email_token_service
+from app.schemas.auth import (
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
+    UserLogin,
+    UserOut,
+    UserRegister,
+    VerifyEmailRequest,
+)
+from app.services import email_token_service, password_reset_service
 from app.services.auth_service import (
     AuthService,
     decode_token,
@@ -48,6 +57,22 @@ def _enqueue_verification_email(user: User) -> None:
         )
     except Exception:
         logger.warning("verification_email_enqueue_failed", user_id=str(user.id), exc_info=True)
+
+
+def _enqueue_password_reset_email(user: User, raw_token: str) -> None:
+    """Enqueue the password-reset email carrying the raw one-time token. Enqueue
+    failures are logged, never raised — forgot-password must stay constant in
+    its response whether or not mail could be queued."""
+    reset_url = f"{settings.FRONTEND_URL}{PASSWORD_RESET_PATH}?token={raw_token}"
+    try:
+        send_email.delay(
+            to=user.email,
+            subject="Сброс пароля — Edllm",
+            template_name="reset_password.html",
+            context={"full_name": user.full_name or "", "reset_url": reset_url},
+        )
+    except Exception:
+        logger.warning("password_reset_email_enqueue_failed", user_id=str(user.id), exc_info=True)
 
 
 def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
@@ -253,3 +278,67 @@ async def resend_verification(
     _enqueue_verification_email(user)
     await email_token_service.start_cooldown(redis, str(user.id))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/forgot-password", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("3/minute")
+async def forgot_password(
+    request: Request,
+    data: ForgotPasswordRequest,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Anonymous: mint a one-time reset token and email the link. The 204 is
+    returned unconditionally — an email is enqueued only when the account
+    exists, so the response never reveals whether it does (account enumeration
+    guard). No CSRF: there is no session to double-submit against."""
+    user = await db.scalar(select(User).where(User.email == data.email))
+    if user is not None:
+        raw_token = await password_reset_service.issue(db, str(user.id))
+        await db.commit()
+        _enqueue_password_reset_email(user, raw_token)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
+async def reset_password(
+    request: Request,
+    data: ResetPasswordRequest,
+    service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Anonymous: consume the token, set the new password, and revoke all
+    sessions. Any token problem (unknown / expired / already used) collapses to
+    one opaque 400 so token state is never disclosed. No CSRF — the single-use
+    token is the proof."""
+    try:
+        user_id = await password_reset_service.consume(db, data.token)
+    except password_reset_service.TokenError:
+        raise HTTPException(status_code=400, detail="invalid_or_expired")
+
+    user = await db.scalar(select(User).where(User.id == UUID(user_id)))
+    if user is None:
+        raise HTTPException(status_code=400, detail="invalid_or_expired")
+
+    # Commits the token burn (set in consume) together with the new hash, then
+    # wipes every refresh family.
+    await service.reset_password(user, data.new_password)
+    return {}
+
+
+@router.post("/change-password", status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
+async def change_password(
+    request: Request,
+    response: Response,
+    data: ChangePasswordRequest,
+    user: User = Depends(get_current_user),
+    service: AuthService = Depends(get_auth_service),
+) -> dict:
+    """Authenticated (cookie + CSRF, via get_current_user): verify the old
+    password, set the new one, revoke every session and reissue this one so the
+    caller stays signed in on rotated cookies while other devices are logged
+    out. Wrong old password → 400, nothing changes."""
+    tokens = await service.change_password(user, data.old_password, data.new_password)
+    _set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
+    return {}
