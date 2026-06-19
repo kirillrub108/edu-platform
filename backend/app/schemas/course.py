@@ -23,9 +23,19 @@ class CourseUpdate(BaseModel):
     is_published: bool | None = None
 
 
+class CoursePartialUpdate(BaseModel):
+    """Inline-edit: only title and description; title must be non-empty if provided."""
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    description: str | None = None
+
+
 class ModuleCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     order: int = 0
+
+
+class ModuleUpdate(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=255)
 
 
 class LessonShort(BaseModel):

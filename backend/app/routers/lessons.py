@@ -11,6 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.celery_app import celery_app
+from app.constants import (
+    CREDIT_WEIGHTS,
+    MAX_VIDEO_UPLOAD_BYTES,
+    SIGNED_URL_TTL_VIDEO,
+    TRIAL_MAX_SCRIPT_CHARS,
+    TRIAL_MAX_SLIDES,
+)
 from app.database import get_db
 from app.dependencies import (
     get_current_user,
@@ -18,6 +25,7 @@ from app.dependencies import (
     require_teacher,
     require_verified_teacher,
 )
+from app.limiter import limiter
 from app.models.course import Course
 from app.models.credit import CreditOperation
 from app.models.enrollment import Enrollment
@@ -35,21 +43,14 @@ from app.schemas.billing import (
 from app.schemas.lesson import (
     LessonCreate,
     LessonOut,
+    LessonPartialUpdate,
     LessonUpdate,
     LessonVideoOut,
     ScriptUpdateRequest,
     TaskStatusResponse,
     VideoGenerateRequest,
 )
-from app.limiter import limiter
 from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
-from app.constants import (
-    CREDIT_WEIGHTS,
-    MAX_VIDEO_UPLOAD_BYTES,
-    SIGNED_URL_TTL_VIDEO,
-    TRIAL_MAX_SCRIPT_CHARS,
-    TRIAL_MAX_SLIDES,
-)
 from app.services import billing_service, quota_service, tier_service
 from app.services.storage_service import storage_service
 from app.services.video_service import count_source_slides
@@ -121,6 +122,21 @@ async def get_lesson(
 async def update_lesson(
     lesson_id: UUID,
     data: LessonUpdate,
+    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(lesson, key, value)
+    await db.commit()
+    await db.refresh(lesson)
+    return _lesson_out(lesson, str(user.id))
+
+
+@router.patch("/{lesson_id}", response_model=LessonOut)
+async def patch_lesson(
+    lesson_id: UUID,
+    data: LessonPartialUpdate,
     user: User = Depends(require_teacher),
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),

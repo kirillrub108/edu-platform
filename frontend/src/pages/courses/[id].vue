@@ -27,6 +27,53 @@ const deletingLesson = ref<Record<string, boolean>>({})
 const togglingModule = ref<Record<string, boolean>>({})
 const togglingLesson = ref<Record<string, boolean>>({})
 
+const savingCourseField = ref<'title' | 'description' | null>(null)
+const courseFieldError = ref('')
+const savingModuleTitle = ref<Record<string, boolean>>({})
+const moduleTitleError = ref<Record<string, string>>({})
+
+const updateCourseField = async (field: 'title' | 'description', value: string | null) => {
+  if (!course.value) return
+  const prev = course.value[field]
+  course.value = { ...course.value, [field]: value }
+  savingCourseField.value = field
+  courseFieldError.value = ''
+  try {
+    const updated = await apiFetch<any>(`/courses/${route.params.id}`, {
+      method: 'PATCH',
+      body: { [field]: value },
+    })
+    course.value = { ...course.value, [field]: updated[field] }
+  } catch (e: any) {
+    course.value = { ...course.value, [field]: prev }
+    courseFieldError.value = e?.data?.detail ?? 'Не удалось сохранить'
+  } finally {
+    savingCourseField.value = null
+  }
+}
+
+const updateModuleTitle = async (moduleId: string, newTitle: string) => {
+  const modules = course.value?.modules ?? []
+  const mod = modules.find((m: any) => m.id === moduleId)
+  if (!mod) return
+  const prev = mod.title
+  mod.title = newTitle
+  savingModuleTitle.value = { ...savingModuleTitle.value, [moduleId]: true }
+  moduleTitleError.value = { ...moduleTitleError.value, [moduleId]: '' }
+  try {
+    const updated = await apiFetch<any>(
+      `/courses/${route.params.id}/modules/${moduleId}`,
+      { method: 'PATCH', body: { title: newTitle } },
+    )
+    mod.title = updated.title
+  } catch (e: any) {
+    mod.title = prev
+    moduleTitleError.value = { ...moduleTitleError.value, [moduleId]: e?.data?.detail ?? 'Не удалось сохранить' }
+  } finally {
+    savingModuleTitle.value = { ...savingModuleTitle.value, [moduleId]: false }
+  }
+}
+
 const activeTab = ref<'content' | 'access'>('content')
 const accessLoading = ref(false)
 const accessError = ref('')
@@ -342,10 +389,30 @@ onMounted(async () => {
           @change="uploadCover"
         />
 
-        <div>
+        <div class="min-w-0">
           <NuxtLink to="/dashboard" class="text-sm text-brand hover:underline mb-1 block">← Мои курсы</NuxtLink>
-          <h1 class="text-2xl font-semibold">{{ course.title }}</h1>
-          <p v-if="course.description" class="text-gray-500 mt-1 text-sm">{{ course.description }}</p>
+          <div>
+            <InlineEdit
+              :value="course.title"
+              tag="h1"
+              display-class="text-2xl font-semibold"
+              input-class="text-2xl font-semibold"
+              :saving="savingCourseField === 'title'"
+              @save="updateCourseField('title', $event)"
+            />
+          </div>
+          <div class="mt-1">
+            <InlineEdit
+              :value="course.description ?? ''"
+              placeholder="Добавить описание…"
+              display-class="text-gray-500 text-sm"
+              input-class="text-gray-500 text-sm"
+              :saving="savingCourseField === 'description'"
+              @save="updateCourseField('description', $event)"
+              @cancel="course.description === '' && updateCourseField('description', null)"
+            />
+          </div>
+          <p v-if="courseFieldError" class="text-xs text-rose-600 mt-1">{{ courseFieldError }}</p>
         </div>
       </div>
 
@@ -455,14 +522,21 @@ onMounted(async () => {
       <div class="space-y-4 mb-4">
         <div v-for="m in course.modules" :key="m.id" class="bg-white border rounded-xl p-4">
           <div class="font-medium text-gray-800 mb-3 flex items-center gap-2">
-            <span class="text-brand/60 text-xs font-mono">M</span>
-            {{ m.title }}
+            <span class="text-brand/60 text-xs font-mono shrink-0">M</span>
+            <InlineEdit
+              :value="m.title"
+              display-class="font-medium text-gray-800"
+              input-class="font-medium text-gray-800"
+              :saving="savingModuleTitle[m.id]"
+              @save="updateModuleTitle(m.id, $event)"
+            />
             <span
               v-if="!m.is_published"
-              class="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500"
+              class="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500 shrink-0"
             >
               Черновик
             </span>
+            <span v-if="moduleTitleError[m.id]" class="text-xs text-rose-600">{{ moduleTitleError[m.id] }}</span>
             <div class="ml-auto flex items-center gap-2">
               <button
                 class="text-xs px-2 py-1 rounded-lg border transition disabled:opacity-40 whitespace-nowrap"

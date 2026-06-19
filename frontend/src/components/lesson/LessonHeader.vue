@@ -6,13 +6,13 @@ const props = defineProps<{
   title: string
   status: string
   isPublished: boolean
+  savingTitle?: boolean
 }>()
 
-// The generation `status` is only worth a header badge while it's actively
-// transitioning or errored — otherwise the visibility badge + the "Этапы" panel
-// already tell the story. Critically, a "published" generation status must NOT
-// render as "Опубликован" here, since that would contradict the is_published
-// visibility flag the publish button controls.
+const emit = defineEmits<{
+  (e: 'update:title', value: string): void
+}>()
+
 const showStatus = computed(() =>
   ['analyzing', 'processing', 'error'].includes(props.status),
 )
@@ -28,7 +28,14 @@ const showStatus = computed(() =>
       Назад к курсам
     </NuxtLink>
     <div class="flex items-center gap-3 flex-wrap">
-      <h1 class="text-2xl font-semibold text-gray-900">{{ title }}</h1>
+      <InlineEdit
+        :value="title"
+        tag="h1"
+        display-class="text-2xl font-semibold text-gray-900"
+        input-class="text-2xl font-semibold text-gray-900"
+        :saving="savingTitle"
+        @save="emit('update:title', $event)"
+      />
       <!-- Visibility (is_published) — the state the publish button toggles. -->
       <span
         class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"

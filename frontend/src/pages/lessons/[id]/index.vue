@@ -22,6 +22,31 @@ const canDeleteComment = (_c: Comment): boolean => true
 const showSlideEditor = ref(false)
 const warningDismissed = ref(false)
 
+// ── Inline title editing ──────────────────────────────────────────────────────
+
+const savingTitle = ref(false)
+const titleError = ref('')
+
+const updateTitle = async (newTitle: string) => {
+  if (!lesson.value) return
+  const prev = lesson.value.title
+  lesson.value = { ...lesson.value, title: newTitle }
+  savingTitle.value = true
+  titleError.value = ''
+  try {
+    const updated = await apiFetch<{ title: string }>(`/lessons/${lessonId.value}`, {
+      method: 'PATCH',
+      body: { title: newTitle },
+    })
+    lesson.value = { ...lesson.value, title: updated.title }
+  } catch (e: any) {
+    lesson.value = { ...lesson.value, title: prev }
+    titleError.value = e?.data?.detail ?? 'Не удалось сохранить название'
+  } finally {
+    savingTitle.value = false
+  }
+}
+
 // Lesson-level publish flag (student visibility) — independent of the generation
 // `status` badge and of per-video publish. Mirrors the toggle in the course editor.
 const togglingPublish = ref(false)
@@ -416,6 +441,8 @@ watch(lessonId, (newId, oldId) => {
       :title="lesson.title"
       :status="lessonStatusForBadge"
       :is-published="lesson.is_published"
+      :saving-title="savingTitle"
+      @update:title="updateTitle"
     >
       <template #actions>
         <button
@@ -435,6 +462,8 @@ watch(lessonId, (newId, oldId) => {
         <span v-if="publishError" class="text-sm text-rose-600">{{ publishError }}</span>
       </template>
     </LessonHeader>
+
+    <p v-if="titleError" class="text-sm text-rose-600">{{ titleError }}</p>
 
     <div
       v-if="lesson.last_warning && !warningDismissed"

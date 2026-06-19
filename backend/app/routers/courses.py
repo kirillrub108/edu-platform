@@ -19,9 +19,11 @@ from app.schemas.course import (
     CourseDetail,
     CourseGroupedResponse,
     CourseOut,
+    CoursePartialUpdate,
     CourseUpdate,
     ModuleCreate,
     ModuleOut,
+    ModuleUpdate,
 )
 from app.services.storage_service import storage_service
 
@@ -181,6 +183,21 @@ async def update_course(
     return _course_out(course, str(user.id))
 
 
+@router.patch("/{course_id}", response_model=CourseOut)
+async def patch_course(
+    course_id: UUID,
+    data: CoursePartialUpdate,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    course = await _get_owned_course(course_id, user, db)
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(course, key, value)
+    await db.commit()
+    await db.refresh(course, attribute_names=["owner"])
+    return _course_out(course, str(user.id))
+
+
 @router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_course(
     course_id: UUID,
@@ -244,6 +261,22 @@ async def delete_module(
         raise HTTPException(status_code=404, detail="Module not found")
     await db.delete(module)
     await db.commit()
+
+
+@router.patch("/{course_id}/modules/{module_id}", response_model=ModuleOut)
+async def patch_module(
+    course_id: UUID,
+    module_id: UUID,
+    data: ModuleUpdate,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    module = await _get_owned_module(course_id, module_id, user, db)
+    for key, value in data.model_dump(exclude_unset=True).items():
+        setattr(module, key, value)
+    await db.commit()
+    await db.refresh(module, attribute_names=["lessons"])
+    return module
 
 
 @router.post("/{course_id}/modules/{module_id}/publish", response_model=ModuleOut)
