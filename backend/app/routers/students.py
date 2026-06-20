@@ -103,7 +103,7 @@ async def my_courses(
             1
             for module in course.modules
             for lesson in module.lessons
-            if visibility_service.lesson_visible_to_student(course, module, lesson)
+            if visibility_service.lesson_visible_to_student(module, lesson)
         )
         out = StudentCourseOut.model_validate(course)
         out.completed_lessons = sum(1 for p in enrollment.progress if p.is_completed)
@@ -201,9 +201,10 @@ async def get_lesson_for_student(
     if not enrollment:
         raise HTTPException(status_code=403, detail="Not enrolled")
 
-    # A draft anywhere in the chain hides the lesson — 404, never leak a draft.
-    course = await db.get(Course, module.course_id)
-    if not visibility_service.lesson_visible_to_student(course, module, lesson):
+    # An unpublished module/lesson hides the lesson — 404, never leak a draft.
+    # course.is_published is intentionally not checked here: an enrolled student
+    # keeps access after the course is unpublished (see visibility_service).
+    if not visibility_service.lesson_visible_to_student(module, lesson):
         raise HTTPException(status_code=404, detail="Lesson not found")
 
     out = LessonOut.model_validate(lesson)

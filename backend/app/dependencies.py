@@ -201,10 +201,12 @@ async def require_lesson_access(
             )
         )
         if enrolled is not None:
-            # Drafts anywhere in the chain are hidden — 404 (not 403) so we don't
-            # reveal that an unpublished lesson exists, matching the course flow.
+            # Unpublished module/lesson is hidden — 404 (not 403) so we don't
+            # reveal that a draft exists. course.is_published is intentionally not
+            # checked: an enrolled student keeps access after the course is
+            # unpublished (single source of truth: visibility_service).
             if not visibility_service.lesson_visible_to_student(
-                course, lesson.module, lesson
+                lesson.module, lesson
             ):
                 raise HTTPException(status_code=404, detail="Lesson not found")
             return user, lesson, False

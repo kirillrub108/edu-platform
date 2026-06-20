@@ -4,7 +4,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -13,6 +13,7 @@ from app.constants import ACCESS_CODE_ALPHABET, ACCESS_CODE_LENGTH, ACCESS_CODE_
 from app.database import get_db
 from app.dependencies import require_teacher
 from app.models.course import AccessMode, Course
+from app.models.enrollment import Enrollment
 from app.models.lesson import Module
 from app.models.user import User
 from app.schemas.course import (
@@ -174,6 +175,14 @@ async def get_course(
         raise HTTPException(status_code=404, detail="Course not found")
     if course.owner_id != user.id:
         raise HTTPException(status_code=403, detail="Not your course")
+    # Enrolled-student count drives the "unpublish keeps enrolled access" warning
+    # on the frontend; computed here (no column) the same way as lessons_count.
+    course.enrollment_count = (
+        await db.scalar(
+            select(func.count(Enrollment.id)).where(Enrollment.course_id == course.id)
+        )
+        or 0
+    )
     return _course_detail_out(course, str(user.id))
 
 

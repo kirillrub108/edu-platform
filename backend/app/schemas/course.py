@@ -74,6 +74,7 @@ class CourseOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     lessons_count: int = 0
+    enrollment_count: int = 0
     # Source column for the computed fields below; not serialized itself.
     deleted_at: datetime | None = Field(default=None, exclude=True)
 

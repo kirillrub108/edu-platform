@@ -95,6 +95,18 @@ const load = async () => {
 }
 
 const togglePublish = async () => {
+  // Unpublishing a course with enrolled students no longer revokes their access
+  // (it only closes the catalog/new-enroll gate) — warn before doing so. Same
+  // window.confirm pattern used for module/lesson deletion below.
+  const count = course.value?.enrollment_count ?? 0
+  if (course.value?.is_published && count > 0) {
+    const ok = window.confirm(
+      `${count} студентов записаны и сохранят доступ к урокам, которые у них есть. `
+      + 'Новые записаться не смогут, курс скроется из каталога. '
+      + 'Чтобы полностью скрыть материалы — снимите с публикации модули/уроки.',
+    )
+    if (!ok) return
+  }
   publishing.value = true
   actionError.value = ''
   try {

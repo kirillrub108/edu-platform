@@ -329,17 +329,20 @@
 Это **единственный источник истины** по видимости для студента:
 
 ```
-lesson_visible_to_student = course.is_published AND module.is_published AND lesson.is_published
+# доступ уже записанного студента:
+lesson_visible_to_student = module.is_published AND lesson.is_published
+# course.is_published гейтит ТОЛЬКО обнаружение в каталоге и новую запись (enroll / preview)
 ```
 
-- Учитель-владелец **обходит** правило и видит черновики; студент — только полностью опубликованную цепочку.
-- Скрытие — **read-time эффект AND**, а не каскад: снятие публикации родителя **НЕ сбрасывает** флаги детей. Снял курс с публикации → дети остаются `is_published=true` в БД, студент 404-ит из-за AND; опубликовал курс снова → урок сразу виден (флаги детей не трогались).
-- Черновик скрывается через **404, а не 403** (`dependencies.require_lesson_access`) — чтобы не раскрывать сам факт существования неопубликованного ресурса. 403 отдаётся только если студент не записан на курс.
+- Учитель-владелец **обходит** правило и видит черновики; записанный студент — только `module`/`lesson`-published цепочку, **независимо от `course.is_published`**.
+- **Расцепление «каталог/enroll» vs «доступ записанного»:** снял курс с публикации → курс ушёл из каталога и `enroll` отдаёт 404, **но записанные сохраняют доступ** к опубликованным модулям/урокам (в т.ч. пройденным). Спрятать материалы у всех = снять с публикации модуль/урок. Полное удаление — отдельный архив (`Course.deleted_at` → purge), не путать с unpublish.
+- Скрытие модуля/урока — **read-time эффект AND**, а не каскад: снятие публикации родителя **НЕ сбрасывает** флаги детей; опубликовал модуль снова → урок сразу виден.
+- Черновик модуля/урока скрывается через **404, а не 403** (`dependencies.require_lesson_access`) — чтобы не раскрывать сам факт существования неопубликованного ресурса. 403 — только если студент не записан на курс.
 - `visibility_service.visible_module_tree(course)` обрезает дерево модулей/уроков под студента, возвращая DTO (не мутируя ORM-коллекции).
 
 ### 7.3 Фронт
 
-На странице курса ([courses/[id].vue](../frontend/src/pages/courses/[id].vue)) — кнопки публикации на курсе/модуле/уроке; карточки курса показывают статус публикации, после действия `await load()` перезагружает данные с новыми флагами.
+На странице курса ([courses/[id].vue](../frontend/src/pages/courses/[id].vue)) — кнопки публикации на курсе/модуле/уроке; карточки курса показывают статус публикации, после действия `await load()` перезагружает данные с новыми флагами. Перед снятием курса с публикации при наличии записанных (`enrollment_count > 0` из `CourseDetail`) показывается `window.confirm`: записанные сохранят доступ, новые записаться не смогут, курс уйдёт из каталога.
 
 ---
 
@@ -367,9 +370,9 @@ lesson_visible_to_student = course.is_published AND module.is_published AND less
    - Возвращает список `CourseOut`.
 2. Студент кликает на карточку курса → `/student/courses/{id}` ([pages/student/courses/[id].vue](../frontend/src/pages/student/courses/[id].vue)).
 3. `GET /students/courses/{id}`:
-   - Проверяется наличие `Enrollment` → иначе 403.
+   - Проверяется наличие `Enrollment` → иначе 403 (на `course.is_published` НЕ завязан).
    - `select(Course).options(selectinload(Course.owner), selectinload(Course.modules).selectinload(Module.lessons))`.
-   - Возвращает `CourseDetail` с вложенными модулями и уроками.
+   - Возвращает `CourseDetail`, где `modules` обрезаны под видимость (`module.is_published AND lesson.is_published`) — завязки на `course.is_published` нет, поэтому доступ сохраняется и после снятия курса с публикации.
 4. UI: слева sidebar с модулями/уроками, справа — `LessonPlayer`.
 5. `LessonPlayer` ([components/LessonPlayer.vue](../frontend/src/components/LessonPlayer.vue)) для `content_type === 'video'` показывает `<video :src="lesson.video_url" controls>` (URL — полный, выдан бэкендом при генерации).
 

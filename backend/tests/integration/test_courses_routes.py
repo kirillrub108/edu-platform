@@ -14,9 +14,28 @@ from app.models.course import Course
 from app.models.lesson import Lesson, Module
 from app.models.user import User, UserRole
 from app.services.auth_service import create_access_token, hash_password
-from tests.factories import make_course, make_lesson, make_module
+from tests.factories import make_course, make_enrollment, make_lesson, make_module
 
 pytestmark = pytest.mark.integration
+
+
+async def test_get_course_returns_enrollment_count(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    """GET /courses/{id} exposes enrollment_count (drives the unpublish warning)."""
+    course = await make_course(db_session, owner=teacher_user, is_published=True)
+
+    empty = await client.get(f"/api/v1/courses/{course.id}", cookies=teacher_token)
+    assert empty.status_code == 200
+    assert empty.json()["enrollment_count"] == 0
+
+    await make_enrollment(db_session, student_user, course)
+    after = await client.get(f"/api/v1/courses/{course.id}", cookies=teacher_token)
+    assert after.json()["enrollment_count"] == 1
 
 
 async def test_teacher_can_create_course(

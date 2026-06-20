@@ -1,9 +1,11 @@
 """Module/lesson publish flags: effective student visibility + idempotency.
 
-Effective visibility = course.is_published AND module.is_published AND
-lesson.is_published. A draft anywhere in the chain hides the element from
-students (and direct-by-id access 404s), while owners keep seeing everything.
-The flags are independent — unpublishing a parent never clears a child's flag.
+Effective visibility for an enrolled student = module.is_published AND
+lesson.is_published. course.is_published gates discovery/new-enroll only — an
+already-enrolled student keeps access after the course is unpublished. A draft
+module/lesson still hides the element from students (and direct-by-id access
+404s), while owners keep seeing everything. The flags are independent —
+unpublishing a parent never clears a child's flag.
 """
 
 from __future__ import annotations
@@ -101,6 +103,86 @@ async def test_fully_published_chain_is_visible_to_student(
         f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
     )
     assert direct.status_code == 200
+
+
+async def test_unpublished_course_keeps_enrolled_student_access(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_user: User,
+    student_token: dict[str, str],
+) -> None:
+    """Decoupling: course.is_published no longer gates enrolled-student access.
+
+    Module + lesson are published, the course is NOT — an already-enrolled
+    student still sees the lesson in the tree and can open it directly.
+    """
+    course = await make_course(db_session, owner=teacher_user, is_published=False)
+    module = await make_module(db_session, course, is_published=True)
+    lesson = await make_lesson(db_session, module, is_published=True)
+    await make_enrollment(db_session, student_user, course)
+
+    detail = await client.get(
+        f"/api/v1/students/courses/{course.id}", cookies=student_token
+    )
+    assert detail.status_code == 200
+    modules = detail.json()["modules"]
+    assert [l["id"] for l in modules[0]["lessons"]] == [str(lesson.id)]
+
+    direct = await client.get(
+        f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
+    )
+    assert direct.status_code == 200
+
+
+async def test_unpublished_course_with_draft_module_still_hidden(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_user: User,
+    student_token: dict[str, str],
+) -> None:
+    """Content gate survives: an unpublished module hides the lesson even from an
+    enrolled student, regardless of course.is_published (a deliberate teacher act)."""
+    course = await make_course(db_session, owner=teacher_user, is_published=False)
+    module = await make_module(db_session, course, is_published=False)
+    lesson = await make_lesson(db_session, module, is_published=True)
+    await make_enrollment(db_session, student_user, course)
+
+    detail = await client.get(
+        f"/api/v1/students/courses/{course.id}", cookies=student_token
+    )
+    assert detail.status_code == 200
+    assert detail.json()["modules"] == []
+
+    direct = await client.get(
+        f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
+    )
+    assert direct.status_code == 404
+
+
+async def test_non_enrolled_student_still_forbidden(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_user: User,
+    student_token: dict[str, str],
+) -> None:
+    """Enrollment check is unchanged: a non-enrolled student gets 403, even on a
+    fully published chain."""
+    course = await make_course(db_session, owner=teacher_user, is_published=True)
+    module = await make_module(db_session, course, is_published=True)
+    lesson = await make_lesson(db_session, module, is_published=True)
+
+    detail = await client.get(
+        f"/api/v1/students/courses/{course.id}", cookies=student_token
+    )
+    assert detail.status_code == 403
+
+    direct = await client.get(
+        f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
+    )
+    assert direct.status_code == 403
 
 
 async def test_owner_sees_drafts_with_flags(
