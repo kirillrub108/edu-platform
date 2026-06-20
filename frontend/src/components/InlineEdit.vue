@@ -16,7 +16,6 @@ const emit = defineEmits<{
 const editing = ref(false)
 const draft = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
-let debounceTimer: ReturnType<typeof setTimeout> | null = null
 
 const startEdit = () => {
   draft.value = props.value
@@ -24,11 +23,22 @@ const startEdit = () => {
   nextTick(() => inputRef.value?.select())
 }
 
-const commit = () => {
-  if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null }
+// Save without leaving the input (Enter). Cursor stays in place.
+const saveInPlace = () => {
   const trimmed = draft.value.trim()
   if (!trimmed) {
-    // empty — restore original and cancel
+    draft.value = props.value
+    return
+  }
+  if (trimmed !== props.value) {
+    emit('save', trimmed)
+  }
+}
+
+// Save and close (blur / Tab).
+const commitAndClose = () => {
+  const trimmed = draft.value.trim()
+  if (!trimmed) {
     draft.value = props.value
     editing.value = false
     emit('cancel')
@@ -41,30 +51,24 @@ const commit = () => {
 }
 
 const cancel = () => {
-  if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null }
   draft.value = props.value
   editing.value = false
   emit('cancel')
 }
 
-const onInput = () => {
-  if (debounceTimer) clearTimeout(debounceTimer)
-  const trimmed = draft.value.trim()
-  if (trimmed && trimmed !== props.value) {
-    debounceTimer = setTimeout(commit, 800)
-  }
-}
-
 const onKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Enter' || e.key === 'Tab') {
+  if (e.key === 'Enter') {
     e.preventDefault()
-    commit()
+    saveInPlace()
+  } else if (e.key === 'Tab') {
+    e.preventDefault()
+    commitAndClose()
   } else if (e.key === 'Escape') {
     cancel()
   }
 }
 
-const onBlur = () => commit()
+const onBlur = () => commitAndClose()
 </script>
 
 <template>
@@ -74,7 +78,6 @@ const onBlur = () => commit()
       ref="inputRef"
       v-model="draft"
       :class="['bg-transparent border-b border-current outline-none w-full min-w-24', inputClass]"
-      @input="onInput"
       @keydown="onKeydown"
       @blur="onBlur"
     />
