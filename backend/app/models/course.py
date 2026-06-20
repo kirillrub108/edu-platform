@@ -27,6 +27,7 @@ class Course(Base):
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     cover_url = Column(String(512), nullable=True)
+    cover_image_path = Column(String(512), nullable=True)
     owner_id = Column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )  # noqa: E501

@@ -1,8 +1,9 @@
 import secrets
 from datetime import datetime, timezone
+from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,15 +31,27 @@ from app.services.storage_service import storage_service
 router = APIRouter(prefix="/api/v1/courses", tags=["courses"])
 
 
+_COVER_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".gif"}
+_MAX_COVER_BYTES = 5 * 1024 * 1024
+
+
 def _course_out(course: Course, user_id: str) -> CourseOut:
     out = CourseOut.model_validate(course)
     out.cover_url = storage_service.resign_url(out.cover_url, user_id)
+    if course.cover_image_path:
+        out.cover_image_url = storage_service.get_url(course.cover_image_path, user_id)
+    elif out.cover_url:
+        out.cover_image_url = out.cover_url  # already re-signed above
     return out
 
 
 def _course_detail_out(course: Course, user_id: str) -> CourseDetail:
     out = CourseDetail.model_validate(course)
     out.cover_url = storage_service.resign_url(out.cover_url, user_id)
+    if course.cover_image_path:
+        out.cover_image_url = storage_service.get_url(course.cover_image_path, user_id)
+    elif out.cover_url:
+        out.cover_image_url = out.cover_url  # already re-signed above
     return out
 
 
@@ -350,6 +363,28 @@ async def delete_access_code(
     course = await _get_owned_course(course_id, user, db)
     course.access_code = None
     course.access_mode = AccessMode.link
+    await db.commit()
+    await db.refresh(course, attribute_names=["owner"])
+    return _course_out(course, str(user.id))
+
+
+@router.post("/{course_id}/cover", response_model=CourseOut)
+async def upload_course_cover(
+    course_id: UUID,
+    file: UploadFile,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in _COVER_EXTS:
+        raise HTTPException(status_code=400, detail="Допустимые форматы: .jpg .jpeg .png .webp .gif")  # noqa: E501
+    content = await file.read()
+    if len(content) > _MAX_COVER_BYTES:
+        raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 5 МБ)")
+    await file.seek(0)
+
+    course = await _get_owned_course(course_id, user, db)
+    course.cover_image_path = await storage_service.save_upload(file, "covers")
     await db.commit()
     await db.refresh(course, attribute_names=["owner"])
     return _course_out(course, str(user.id))

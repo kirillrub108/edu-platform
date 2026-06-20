@@ -107,6 +107,10 @@ async def my_courses(
         )
         out = StudentCourseOut.model_validate(course)
         out.completed_lessons = sum(1 for p in enrollment.progress if p.is_completed)
+        if course.cover_image_path:
+            out.cover_image_url = storage_service.get_url(course.cover_image_path, str(user.id))
+        elif course.cover_url:
+            out.cover_image_url = storage_service.resign_url(course.cover_url, str(user.id))
         result.append(out)
     return result
 

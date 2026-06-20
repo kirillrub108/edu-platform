@@ -154,7 +154,15 @@ onMounted(() => {
           :to="`/student/courses/${c.id}`"
           class="group bg-white rounded-2xl border border-gray-100 overflow-hidden hover:border-violet-200 hover:shadow-sm transition-all duration-150"
         >
-          <div :class="['h-16 bg-gradient-to-br', courseGradient(c.gradient_idx)]" />
+          <div class="h-28 overflow-hidden">
+            <img
+              v-if="c.cover_image_url"
+              :src="c.cover_image_url"
+              :alt="c.title"
+              class="w-full h-full object-cover"
+            />
+            <div v-else :class="['h-full bg-gradient-to-br', courseGradient(c.gradient_idx)]" />
+          </div>
           <div class="p-5">
             <div class="font-semibold text-gray-900 group-hover:text-violet-700 transition line-clamp-1">
               {{ c.title }}

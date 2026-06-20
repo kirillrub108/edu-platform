@@ -66,6 +66,7 @@ class CourseOut(BaseModel):
     title: str
     description: str | None
     cover_url: str | None
+    cover_image_url: str | None = None
     access_mode: AccessMode
     access_code: str | None
     is_published: bool
