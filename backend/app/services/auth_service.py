@@ -40,7 +40,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.constants import EMAIL_VERIFICATION_TTL_SECONDS
+from app.constants import CONSENT_POLICY_VERSION, EMAIL_VERIFICATION_TTL_SECONDS
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.redis_client import get_redis
@@ -192,16 +192,26 @@ class AuthService:
         password: str,
         full_name: str | None,
         role: UserRole = UserRole.teacher,
+        *,
+        accepted_marketing: bool = False,
+        consent_ip: str | None = None,
     ) -> User:
         existing = await self.db.scalar(select(User).where(User.email == email))
         if existing:
             raise HTTPException(status_code=409, detail="Email already registered")
 
+        now = datetime.now(timezone.utc)
         user = User(
             email=email,
             hashed_password=hash_password(password),
             full_name=full_name,
             role=role,
+            pdn_consent_at=now,
+            terms_accepted_at=now,
+            marketing_consent=accepted_marketing,
+            marketing_consent_at=now if accepted_marketing else None,
+            consent_policy_version=CONSENT_POLICY_VERSION,
+            consent_ip=consent_ip,
         )
         self.db.add(user)
         await self.db.commit()

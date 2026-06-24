@@ -7,12 +7,20 @@ from typing import Any
 
 import pytest
 from httpx import AsyncClient
+from sqlalchemy import select
+
+from app.constants import CONSENT_POLICY_VERSION
+from app.models.user import User
 
 pytestmark = pytest.mark.integration
 
 
 def _email() -> str:
     return f"user-{uuid.uuid4().hex[:10]}@example.com"
+
+
+# The two mandatory registration consents, spread into every register payload.
+_CONSENTS = {"accepted_privacy": True, "accepted_terms": True}
 
 
 async def test_register_returns_user_payload(client: AsyncClient) -> None:
@@ -23,6 +31,7 @@ async def test_register_returns_user_payload(client: AsyncClient) -> None:
             "password": "password123",
             "full_name": "Alice",
             "role": "teacher",
+            **_CONSENTS,
         },
     )
     assert resp.status_code == 201
@@ -32,9 +41,82 @@ async def test_register_returns_user_payload(client: AsyncClient) -> None:
     assert "id" in body
 
 
+async def test_register_without_consents_is_rejected_and_creates_no_user(
+    client: AsyncClient, db_session: Any
+) -> None:
+    email = _email()
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={"email": email, "password": "password123", "role": "teacher"},
+    )
+    assert resp.status_code == 422
+    assert await db_session.scalar(select(User).where(User.email == email)) is None
+
+
+async def test_register_missing_one_required_consent_is_rejected(client: AsyncClient) -> None:
+    # Privacy accepted but terms omitted — still a 422.
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": _email(),
+            "password": "password123",
+            "role": "teacher",
+            "accepted_privacy": True,
+        },
+    )
+    assert resp.status_code == 422
+
+
+async def test_register_records_consents_with_marketing(
+    client: AsyncClient, db_session: Any
+) -> None:
+    email = _email()
+    resp = await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "password123",
+            "role": "teacher",
+            "accepted_privacy": True,
+            "accepted_terms": True,
+            "accepted_marketing": True,
+        },
+        headers={"X-Forwarded-For": "203.0.113.7"},
+    )
+    assert resp.status_code == 201
+
+    user = await db_session.scalar(select(User).where(User.email == email))
+    assert user is not None
+    assert user.pdn_consent_at is not None
+    assert user.terms_accepted_at is not None
+    assert user.consent_policy_version == CONSENT_POLICY_VERSION
+    assert user.consent_ip == "203.0.113.7"
+    assert user.marketing_consent is True
+    assert user.marketing_consent_at is not None
+
+
+async def test_register_without_marketing_leaves_marketing_unset(
+    client: AsyncClient, db_session: Any
+) -> None:
+    email = _email()
+    await client.post(
+        "/api/v1/auth/register",
+        json={
+            "email": email,
+            "password": "password123",
+            "role": "teacher",
+            "accepted_privacy": True,
+            "accepted_terms": True,
+        },
+    )
+    user = await db_session.scalar(select(User).where(User.email == email))
+    assert user.marketing_consent is False
+    assert user.marketing_consent_at is None
+
+
 async def test_register_duplicate_email_returns_409(client: AsyncClient) -> None:
     email = _email()
-    payload = {"email": email, "password": "password123", "role": "teacher"}
+    payload = {"email": email, "password": "password123", "role": "teacher", **_CONSENTS}
     first = await client.post("/api/v1/auth/register", json=payload)
     assert first.status_code == 201
 
@@ -47,7 +129,7 @@ async def test_login_sets_auth_cookies(client: AsyncClient) -> None:
     email = _email()
     await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "password123", "role": "teacher"},
+        json={"email": email, "password": "password123", "role": "teacher", **_CONSENTS},
     )
     resp = await client.post(
         "/api/v1/auth/login",
@@ -65,7 +147,7 @@ async def test_login_with_wrong_password_returns_401(client: AsyncClient) -> Non
     email = _email()
     await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "password123", "role": "teacher"},
+        json={"email": email, "password": "password123", "role": "teacher", **_CONSENTS},
     )
     resp = await client.post(
         "/api/v1/auth/login",
@@ -79,7 +161,7 @@ async def test_refresh_rotates_cookies(client: AsyncClient) -> None:
     email = _email()
     await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "password123", "role": "teacher"},
+        json={"email": email, "password": "password123", "role": "teacher", **_CONSENTS},
     )
     await client.post(
         "/api/v1/auth/login",
@@ -103,7 +185,7 @@ async def test_refresh_rejects_access_token_as_refresh_cookie(
     email = _email()
     await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "password123", "role": "teacher"},
+        json={"email": email, "password": "password123", "role": "teacher", **_CONSENTS},
     )
     login_resp = await client.post(
         "/api/v1/auth/login",
@@ -132,7 +214,7 @@ async def test_logout_clears_auth_cookies(client: AsyncClient) -> None:
     email = _email()
     await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "password123", "role": "teacher"},
+        json={"email": email, "password": "password123", "role": "teacher", **_CONSENTS},
     )
     await client.post(
         "/api/v1/auth/login",
@@ -160,7 +242,7 @@ async def test_logout_revokes_refresh_family(client: AsyncClient) -> None:
     email = _email()
     await client.post(
         "/api/v1/auth/register",
-        json={"email": email, "password": "password123", "role": "teacher"},
+        json={"email": email, "password": "password123", "role": "teacher", **_CONSENTS},
     )
     await client.post(
         "/api/v1/auth/login",

@@ -43,6 +43,15 @@ class User(Base):
     # Soft delete: non-null = hidden everywhere (see app/database.py global filter)
     # and slated for physical purge after SOFT_DELETE_PURGE_DAYS.
     deleted_at = Column(DateTime(timezone=True), nullable=True, default=None, index=True)
+    # Registration consents. All set on the server at sign-up (see AuthService.
+    # register); IP comes from the request, never the body. Nullable because
+    # pre-existing users have no recorded consent.
+    pdn_consent_at = Column(DateTime(timezone=True), nullable=True)
+    terms_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    marketing_consent = Column(Boolean, server_default="false", nullable=False, default=False)
+    marketing_consent_at = Column(DateTime(timezone=True), nullable=True)
+    consent_policy_version = Column(String(32), nullable=True)
+    consent_ip = Column(String(45), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

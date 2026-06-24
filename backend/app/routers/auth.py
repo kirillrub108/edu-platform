@@ -26,6 +26,7 @@ from app.schemas.auth import (
     VerifyEmailRequest,
 )
 from app.services import email_token_service, password_reset_service
+from app.services.webhook_security import resolve_client_ip
 from app.services.auth_service import (
     AuthService,
     decode_token,
@@ -119,6 +120,8 @@ async def register(
         password=data.password,
         full_name=data.full_name,
         role=data.role,
+        accepted_marketing=data.accepted_marketing,
+        consent_ip=resolve_client_ip(request),
     )
     _enqueue_verification_email(user)
     return user

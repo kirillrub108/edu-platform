@@ -54,7 +54,13 @@ async def test_register_creates_unverified_user_and_enqueues_email(
 ) -> None:
     resp = await client.post(
         "/api/v1/auth/register",
-        json={"email": _email(), "password": "password123", "role": "teacher"},
+        json={
+            "email": _email(),
+            "password": "password123",
+            "role": "teacher",
+            "accepted_privacy": True,
+            "accepted_terms": True,
+        },
     )
     assert resp.status_code == 201
     assert resp.json()["email_verified"] is False

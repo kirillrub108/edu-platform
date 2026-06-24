@@ -6,14 +6,26 @@ const email = ref('')
 const password = ref('')
 const fullName = ref('')
 const role = ref<'teacher' | 'student'>('teacher')
+const acceptedPrivacy = ref(false)
+const acceptedTerms = ref(false)
+const acceptedMarketing = ref(false)
 const error = ref<string | null>(null)
 const loading = ref(false)
 
+// Both mandatory consents must be ticked before the form may be submitted;
+// the marketing opt-in is optional and never gates submission.
+const consentsGiven = computed(() => acceptedPrivacy.value && acceptedTerms.value)
+
 const submit = async () => {
+  if (!consentsGiven.value) return
   error.value = null
   loading.value = true
   try {
-    await auth.register(email.value, password.value, role.value, fullName.value || undefined)
+    await auth.register(email.value, password.value, role.value, fullName.value || undefined, {
+      accepted_privacy: acceptedPrivacy.value,
+      accepted_terms: acceptedTerms.value,
+      accepted_marketing: acceptedMarketing.value,
+    })
     await navigateTo(role.value === 'teacher' ? '/dashboard' : '/student/dashboard')
   } catch (e: any) {
     error.value = e?.data?.detail ?? 'Ошибка регистрации'
@@ -79,6 +91,47 @@ onMounted(restoreScroll)
             hint="Минимум 8 символов"
           />
 
+          <div class="space-y-2.5 pt-1">
+            <label class="flex items-start gap-2.5 text-xs leading-relaxed text-gray-600">
+              <input
+                v-model="acceptedPrivacy"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500/30"
+              />
+              <span>
+                Я даю согласие на обработку персональных данных в соответствии с
+                <NuxtLink
+                  to="/legal/privacy"
+                  target="_blank"
+                  class="font-medium text-violet-700 hover:underline"
+                >Политикой обработки персональных данных</NuxtLink>
+              </span>
+            </label>
+            <label class="flex items-start gap-2.5 text-xs leading-relaxed text-gray-600">
+              <input
+                v-model="acceptedTerms"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500/30"
+              />
+              <span>
+                Я принимаю условия
+                <NuxtLink
+                  to="/legal/terms"
+                  target="_blank"
+                  class="font-medium text-violet-700 hover:underline"
+                >Пользовательского соглашения</NuxtLink>
+              </span>
+            </label>
+            <label class="flex items-start gap-2.5 text-xs leading-relaxed text-gray-600">
+              <input
+                v-model="acceptedMarketing"
+                type="checkbox"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500/30"
+              />
+              <span>Согласен(на) получать новостные и рекламные рассылки</span>
+            </label>
+          </div>
+
           <p
             v-if="error"
             class="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
@@ -87,9 +140,20 @@ onMounted(restoreScroll)
             <span>{{ error }}</span>
           </p>
 
-          <UiButton type="submit" variant="primary" size="lg" block :loading="loading">
+          <UiButton
+            type="submit"
+            variant="primary"
+            size="lg"
+            block
+            :loading="loading"
+            :disabled="!consentsGiven"
+          >
             {{ loading ? 'Создание…' : 'Зарегистрироваться' }}
           </UiButton>
+
+          <p v-if="!consentsGiven" class="text-center text-xs text-gray-400">
+            Отметьте оба обязательных согласия, чтобы продолжить
+          </p>
         </form>
       </div>
 

@@ -49,11 +49,16 @@ export const useAuthStore = defineStore('auth', () => {
     email: string,
     password: string,
     role: 'teacher' | 'student',
-    full_name?: string,
+    full_name: string | undefined,
+    consents: {
+      accepted_privacy: boolean
+      accepted_terms: boolean
+      accepted_marketing: boolean
+    },
   ) => {
     await apiFetch<UserOut>('/auth/register', {
       method: 'POST',
-      body: { email, password, role, full_name },
+      body: { email, password, role, full_name, ...consents },
     })
     await login(email, password, true)
   }
