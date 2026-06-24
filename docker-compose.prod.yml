@@ -360,6 +360,8 @@ services:
     # origin behind nginx); override only if the API ever moves off-domain.
     environment:
       NUXT_PUBLIC_API_BASE: ${NUXT_PUBLIC_API_BASE:-/api/v1}
+      # Yandex.Metrika counter id — set in .env.prod (NUXT_PUBLIC_METRIKA_ID=...).
+      NUXT_PUBLIC_METRIKA_ID: ${NUXT_PUBLIC_METRIKA_ID:-}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
       interval: 30s

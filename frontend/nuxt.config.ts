@@ -13,6 +13,9 @@ export default defineNuxtConfig({
       // are same-origin in development. Override via NUXT_PUBLIC_API_BASE in
       // production (e.g. http://backend:8000/api/v1 behind an nginx proxy).
       apiBase: '/api/v1',
+      // Yandex.Metrika counter id. Empty → tracking is fully disabled (dev/test).
+      // Set the real id only in prod via NUXT_PUBLIC_METRIKA_ID — never commit it.
+      metrikaId: '',
     },
   },
   nitro: {

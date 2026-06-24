@@ -293,6 +293,8 @@ services:
     environment:
       - CHOKIDAR_USEPOLLING=true
       - NUXT_PUBLIC_API_BASE=http://localhost:8000/api/v1
+      # Empty in dev → Yandex.Metrika is fully disabled. Set the counter id only in prod.
+      - NUXT_PUBLIC_METRIKA_ID=${NUXT_PUBLIC_METRIKA_ID:-}
     depends_on:
       - backend
     networks:
