@@ -6,13 +6,7 @@
       <div class="foot">
         <div class="brandcol">
           <NuxtLink class="brand" to="/">
-            <span class="mark">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-                <path d="M12 3 2 8l10 5 8-4v6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                <path d="M6 11v4c0 1.2 2.7 3 6 3s6-1.8 6-3v-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </span>
-            Edllm
+            <AppLogo />
           </NuxtLink>
           <p class="desc">
             Превращаем презентации в озвученные видеолекции автоматически — ИИ-анализ слайдов и нейросетевая озвучка.
