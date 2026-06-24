@@ -109,6 +109,10 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
     import app.tasks.vision_pipeline as _vis_mod
     _vis_mod.SyncSession = _vp_mod.SyncSession
 
+    # payment_pipeline also imports SyncSession by name from video_pipeline.
+    import app.tasks.payment_pipeline as _pay_mod
+    _pay_mod.SyncSession = _vp_mod.SyncSession
+
     # 2a) usage_service builds its private sync engine lazily on first record;
     # drop anything cached so it re-reads the rebound settings/URL.
     import app.services.usage_service as _usage_mod

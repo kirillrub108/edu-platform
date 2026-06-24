@@ -47,6 +47,14 @@ class Payment(Base):
     # Our Idempotence-Key sent to YooKassa on create — retrying the create call
     # with the same key can never produce a second charge.
     idempotence_key = Column(String(64), nullable=False)
+    # Audit timestamps set during settlement (apply_purchase / the webhook task).
+    # refunded_at records a refund.succeeded event; spent credits are NOT clawed
+    # back automatically (see docs/DECISIONS.md).
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+    refunded_at = Column(DateTime(timezone=True), nullable=True)
+    # Set by the reconcile sweep when a payment is flagged as stuck-in-pending,
+    # so the alert fires exactly once per payment (no spam across sweeps).
+    alerted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

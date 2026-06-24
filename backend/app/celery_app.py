@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+from datetime import timedelta
 
 import sentry_sdk
 import structlog
@@ -12,6 +13,7 @@ from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
 from app.config import settings
+from app.constants import RECONCILE_INTERVAL_MINUTES
 from app.logging_config import configure_logging
 
 configure_logging(settings.ENVIRONMENT)
@@ -62,6 +64,7 @@ celery_app = Celery(
         "app.tasks.quiz_pipeline",
         "app.tasks.purge_pipeline",
         "app.tasks.email_pipeline",
+        "app.tasks.payment_pipeline",
     ],
 )
 
@@ -116,6 +119,14 @@ celery_app.conf.update(
         "purge-soft-deleted-daily": {
             "task": "purge_soft_deleted",
             "schedule": crontab(hour=3, minute=0),
+            "options": {"queue": "quiz"},
+        },
+        # Backstop for YooKassa payments stuck in `pending` (webhook 200'd but the
+        # settle task never ran and the user never polled). Same beat as purge,
+        # routed to celery_quiz. See tasks/payment_pipeline.reconcile_pending_payments.
+        "reconcile-pending-payments": {
+            "task": "reconcile_pending_payments",
+            "schedule": timedelta(minutes=RECONCILE_INTERVAL_MINUTES),
             "options": {"queue": "quiz"},
         },
     },

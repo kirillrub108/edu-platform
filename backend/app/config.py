@@ -121,6 +121,10 @@ class Settings(BaseSettings):
     # Billing admin — shared secret for /api/v1/billing/admin/* endpoints,
     # checked against the X-Admin-Token header. Empty disables admin access.
     ADMIN_API_TOKEN: str = ""
+    # Recipient for operational alerts (e.g. a payment stuck in pending). Empty
+    # → no email is sent even if PAYMENT_STUCK_ALERT_EMAIL is on; the structured
+    # ERROR log still fires.
+    ALERT_ADMIN_EMAIL: str = ""
 
     # YooKassa — one-time credit-package payments. Empty SHOP_ID/SECRET_KEY
     # disables payment creation (POST /billing/payments returns 503). The
@@ -136,6 +140,10 @@ class Settings(BaseSettings):
     # (customer email + one "Пакет N кредитов" item with this vat_code).
     YOOKASSA_SEND_RECEIPT: bool = False
     YOOKASSA_VAT_CODE: int = 1
+    # Webhook source-IP allowlist check (services/webhook_security). Keep True in
+    # any internet-facing deployment; only disable where an upstream WAF / nginx
+    # already restricts the webhook path to YooKassa ranges.
+    YOOKASSA_VERIFY_WEBHOOK_IP: bool = True
 
     # Storage
     STORAGE_PATH: str = "/app/storage"

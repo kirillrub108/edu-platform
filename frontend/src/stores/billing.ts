@@ -31,6 +31,7 @@ export interface PlanConfig {
 }
 
 export interface CreditPackage {
+  title?: string
   credits: number
   price_rub: number
 }

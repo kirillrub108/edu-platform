@@ -47,7 +47,9 @@ class VideoPricingOut(BaseModel):
 class PlansOut(BaseModel):
     weights: dict[str, int]
     plans: dict[str, dict[str, int]]
-    packages: dict[str, dict[str, int]]
+    # Package values are mixed (title/payment_subject/payment_mode are str,
+    # credits/price_rub/vat_code are int) — see constants.CREDIT_PACKAGES.
+    packages: dict[str, dict[str, str | int]]
     video_pricing: VideoPricingOut
 
 

@@ -950,6 +950,40 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## 39. Хардненинг ЮKassa-вебхука: IP-allowlist + асинхронное начисление в Celery
+
+**Контекст.** Базовая интеграция ЮKassa уже была (модель `Payment`, `yookassa_service`, роуты создания/поллинга/вебхука, идемпотентный `apply_purchase`). Вебхук, однако, начислял кредиты **inline** прямо в запросе (re-fetch + `apply_purchase`), не проверял источник и не сверял сумму.
+
+**Решение:**
+- **IP-allowlist (defence-in-depth).** `services/webhook_security.py`: реальный IP берётся из `X-Forwarded-For` **только** если непосредственный TCP-пир — доверенный прокси (`YOOKASSA_TRUSTED_PROXIES`: loopback/docker/nginx), иначе из `request.client`. IP сверяется с `YOOKASSA_TRUSTED_CIDRS` (переопределяемый fallback; источник истины — доки/SDK ЮKassa). Недоверенный IP → 400. Тумблер `YOOKASSA_VERIFY_WEBHOOK_IP`. Тело уведомления по-прежнему не считается достоверным — платёж перезапрашивается.
+- **Начисление вынесено в синхронный Celery-таск** `process_yookassa_payment` (очередь `quiz`, приоритет `PAYMENT_TASK_PRIORITY=0`). Вебхук только валидирует IP, парсит событие и **сразу отдаёт 200** (останавливает 24-часовые ретраи). Таск: sync-клиент `get_payment_sync` (re-fetch) → `SELECT … FOR UPDATE` на sync-сессии → валидация → `sync_apply_purchase`. Граница async/sync соблюдена (в `app/tasks/*` только sync).
+- **Анти-фрод сверка.** `payment_matches`: кредиты начисляются только если `status==succeeded ∧ paid ∧ currency==RUB ∧ amount == цене пакета`. Применяется и в таске, и в async-поллинге.
+- **Гонка «вебхук раньше коммита `yookassa_payment_id`».** Таск находит локальный платёж по `metadata.payment_id` (наше значение, возвращённое авторитетным GET) → не зависит от того, успел ли закоммититься `yookassa_payment_id`. Фолбэк-поиск по `yookassa_payment_id`.
+- **`require_verified_email`** на `POST /payments`; `metadata.user_id`; per-package `vat_code/payment_subject/payment_mode` в `CREDIT_PACKAGES`.
+
+**Edge case — возврат (`refund.succeeded`).** Фиксируем факт: `Payment.refunded_at` проставляется один раз (`sync_mark_payment_refunded`). **Уже потраченные кредиты автоматически НЕ списываются** — это ручное/финансовое решение (баланс может уйти в минус, нужна политика). Отложено: автосписание/блокировка при возврате, сохранение карты и автоплатежи (v2).
+
+**Trade-offs:**
+- + Вебхук отвечает мгновенно и не висит на сетевом round-trip к ЮKassa; источник IP не подделать; сумма сверяется до начисления.
+- − Две точки начисления (sync-таск для вебхука + async-инлайн для поллинга/локалки), обе идемпотентны через `Payment.status` под блокировкой.
+- − IP-allowlist — статический fallback; при смене диапазонов ЮKassa нужно обновить `constants.py` (или включить SDK `SecurityHelper`).
+
+---
+
+## 40. Reconcile «зависших» платежей + единый путь расчёта
+
+**Контекст.** Поскольку вебхук отвечает 200 сразу (§39), ЮKassa больше НЕ редоставляет уведомление. Появился тихий разрыв: вебхук вернул 200, но таск не поставился в очередь (Redis моргнул), а пользователь закрыл return-страницу → платёж навсегда висит в `pending`.
+
+**Решение:**
+- **Единый путь расчёта.** Денежная логика вынесена в `tasks/payment_pipeline._settle_payment(db, yk, event)` (locate FOR UPDATE → `payment_matches` → `sync_apply_purchase`/cancel/refund). Её РЕЮЗят и вебхук-таск `process_yookassa_payment`, и reconcile — копии нет.
+- **Периодический backstop.** Синхронный beat-таск `reconcile_pending_payments` (в celery_quiz, очередь `quiz`, интервал `RECONCILE_INTERVAL_MINUTES`): выбирает `pending`-платежи в окне `[RECONCILE_MIN_AGE_MINUTES, RECONCILE_MAX_AGE_HOURS]`, делает авторитетный `get_payment_sync` и прогоняет через `_settle_payment`. Идемпотентность наследуется от guard'а по терминальному статусу под блокировкой — вебхук + reconcile никогда не зачислят дважды.
+- **Алёрт «совсем зависших».** Платёж в `pending` дольше `PAYMENT_STUCK_ALERT_MINUTES` → структурированный лог ERROR (→ Sentry) и опциональное письмо админу (`PAYMENT_STUCK_ALERT_EMAIL` + `ALERT_ADMIN_EMAIL`), ровно один раз через `Payment.alerted_at` (`skip_locked`, без спама).
+- **След для reconnect не добавлялся в вебхук:** durable-трейс зависшего платежа — это сама строка `Payment(status=pending)`, созданная на `create_payment` ДО любого вебхука; enqueue и так идёт строго после успешного парса. Отдельная таблица событий не нужна.
+
+**Trade-offs:** + закрыт единственный путь к навсегда-зависшему оплаченному платежу; − лишний beat-таск и сетевые GET'ы раз в интервал (батч ограничен, окно по возрасту отсекает мёртвые). Порог reconcile 10 мин (дать вебхуку/поллингу успеть), потолок 72 ч (не дёргать мёртвые), алёрт 60 мин.
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.

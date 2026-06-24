@@ -227,11 +227,21 @@ PLAN_CONFIGS: dict[str, dict[str, int]] = {
 
 # One-time credit packages purchasable via YooKassa. Keys are package_key in
 # POST /api/v1/billing/payments and Payment.package_key.
-CREDIT_PACKAGES: dict[str, dict[str, int]] = {
-    "pack_50":   {"credits": 50,   "price_rub": 190},
-    "pack_200":  {"credits": 200,  "price_rub": 590},
-    "pack_500":  {"credits": 500,  "price_rub": 1290},
-    "pack_1200": {"credits": 1200, "price_rub": 2690},
+#
+# Each package also carries its 54-ФЗ receipt attributes, used only when
+# YOOKASSA_SEND_RECEIPT is on (services/yookassa_service._receipt):
+#   vat_code        — НДС-код из «Справочника значений» ЮKassa для 54-ФЗ
+#       (https://yookassa.ru/developers/payment-acceptance/receipts/54fz/parameters-values#vat-codes).
+#       ВНИМАНИЕ: с 2026-01-01 базовая ставка НДС — 22%; конкретные коды для
+#       пакетов обязательно согласовать с бухгалтером. Здесь значение-заглушка
+#       (1 = «НДС не облагается»).
+#   payment_subject — предмет расчёта (service = услуга)
+#   payment_mode    — признак способа расчёта (full_payment = полный расчёт)
+CREDIT_PACKAGES: dict[str, dict[str, str | int]] = {
+    "pack_50":   {"title": "50 кредитов",   "credits": 50,   "price_rub": 190,  "vat_code": 1, "payment_subject": "service", "payment_mode": "full_payment"},  # noqa: E501
+    "pack_200":  {"title": "200 кредитов",  "credits": 200,  "price_rub": 590,  "vat_code": 1, "payment_subject": "service", "payment_mode": "full_payment"},  # noqa: E501
+    "pack_500":  {"title": "500 кредитов",  "credits": 500,  "price_rub": 1290, "vat_code": 1, "payment_subject": "service", "payment_mode": "full_payment"},  # noqa: E501
+    "pack_1200": {"title": "1200 кредитов", "credits": 1200, "price_rub": 2690, "vat_code": 1, "payment_subject": "service", "payment_mode": "full_payment"},  # noqa: E501
 }
 
 CREDIT_CARRYOVER_RATIO: float = 0.5  # до 50% месячного объёма переносится на след. месяц
@@ -244,6 +254,67 @@ YOOKASSA_CONNECT_TIMEOUT: float = 5.0
 YOOKASSA_READ_TIMEOUT: float = 20.0
 YOOKASSA_MAX_RETRIES: int = 2
 YOOKASSA_RETRY_BACKOFF: float = 0.5  # base seconds
+
+# Webhook hardening (routers/billing.yookassa_webhook + services/webhook_security).
+# The notification body is never trusted (the payment is re-fetched), but as
+# defence in depth we also reject calls whose real client IP is outside the
+# published YooKassa ranges. These CIDRs are an OVERRIDABLE FALLBACK — the
+# authoritative source is the YooKassa docs / SDK SecurityHelper:
+# https://yookassa.ru/developers/using-api/webhooks#ip
+YOOKASSA_TRUSTED_CIDRS: tuple[str, ...] = (
+    "185.71.76.0/27",
+    "185.71.77.0/27",
+    "77.75.153.0/25",
+    "77.75.156.11/32",
+    "77.75.156.35/32",
+    "77.75.154.128/25",
+    "2a02:5180::/32",
+)
+# The only hops that may legitimately sit between YooKassa and the backend are
+# the loopback / private docker network and the prod nginx. X-Forwarded-For is
+# honoured ONLY when the immediate TCP peer is one of these — never blindly.
+YOOKASSA_TRUSTED_PROXIES: tuple[str, ...] = (
+    "127.0.0.0/8",
+    "::1/128",
+    "10.0.0.0/8",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "fc00::/7",
+)
+# Notification events the webhook acts on; anything else is acknowledged (200)
+# and ignored so YooKassa stops retrying.
+YOOKASSA_HANDLED_EVENTS: frozenset[str] = frozenset(
+    {
+        "payment.succeeded",
+        "payment.waiting_for_capture",
+        "payment.canceled",
+        "refund.succeeded",
+    }
+)
+# Settlement is money-critical and low-volume → schedule it at the highest
+# Celery priority (0 = first on the Redis broker, see TIER_PRIORITY below).
+PAYMENT_TASK_PRIORITY: int = 0
+# The webhook returns 200 immediately, so YooKassa won't redeliver — the task's
+# own retries are the backstop for a transient YooKassa outage (the poll path is
+# the other). More attempts over a longer window than the HTTP-level retries.
+PAYMENT_TASK_MAX_RETRIES: int = 5
+PAYMENT_TASK_RETRY_BACKOFF: float = 10.0  # base seconds; grows as base * 2**retries
+PAYMENT_TASK_RETRY_MAX_BACKOFF: float = 300.0  # cap a single wait at 5 min
+
+# Reconcile sweep (tasks/payment_pipeline.reconcile_pending_payments). Catches
+# payments stuck in `pending` when the webhook 200'd but the settle task never
+# ran (Redis blip) AND the user never polled. Runs on beat in celery_quiz →
+# queue `quiz`. Reuses the SAME settlement path, so it can't double-credit.
+RECONCILE_INTERVAL_MINUTES: int = 15      # beat cadence
+RECONCILE_MIN_AGE_MINUTES: int = 10       # grace: let the task + poll settle first
+RECONCILE_MAX_AGE_HOURS: int = 72         # stop re-querying long-dead payments
+RECONCILE_BATCH_SIZE: int = 100
+# Alert when a payment is STILL pending past this despite reconcile — exactly
+# once per payment (Payment.alerted_at). Email is optional and OFF by default
+# (structured ERROR log → Sentry is always on); needs config.ALERT_ADMIN_EMAIL.
+PAYMENT_STUCK_ALERT_MINUTES: int = 60
+PAYMENT_STUCK_ALERT_BATCH: int = 50
+PAYMENT_STUCK_ALERT_EMAIL: bool = False
 
 # ── Celery scheduling priority by tier ───────────────────────────────────────
 # A "tier" (free|paid|enterprise) is DERIVED from the billing CreditPlan via

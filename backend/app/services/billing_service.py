@@ -354,6 +354,7 @@ async def apply_purchase(db: AsyncSession, payment_id: UUID) -> bool:
         )
     )
     payment.status = PaymentStatus.succeeded
+    payment.paid_at = datetime.now(timezone.utc)
     await db.commit()
     return True
 
@@ -504,5 +505,75 @@ def sync_finalize_generation(
                 ),
             )
         )
+    db.commit()
+    return True
+
+
+def sync_apply_purchase(db: Session, payment: Payment, *, yookassa_payment_id: str) -> bool:
+    """Credit a succeeded YooKassa payment exactly once, from the Celery task.
+
+    Sync mirror of apply_purchase. The caller (process_yookassa_payment) has
+    already locked `payment` FOR UPDATE in this transaction and validated the
+    authoritative amount, so this just credits, flips status and stamps paid_at
+    in one commit. A redelivery finds status != pending and is a no-op.
+    """
+    if payment.status != PaymentStatus.pending:
+        db.rollback()
+        return False
+    free = PLAN_CONFIGS["free"]
+    # Ensure the account exists WITHOUT committing — a commit here would drop the
+    # payment FOR UPDATE lock and reopen the double-grant race. on_conflict_do_
+    # nothing makes the insert a no-op when the account already exists.
+    db.execute(
+        pg_insert(CreditAccount)
+        .values(
+            owner_id=payment.user_id,
+            plan=CreditPlan.free,
+            balance=free["onetime_credits"],
+            reserved=0,
+            monthly_allowance=free["monthly_allowance"],
+        )
+        .on_conflict_do_nothing(index_elements=["owner_id"])
+    )
+    db.flush()
+    account = db.scalar(
+        select(CreditAccount).where(CreditAccount.owner_id == payment.user_id).with_for_update()
+    )
+    account.balance += payment.credits
+    db.add(
+        CreditTransaction(
+            account_id=account.id,
+            delta=payment.credits,
+            operation=CreditOperation.PURCHASE,
+            ref_id=str(payment.id),
+            description=f"Покупка пакета {payment.credits} кредитов",
+        )
+    )
+    if not payment.yookassa_payment_id:
+        payment.yookassa_payment_id = yookassa_payment_id
+    payment.status = PaymentStatus.succeeded
+    payment.paid_at = datetime.now(timezone.utc)
+    db.commit()
+    return True
+
+
+def sync_mark_payment_canceled(db: Session, payment: Payment) -> bool:
+    """Sync mirror of mark_payment_canceled (used by the webhook task)."""
+    if payment.status != PaymentStatus.pending:
+        db.rollback()
+        return False
+    payment.status = PaymentStatus.canceled
+    db.commit()
+    return True
+
+
+def sync_mark_payment_refunded(db: Session, payment: Payment) -> bool:
+    """Record a refund.succeeded notification once. Spent credits are NOT clawed
+    back automatically — that is a manual/finance decision (see docs/DECISIONS.md);
+    we only stamp refunded_at for the audit trail."""
+    if payment.refunded_at is not None:
+        db.rollback()
+        return False
+    payment.refunded_at = datetime.now(timezone.utc)
     db.commit()
     return True

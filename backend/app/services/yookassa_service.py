@@ -12,6 +12,8 @@ app lifespan). Network failures and timeouts on the idempotent calls are
 retried with backoff; HTTP 4xx/5xx are surfaced as domain errors without retry.
 """
 import asyncio
+import time
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import httpx
@@ -94,18 +96,26 @@ def _parse_payment(resp: httpx.Response, op: str) -> YooKassaPayment:
         raise YooKassaError(f"YooKassa {op} returned a malformed payload: {exc}") from exc
 
 
-def _receipt(customer_email: str, credits: int, amount_value: str) -> dict[str, Any]:
-    # 54-ФЗ receipt for ИП: one service item, vat code from env.
+def _receipt(
+    *,
+    customer_email: str,
+    title: str,
+    amount_value: str,
+    vat_code: int,
+    payment_subject: str,
+    payment_mode: str,
+) -> dict[str, Any]:
+    # 54-ФЗ receipt for ИП: one service item; attributes come from the package.
     return {
         "customer": {"email": customer_email},
         "items": [
             {
-                "description": f"Пакет {credits} кредитов",
+                "description": title,
                 "quantity": "1.00",
                 "amount": {"value": amount_value, "currency": "RUB"},
-                "vat_code": settings.YOOKASSA_VAT_CODE,
-                "payment_subject": "service",
-                "payment_mode": "full_payment",
+                "vat_code": vat_code,
+                "payment_subject": payment_subject,
+                "payment_mode": payment_mode,
             }
         ],
     }
@@ -121,7 +131,10 @@ async def create_payment(
     description: str,
     idempotence_key: str,
     metadata: dict[str, str],
-    credits: int,
+    title: str,
+    vat_code: int,
+    payment_subject: str,
+    payment_mode: str,
     customer_email: str,
     return_url: str,
 ) -> YooKassaPayment:
@@ -134,7 +147,14 @@ async def create_payment(
         "metadata": metadata,
     }
     if settings.YOOKASSA_SEND_RECEIPT:
-        body["receipt"] = _receipt(customer_email, credits, amount_rub)
+        body["receipt"] = _receipt(
+            customer_email=customer_email,
+            title=title,
+            amount_value=amount_rub,
+            vat_code=vat_code,
+            payment_subject=payment_subject,
+            payment_mode=payment_mode,
+        )
 
     resp = await _request_with_retries(
         "POST",
@@ -157,3 +177,53 @@ async def get_payment(yookassa_payment_id: str) -> YooKassaPayment:
         logger.error("yookassa_fetch_failed", status=resp.status_code, body=resp.text[:500])
         raise YooKassaError(f"YooKassa fetch failed: HTTP {resp.status_code}")
     return _parse_payment(resp, "fetch")
+
+
+# ── Sync client (Celery tasks) ────────────────────────────────────────────────
+# Tasks run on prefork workers and must never touch the async client or an
+# AsyncSession. A short-lived httpx.Client per call is fork-safe (no pooled
+# connection is shared across the fork) and payment volume is low.
+
+
+def get_payment_sync(yookassa_payment_id: str) -> YooKassaPayment:
+    """GET /payments/{id} from a Celery task — the authoritative payment state.
+    Retries only transport/timeout errors; HTTP status maps like get_payment."""
+    base_url = settings.YOOKASSA_API_URL.rstrip("/") + "/"
+    auth = httpx.BasicAuth(settings.YOOKASSA_SHOP_ID, settings.YOOKASSA_SECRET_KEY)
+    timeout = httpx.Timeout(YOOKASSA_READ_TIMEOUT, connect=YOOKASSA_CONNECT_TIMEOUT)
+    resp: httpx.Response | None = None
+    last_exc: Exception | None = None
+    for attempt in range(YOOKASSA_MAX_RETRIES + 1):
+        try:
+            with httpx.Client(base_url=base_url, auth=auth, timeout=timeout) as client:
+                resp = client.get(f"payments/{yookassa_payment_id}")
+            break
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            last_exc = exc
+            if attempt >= YOOKASSA_MAX_RETRIES:
+                raise YooKassaError(
+                    f"YooKassa GET payments/{yookassa_payment_id} failed after "
+                    f"{attempt + 1} attempts: {exc}"
+                ) from exc
+            time.sleep(YOOKASSA_RETRY_BACKOFF * 2**attempt)
+    if resp is None:  # defensive — the loop either breaks with a response or raises
+        raise YooKassaError(f"YooKassa GET payments/{yookassa_payment_id} failed: {last_exc}")
+    if resp.status_code == 404:
+        raise YooKassaNotFound(yookassa_payment_id)
+    if resp.status_code >= 400:
+        logger.error("yookassa_fetch_sync_failed", status=resp.status_code, body=resp.text[:500])
+        raise YooKassaError(f"YooKassa fetch failed: HTTP {resp.status_code}")
+    return _parse_payment(resp, "fetch_sync")
+
+
+def payment_matches(yk: YooKassaPayment, expected_amount_rub: Decimal) -> bool:
+    """True only when the authoritative payment is a real, paid, RUB success for
+    exactly the expected price — the anti-fraud gate before crediting."""
+    if yk.status != "succeeded" or not yk.paid or yk.amount is None:
+        return False
+    if yk.amount.currency != "RUB":
+        return False
+    try:
+        return Decimal(yk.amount.value) == Decimal(expected_amount_rub)
+    except (InvalidOperation, TypeError):
+        return False
