@@ -4,6 +4,81 @@ import { $fetch, type FetchOptions } from 'ofetch'
 // runs — the rest await the same promise so we don't burn multiple rotations.
 let refreshPromise: Promise<boolean> | null = null
 
+// ── Error parsing ─────────────────────────────────────────────────────────────
+
+interface Pydantic422Item {
+  type: string
+  loc: string[]
+  msg: string
+  ctx?: Record<string, unknown>
+}
+
+export interface ParsedApiError {
+  /** field name → first human-readable RU error (from Pydantic 422) */
+  fields: Record<string, string>
+  /** general error message (non-field 422 items, or any non-422 error) */
+  general: string
+}
+
+function mapPydanticMessage(item: Pydantic422Item): string {
+  const { type, msg, ctx } = item
+  if (type === 'missing') return 'Обязательное поле'
+  if (type === 'string_too_short') {
+    const min = ctx?.min_length
+    return typeof min === 'number' ? `Минимум ${min} символов` : 'Слишком короткое значение'
+  }
+  if (type === 'value_error' && (msg.includes('@') || msg.toLowerCase().includes('email'))) {
+    return 'Некорректный email'
+  }
+  return msg
+}
+
+const KNOWN_DETAIL_RU: Record<string, string> = {
+  'Email already registered': 'Email уже зарегистрирован',
+}
+
+function mapGeneralError(err: unknown): string {
+  const status = (err as { response?: { status?: number } })?.response?.status
+  if (!status) return 'Сервис недоступен, попробуйте позже'
+  if (status === 429) return 'Слишком много попыток, попробуйте позже'
+  if (status >= 500) return 'Сервис недоступен, попробуйте позже'
+  const detail = (err as { data?: { detail?: unknown } })?.data?.detail
+  if (typeof detail === 'string') return KNOWN_DETAIL_RU[detail] ?? detail
+  return 'Ошибка запроса'
+}
+
+/**
+ * Normalize any $fetch error into a structured, human-readable form.
+ * 422 responses produce per-field messages; everything else goes into `general`.
+ * Existing callers that access err.data directly are unaffected — this is additive.
+ */
+export function parseApiError(err: unknown): ParsedApiError {
+  const status = (err as { response?: { status?: number } })?.response?.status
+  const detail = (err as { data?: { detail?: unknown } })?.data?.detail
+
+  if (status === 422 && Array.isArray(detail)) {
+    const fields: Record<string, string> = {}
+    const generalMsgs: string[] = []
+
+    for (const item of detail as Pydantic422Item[]) {
+      // loc is typically ["body", "fieldName"]; take the last segment as field key
+      const last = item.loc?.at(-1)
+      const fieldKey = typeof last === 'string' && last !== 'body' ? last : null
+      const message = mapPydanticMessage(item)
+
+      if (fieldKey) {
+        if (!fields[fieldKey]) fields[fieldKey] = message
+      } else {
+        generalMsgs.push(message)
+      }
+    }
+
+    return { fields, general: generalMsgs.join('; ') }
+  }
+
+  return { fields: {}, general: mapGeneralError(err) }
+}
+
 const isAuthEndpoint = (path: string): boolean =>
   path.startsWith('/auth/refresh') ||
   path.startsWith('/auth/login') ||

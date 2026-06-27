@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { AlertCircle } from 'lucide-vue-next'
+import { parseApiError } from '~/composables/useApi'
 
 const auth = useAuthStore()
 const email = ref('')
@@ -10,6 +11,7 @@ const acceptedPrivacy = ref(false)
 const acceptedTerms = ref(false)
 const acceptedMarketing = ref(false)
 const error = ref<string | null>(null)
+const fieldErrors = ref<Record<string, string>>({})
 const loading = ref(false)
 
 // Both mandatory consents must be ticked before the form may be submitted;
@@ -19,6 +21,7 @@ const consentsGiven = computed(() => acceptedPrivacy.value && acceptedTerms.valu
 const submit = async () => {
   if (!consentsGiven.value) return
   error.value = null
+  fieldErrors.value = {}
   loading.value = true
   try {
     await auth.register(email.value, password.value, role.value, fullName.value || undefined, {
@@ -27,8 +30,10 @@ const submit = async () => {
       accepted_marketing: acceptedMarketing.value,
     })
     await navigateTo(role.value === 'teacher' ? '/dashboard' : '/student/dashboard')
-  } catch (e: any) {
-    error.value = e?.data?.detail ?? 'Ошибка регистрации'
+  } catch (e: unknown) {
+    const parsed = parseApiError(e)
+    fieldErrors.value = parsed.fields
+    error.value = parsed.general || null
   } finally {
     loading.value = false
   }
@@ -74,13 +79,21 @@ onMounted(restoreScroll)
         </p>
 
         <form class="space-y-4" @submit.prevent="submit">
-          <UiInput v-model="fullName" label="Имя" placeholder="Необязательно" />
+          <UiInput
+            v-model="fullName"
+            label="Имя"
+            placeholder="Необязательно"
+            :error="fieldErrors.full_name"
+            @update:model-value="delete fieldErrors['full_name']"
+          />
           <UiInput
             v-model="email"
             label="Email"
             type="email"
             placeholder="you@example.com"
             autocomplete="email"
+            :error="fieldErrors.email"
+            @update:model-value="delete fieldErrors['email']"
           />
           <UiInput
             v-model="password"
@@ -88,7 +101,9 @@ onMounted(restoreScroll)
             type="password"
             placeholder="••••••••"
             autocomplete="new-password"
-            hint="Минимум 8 символов"
+            :hint="fieldErrors.password ? undefined : 'Минимум 8 символов'"
+            :error="fieldErrors.password"
+            @update:model-value="delete fieldErrors['password']"
           />
 
           <div class="space-y-2.5 pt-1">
