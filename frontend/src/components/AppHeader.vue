@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LogOut, Menu, MailWarning, Coins, Settings } from 'lucide-vue-next'
+import { LogOut, Menu, MailWarning, Coins, Settings, Bug } from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const { user, isAuthenticated, isEmailVerified } = storeToRefs(auth)
@@ -38,6 +38,12 @@ const dashboardLink = computed(() =>
       </NuxtLink>
 
 <div v-if="isAuthenticated" class="hidden md:flex items-center gap-3">
+        <SupportContactLink
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 transition"
+        >
+          <Bug class="w-3.5 h-3.5" />
+          Написать нам
+        </SupportContactLink>
         <NuxtLink
           v-if="isTeacher"
           to="/billing"
@@ -86,6 +92,12 @@ const dashboardLink = computed(() =>
       </div>
 
       <div v-else class="hidden md:flex items-center gap-2">
+        <SupportContactLink
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 transition mr-2"
+        >
+          <Bug class="w-3.5 h-3.5" />
+          Написать нам
+        </SupportContactLink>
         <NuxtLink
           to="/login"
           class="px-4 py-2 rounded-xl text-sm font-medium text-gray-700 hover:text-violet-700 transition"

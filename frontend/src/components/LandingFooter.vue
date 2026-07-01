@@ -27,6 +27,18 @@
             <li><NuxtLink to="/login">Войти</NuxtLink></li>
           </ul>
         </div>
+        <div>
+          <h5>Поддержка</h5>
+          <ul>
+            <li>
+              <SupportContactLink class="contact-link">
+                <Bug class="icon" :size="16" />
+                Написать нам
+              </SupportContactLink>
+            </li>
+            <li><a :href="`mailto:${SUPPORT_EMAIL}`">{{ SUPPORT_EMAIL }}</a></li>
+          </ul>
+        </div>
       </div>
       <div class="foot-bottom">
         <span>© {{ year }} Edllm. Все права защищены.</span>
@@ -37,5 +49,7 @@
 </template>
 
 <script setup lang="ts">
+import { Bug } from 'lucide-vue-next'
+
 const year = new Date().getFullYear()
 </script>

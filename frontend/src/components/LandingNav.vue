@@ -8,9 +8,17 @@
         <AppLogo />
       </NuxtLink>
       <nav class="nav-right">
+        <SupportContactLink class="nav-link contact-link">
+          <Bug class="icon" :size="16" />
+          Написать нам
+        </SupportContactLink>
         <NuxtLink class="nav-link" to="/login">Войти</NuxtLink>
         <NuxtLink class="btn btn-primary" to="/register">Создать аккаунт</NuxtLink>
       </nav>
     </div>
   </header>
 </template>
+
+<script setup lang="ts">
+import { Bug } from 'lucide-vue-next'
+</script>
