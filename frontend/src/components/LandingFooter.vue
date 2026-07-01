@@ -39,6 +39,14 @@
             <li><a :href="`mailto:${SUPPORT_EMAIL}`">{{ SUPPORT_EMAIL }}</a></li>
           </ul>
         </div>
+        <div>
+          <h5>Правовая информация</h5>
+          <ul>
+            <li v-for="d in LEGAL_DOCUMENTS" :key="d.key">
+              <NuxtLink :to="d.route">{{ d.shortTitle }}</NuxtLink>
+            </li>
+          </ul>
+        </div>
       </div>
       <div class="foot-bottom">
         <span>© {{ year }} Edllm. Все права защищены.</span>

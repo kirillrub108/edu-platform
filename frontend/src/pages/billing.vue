@@ -48,9 +48,11 @@ const packs = computed(() =>
 
 const buyingKey = ref<string | null>(null)
 const payError = ref('')
+// Mandatory consent before any purchase can be initiated.
+const acceptedPurchaseTerms = ref(false)
 
 const buyPack = async (key: string) => {
-  if (buyingKey.value) return
+  if (buyingKey.value || !acceptedPurchaseTerms.value) return
   buyingKey.value = key
   payError.value = ''
   const r = await billing.createPayment(key)
@@ -287,6 +289,51 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
               <AlertCircle class="w-4 h-4 shrink-0 mt-0.5" />
               <span>{{ payError }}</span>
             </div>
+
+            <!-- Legal docs + mandatory consent, shown before the pay buttons -->
+            <div class="mb-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-soft">
+              <div class="flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-gray-500">
+                <NuxtLink
+                  v-for="d in LEGAL_DOCUMENTS"
+                  :key="d.key"
+                  :to="d.route"
+                  target="_blank"
+                  class="hover:text-violet-700 hover:underline transition"
+                >
+                  {{ d.shortTitle }}
+                </NuxtLink>
+              </div>
+              <label class="mt-3 flex items-start gap-2.5 text-xs leading-relaxed text-gray-600">
+                <input
+                  v-model="acceptedPurchaseTerms"
+                  type="checkbox"
+                  class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500/30"
+                />
+                <span>
+                  Оплачивая, я принимаю
+                  <NuxtLink
+                    :to="legalDoc('offer').route"
+                    target="_blank"
+                    class="font-medium text-violet-700 hover:underline"
+                  >Публичную оферту</NuxtLink>,
+                  <NuxtLink
+                    :to="legalDoc('privacy').route"
+                    target="_blank"
+                    class="font-medium text-violet-700 hover:underline"
+                  >Политику конфиденциальности</NuxtLink>
+                  и
+                  <NuxtLink
+                    :to="legalDoc('refund').route"
+                    target="_blank"
+                    class="font-medium text-violet-700 hover:underline"
+                  >Политику возврата</NuxtLink>
+                </span>
+              </label>
+              <p v-if="!acceptedPurchaseTerms" class="mt-2 text-xs text-gray-400">
+                Отметьте согласие, чтобы продолжить оплату.
+              </p>
+            </div>
+
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div
                 v-for="pack in packs"
@@ -303,7 +350,7 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
                   variant="secondary"
                   size="sm"
                   :loading="buyingKey === pack.key"
-                  :disabled="!!buyingKey && buyingKey !== pack.key"
+                  :disabled="(!!buyingKey && buyingKey !== pack.key) || !acceptedPurchaseTerms"
                   @click="buyPack(pack.key)"
                 >
                   Купить

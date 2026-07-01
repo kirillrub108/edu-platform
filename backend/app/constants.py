@@ -376,14 +376,10 @@ PASSWORD_RESET_TOKEN_BYTES: int = 32
 PASSWORD_RESET_PATH: str = "/reset-password"
 
 # Registration consents (personal-data processing)
-# SPA routes that host the legal documents; opened from the registration form in
-# a new tab. These pages do not exist yet — create them separately.
-LEGAL_PRIVACY_PATH: str = "/legal/privacy"
-LEGAL_TERMS_PATH: str = "/legal/terms"
 # Version of the legal documents the user is consenting to at registration time.
 # Bump this whenever the privacy policy / terms change so we can tell which
 # revision each user agreed to.
-CONSENT_POLICY_VERSION: str = "2026-06-24"
+CONSENT_POLICY_VERSION: str = "2026-07-01"
 
 # Access code generation
 ACCESS_CODE_LENGTH: int = 6

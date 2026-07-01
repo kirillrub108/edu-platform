@@ -1144,7 +1144,7 @@ html:has(.ldg) {
 }
 .ldg .foot {
   display: grid;
-  grid-template-columns: 1.6fr 1fr 1fr 1fr;
+  grid-template-columns: 1.6fr 1fr 1fr 1fr 1fr;
   gap: 30px;
 }
 .ldg .foot .desc {

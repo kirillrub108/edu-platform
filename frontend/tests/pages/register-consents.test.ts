@@ -40,8 +40,9 @@ describe('register consent gating', () => {
   })
 
   it('opens the legal documents in a new tab', () => {
+    expect(source).toMatch(/to="\/legal\/pdn-consent"\s+target="_blank"/)
     expect(source).toMatch(/to="\/legal\/privacy"\s+target="_blank"/)
-    expect(source).toMatch(/to="\/legal\/terms"\s+target="_blank"/)
+    expect(source).toMatch(/to="\/legal\/offer"\s+target="_blank"/)
   })
 
   it('forwards the consent flags through the store register action', () => {

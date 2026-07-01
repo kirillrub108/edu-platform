@@ -114,12 +114,20 @@ onMounted(restoreScroll)
                 class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500/30"
               />
               <span>
-                Я даю согласие на обработку персональных данных в соответствии с
+                Я даю
+                <NuxtLink
+                  to="/legal/pdn-consent"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="font-medium text-violet-700 hover:underline"
+                >согласие на обработку персональных данных</NuxtLink>
+                и принимаю
                 <NuxtLink
                   to="/legal/privacy"
                   target="_blank"
+                  rel="noopener noreferrer"
                   class="font-medium text-violet-700 hover:underline"
-                >Политикой обработки персональных данных</NuxtLink>
+                >Политику конфиденциальности</NuxtLink>
               </span>
             </label>
             <label class="flex items-start gap-2.5 text-xs leading-relaxed text-gray-600">
@@ -131,10 +139,11 @@ onMounted(restoreScroll)
               <span>
                 Я принимаю условия
                 <NuxtLink
-                  to="/legal/terms"
+                  to="/legal/offer"
                   target="_blank"
+                  rel="noopener noreferrer"
                   class="font-medium text-violet-700 hover:underline"
-                >Пользовательского соглашения</NuxtLink>
+                >Публичной оферты</NuxtLink>
               </span>
             </label>
             <label class="flex items-start gap-2.5 text-xs leading-relaxed text-gray-600">
