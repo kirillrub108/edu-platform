@@ -87,7 +87,7 @@ const hasData = computed(() => !!data.value && data.value.total_attempts > 0)
 
       <ul class="divide-y divide-gray-50 border-t border-gray-100 pt-2">
         <li
-          v-for="(r, idx) in data.recent_submissions.slice(0, 3)"
+          v-for="(r, idx) in data.recent_submissions.slice(0, 5)"
           :key="`${r.student_id}-${r.lesson_id}-${idx}`"
           class="flex items-center gap-3 py-2 text-sm"
         >

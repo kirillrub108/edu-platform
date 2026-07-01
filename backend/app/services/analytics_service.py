@@ -91,12 +91,15 @@ async def get_summary(db: AsyncSession, owner_id: UUID) -> QuizAnalyticsSummary:
             func.count(func.distinct(quiz_lessons.c.lesson_id)).label("lessons"),
             func.count(QuizAttempt.id).label("attempts"),
             func.avg(cast(QuizAttempt.score, Float)).label("avg_score"),
+            # Use the stored per-quiz-threshold `passed` flag, not a recomputed
+            # comparison against the global default — quizzes can override
+            # pass_threshold, and QuizAttempt.passed already reflects that.
             func.avg(
                 cast(
                     case(
-                        (QuizAttempt.score.is_(None), None),
-                        (QuizAttempt.score >= QUIZ_PASS_THRESHOLD, 1.0),
-                        else_=0.0,
+                        (QuizAttempt.passed.is_(True), 1.0),
+                        (QuizAttempt.passed.is_(False), 0.0),
+                        else_=None,
                     ),
                     Float,
                 )
@@ -125,6 +128,7 @@ async def get_summary(db: AsyncSession, owner_id: UUID) -> QuizAnalyticsSummary:
             quiz_lessons.c.lesson_title.label("lesson_title"),
             quiz_lessons.c.course_title.label("course_title"),
             best.c.score.label("score"),
+            best.c.passed.label("passed"),
             best.c.submitted_at.label("submitted_at"),
         )
         .select_from(best)
@@ -144,9 +148,9 @@ async def get_summary(db: AsyncSession, owner_id: UUID) -> QuizAnalyticsSummary:
             lesson_title=r.lesson_title,
             course_title=r.course_title,
             score=float(r.score) if r.score is not None else None,
-            is_completed=r.score is not None and float(r.score) >= QUIZ_PASS_THRESHOLD,
+            is_completed=bool(r.passed),
             completed_at=r.submitted_at,
-            passed=r.score is not None and float(r.score) >= QUIZ_PASS_THRESHOLD,
+            passed=bool(r.passed),
         )
         for r in recent_rows
     ]
@@ -171,9 +175,9 @@ def _sort_column(sort: QuizLessonSort):
         return func.avg(
             cast(
                 case(
-                    (QuizAttempt.score.is_(None), None),
-                    (QuizAttempt.score >= QUIZ_PASS_THRESHOLD, 1.0),
-                    else_=0.0,
+                    (QuizAttempt.passed.is_(True), 1.0),
+                    (QuizAttempt.passed.is_(False), 0.0),
+                    else_=None,
                 ),
                 Float,
             )
@@ -214,9 +218,9 @@ async def list_quiz_lessons(
     pass_col = func.avg(
         cast(
             case(
-                (QuizAttempt.score.is_(None), None),
-                (QuizAttempt.score >= QUIZ_PASS_THRESHOLD, 1.0),
-                else_=0.0,
+                (QuizAttempt.passed.is_(True), 1.0),
+                (QuizAttempt.passed.is_(False), 0.0),
+                else_=None,
             ),
             Float,
         )
@@ -329,6 +333,7 @@ async def get_lesson_submissions(
             User.email.label("student_email"),
             User.full_name.label("student_full_name"),
             best.c.score.label("score"),
+            best.c.passed.label("passed"),
             best.c.submitted_at.label("submitted_at"),
         )
         .select_from(best)
@@ -349,9 +354,9 @@ async def get_lesson_submissions(
             lesson_title=lesson_title,
             course_title=course_title,
             score=float(r.score) if r.score is not None else None,
-            is_completed=r.score is not None and float(r.score) >= QUIZ_PASS_THRESHOLD,
+            is_completed=bool(r.passed),
             completed_at=r.submitted_at,
-            passed=r.score is not None and float(r.score) >= QUIZ_PASS_THRESHOLD,
+            passed=bool(r.passed),
         )
         for r in rows
     ]
@@ -366,15 +371,23 @@ class LessonNotOwnedByTeacher(Exception):
 
 async def _lesson_owner_context(
     db: AsyncSession, owner_id: UUID, lesson_id: UUID
-) -> tuple[str, UUID, UUID | None]:
-    """Return (lesson_title, course_id, quiz_id) if the teacher owns the lesson.
+) -> tuple[str, UUID, UUID | None, float]:
+    """Return (lesson_title, course_id, quiz_id, pass_threshold) if the teacher
+    owns the lesson.
 
-    quiz_id is None when the lesson has no quiz attached. Raises
-    LessonNotOwnedByTeacher if the lesson is missing or owned by someone else.
+    quiz_id is None when the lesson has no quiz attached, in which case
+    pass_threshold falls back to the global QUIZ_PASS_THRESHOLD default (there's
+    no per-quiz value to read). Raises LessonNotOwnedByTeacher if the lesson is
+    missing or owned by someone else.
     """
     row = (
         await db.execute(
-            select(Lesson.title, Course.id.label("course_id"), Quiz.id.label("quiz_id"))
+            select(
+                Lesson.title,
+                Course.id.label("course_id"),
+                Quiz.id.label("quiz_id"),
+                Quiz.pass_threshold.label("pass_threshold"),
+            )
             .select_from(Lesson)
             .join(Module, Lesson.module_id == Module.id)
             .join(Course, Module.course_id == Course.id)
@@ -385,7 +398,10 @@ async def _lesson_owner_context(
     ).first()
     if row is None:
         raise LessonNotOwnedByTeacher()
-    return row.title, row.course_id, row.quiz_id
+    threshold = (
+        float(row.pass_threshold) if row.pass_threshold is not None else QUIZ_PASS_THRESHOLD
+    )
+    return row.title, row.course_id, row.quiz_id, threshold
 
 
 async def get_quiz_results(
@@ -393,7 +409,9 @@ async def get_quiz_results(
     owner_id: UUID,
     lesson_id: UUID,
 ) -> QuizResultsResponse:
-    lesson_title, course_id, quiz_id = await _lesson_owner_context(db, owner_id, lesson_id)
+    lesson_title, course_id, quiz_id, pass_threshold = await _lesson_owner_context(
+        db, owner_id, lesson_id
+    )
 
     # Real quiz scores live in QuizAttempt; LessonProgress.quiz_score only holds
     # a teacher's manual override (edited_by_teacher=True). The displayed score
@@ -422,6 +440,7 @@ async def get_quiz_results(
             LessonProgress.edit_reason.label("edit_reason"),
             LessonProgress.completed_at.label("lp_completed_at"),
             best.c.score.label("auto_score"),
+            best.c.passed.label("auto_passed"),
             best.c.submitted_at.label("auto_submitted_at"),
             func.coalesce(attempts_sq.c.cnt, 0).label("attempts"),
         )
@@ -454,7 +473,13 @@ async def get_quiz_results(
         manual = float(r.manual_score) if r.manual_score is not None else None
         auto = float(r.auto_score) if r.auto_score is not None else None
         effective = manual if (edited and manual is not None) else auto
-        passed = effective is not None and effective >= QUIZ_PASS_THRESHOLD
+        if edited and manual is not None:
+            # Manual override has no stored per-question "passed" — compare
+            # against this quiz's own threshold (falls back to the global
+            # default for lessons with no quiz attached).
+            passed = manual >= pass_threshold
+        else:
+            passed = bool(r.auto_passed)
         completed_at = r.lp_completed_at if edited else r.auto_submitted_at
         items.append(
             QuizResultOut(
@@ -487,7 +512,9 @@ async def patch_quiz_result(
     reason: str | None,
 ) -> QuizResultOut:
     # Verify teacher owns the lesson and resolve course + quiz.
-    _title, course_id, quiz_id = await _lesson_owner_context(db, owner_id, lesson_id)
+    _title, course_id, quiz_id, pass_threshold = await _lesson_owner_context(
+        db, owner_id, lesson_id
+    )
 
     # Verify the student is enrolled in this course.
     enrollment_row = (
@@ -502,7 +529,7 @@ async def patch_quiz_result(
         raise LessonNotOwnedByTeacher()
 
     enrollment_id: UUID = enrollment_row.id
-    passed = score >= QUIZ_PASS_THRESHOLD
+    passed = score >= pass_threshold
 
     # Upsert LessonProgress — this row is the teacher's manual override.
     progress = (
