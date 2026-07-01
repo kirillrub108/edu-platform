@@ -144,7 +144,7 @@ onMounted(load)
       <div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div class="flex items-center gap-3 min-w-0">
           <NuxtLink
-            :to="`/lessons/${lessonId}`"
+            to="/analytics/quiz-results"
             class="shrink-0 w-8 h-8 rounded-xl border border-gray-200 bg-white text-gray-600 hover:text-violet-700 hover:border-violet-300 grid place-items-center transition"
           >
             <ArrowLeft class="w-4 h-4" />
