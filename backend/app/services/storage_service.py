@@ -85,6 +85,13 @@ class S3Backend:
             ExpiresIn=self._expire,
         )
 
+    def get_presigned_url(self, relative_path: str, ttl_seconds: int) -> str:
+        return self._client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": self._bucket, "Key": relative_path},
+            ExpiresIn=ttl_seconds,
+        )
+
     def get_full_path(self, relative_path: str) -> str:
         raise NotImplementedError("S3Backend has no local path — use get_url() instead")
 
@@ -198,22 +205,32 @@ class StorageService:
             return f"{self._backend.base_url}{generate_signed_url(relative_path, user_id, expires_in=expires_in)}"
         return self._backend.get_url(relative_path)
 
-    def resign_url(self, stored_url: str | None, user_id: str, expires_in: int | None = None) -> str | None:
+    def relative_path_from_url(self, stored_url: str | None) -> str | None:
+        """Recover the storage key from a stored URL. Local URLs look like
+        ``<base>/files/<rel>?<sig>``; S3 presigned URLs like
+        ``<host>/<bucket>/<key>?<sig>``. Returns None when neither shape matches
+        (empty / unknown / legacy value)."""
         if not stored_url:
-            return stored_url
+            return None
         if isinstance(self._backend, LocalBackend):
             marker = "/files/"
             idx = stored_url.find(marker)
             if idx == -1:
-                return stored_url
-            rel_and_query = stored_url[idx + len(marker):]
-            rel = rel_and_query.split("?", 1)[0]
-            return self.get_url(rel, user_id, expires_in=expires_in)
-        # S3: extract the object key from the presigned URL and issue a fresh one.
-        # Presigned URL path is /{bucket}/{key}, so strip the bucket prefix.
-        rel = self._extract_s3_relative(stored_url)
+                return None
+            rel = stored_url[idx + len(marker):].split("?", 1)[0]
+            return rel or None
+        # S3: object key sits after the /{bucket}/ prefix of the presigned URL.
+        return self._extract_s3_relative(stored_url)
+
+    def resign_url(self, stored_url: str | None, user_id: str, expires_in: int | None = None) -> str | None:
+        if not stored_url:
+            return stored_url
+        rel = self.relative_path_from_url(stored_url)
         if rel is None:
             return stored_url
+        if isinstance(self._backend, LocalBackend):
+            return self.get_url(rel, user_id, expires_in=expires_in)
+        # S3: issue a fresh presigned URL for the same object key.
         return self._backend.get_url(rel)
 
     def _extract_s3_relative(self, url: str) -> str | None:
@@ -225,6 +242,17 @@ class StorageService:
 
     def get_full_path(self, relative_path: str) -> str:
         return self._backend.get_full_path(relative_path)
+
+    def exists(self, relative_path: str) -> bool:
+        return self._backend.exists(relative_path)
+
+    def presign_stream_url(self, relative_path: str, ttl_seconds: int) -> str:
+        """Short-lived presigned S3 GET URL for direct video streaming (the
+        ``/stream`` 302 target). S3 backend only — local delivery hands bytes to
+        nginx via X-Accel-Redirect or falls back to FileResponse in dev."""
+        if not isinstance(self._backend, S3Backend):
+            raise RuntimeError("presign_stream_url requires the S3 storage backend")
+        return self._backend.get_presigned_url(relative_path, ttl_seconds)
 
     def delete_file(self, relative_path: str) -> None:
         self._backend.delete(relative_path)

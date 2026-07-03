@@ -56,6 +56,11 @@ async def serve_file(
     if ".." in file_path.split("/") or file_path.startswith("/") or "\\" in file_path:
         raise HTTPException(status_code=400, detail="Invalid path")
 
+    # NOTE: this dev-only route (registered when SERVE_STATIC_VIA_NGINX=false)
+    # intentionally still serves /files/videos/* as signed bearer URLs — it's the
+    # 302 target the /stream endpoint redirects to in dev, so the browser fetches
+    # video bytes directly instead of through the Nuxt proxy. In prod nginx serves
+    # /files/* and the video path is blocked in verify_file_signature below.
     if not verify_signed_url(file_path, uid, expires, sig):
         raise HTTPException(status_code=403, detail="Invalid or expired signature")
 
@@ -119,6 +124,10 @@ async def verify_file_signature(request: Request) -> Response:
         raise HTTPException(status_code=403, detail="Forbidden")
 
     file_path = unquote(parsed.path[len("/files/"):])
+    if file_path.split("/", 1)[0] == "videos":
+        # Videos are served only via the authorised /stream endpoint; refuse to
+        # validate a signed /files/videos/* URL so the old path can't be replayed.
+        raise HTTPException(status_code=403, detail="Forbidden")
     params = parse_qs(parsed.query)
     uid = (params.get("uid") or [""])[0]
     sig = (params.get("sig") or [""])[0]

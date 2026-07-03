@@ -53,7 +53,8 @@ async def test_upload_video_publishes_and_replaces(
     assert refreshed.is_published is True
     assert refreshed.video_url is not None
 
-    # Re-upload replaces the previous video.
+    # Re-upload replaces the previous video (fresh file → fresh signed URL in the
+    # dev/test delivery mode).
     again = await client.post(
         f"/api/v1/lessons/{lesson.id}/upload-video",
         files={"file": ("clip2.webm", b"\x1a\x45\xdf\xa3" + b"\x00" * 20, "video/webm")},

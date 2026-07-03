@@ -1,10 +1,14 @@
 import asyncio
 import json
+import mimetypes
 import os
+from urllib.parse import quote
 from uuid import UUID, uuid4
 
+import structlog
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
+from fastapi.responses import RedirectResponse, Response
 from redis.asyncio import Redis
 from sqlalchemy import desc, func, select, update
 from sqlalchemy import inspect as sa_inspect
@@ -12,17 +16,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from app.celery_app import celery_app
+from app.config import settings
 from app.constants import (
     CREDIT_WEIGHTS,
     MAX_VIDEO_UPLOAD_BYTES,
+    S3_PRESIGN_TTL_SECONDS,
     SIGNED_URL_TTL_VIDEO,
     TRIAL_MAX_SCRIPT_CHARS,
     TRIAL_MAX_SLIDES,
+    VIDEO_XACCEL_ENABLED,
+    VIDEO_XACCEL_INTERNAL_PREFIX,
 )
 from app.database import get_db
 from app.dependencies import (
     get_current_user,
     get_owned_lesson,
+    require_lesson_access,
     require_teacher,
     require_verified_teacher,
 )
@@ -57,12 +66,54 @@ from app.services.storage_service import storage_service
 from app.services.video_service import count_source_slides
 from app.tasks.video_pipeline import generate_video_lesson
 
+logger = structlog.get_logger()
+
+_LESSON_ROUTE_PREFIX = "/api/v1/lessons"
+
+
+def lesson_video_stream_path(lesson_id: UUID) -> str:
+    """Relative URL of the authorised player-stream endpoint for a lesson's
+    current video. Same-origin (Nuxt devProxy in dev, nginx `/api/` in prod), so
+    the httpOnly session cookie rides along with the browser's <video> request."""
+    return f"{_LESSON_ROUTE_PREFIX}/{lesson_id}/video/stream"
+
+
+def lesson_video_render_stream_path(lesson_id: UUID, video_id: UUID) -> str:
+    """Relative URL of the authorised stream endpoint for one specific render."""
+    return f"{_LESSON_ROUTE_PREFIX}/{lesson_id}/videos/{video_id}/stream"
+
+
+# Dev (local storage, no nginx) has the frontend talking to the backend
+# cross-origin (absolute NUXT_PUBLIC_API_BASE) with no reverse proxy, so a
+# <video> can't ride the SameSite session cookie to the same-origin /stream
+# endpoint. There it loads a bearer-signed absolute /files URL directly instead —
+# the same model covers use. Prod (nginx or S3) is same-origin and serves the
+# player through /stream (X-Accel / presigned 302).
+_VIDEO_DIRECT_SIGNED: bool = (
+    settings.STORAGE_BACKEND == "local" and not VIDEO_XACCEL_ENABLED
+)
+
+
+def video_playback_url(
+    lesson_id: UUID, video_id: UUID | None, stored_url: str | None, user_id: str
+) -> str | None:
+    """Player src for a lesson video: a bearer-signed absolute /files URL in dev
+    (loaded cross-origin directly by <video>), else the same-origin /stream
+    endpoint (enrollment + visibility re-checked per request)."""
+    if not stored_url:
+        return None
+    if _VIDEO_DIRECT_SIGNED:
+        return storage_service.resign_url(stored_url, user_id, expires_in=SIGNED_URL_TTL_VIDEO)
+    if video_id is not None:
+        return lesson_video_render_stream_path(lesson_id, video_id)
+    return lesson_video_stream_path(lesson_id)
+
 
 def _lesson_out(
     lesson: Lesson, user_id: str, published_video: LessonVideoOut | None = None
 ) -> LessonOut:
     out = LessonOut.model_validate(lesson)
-    out.video_url = storage_service.resign_url(out.video_url, user_id, expires_in=SIGNED_URL_TTL_VIDEO)
+    out.video_url = video_playback_url(lesson.id, None, lesson.video_url, user_id)
     out.published_video = published_video
     # Only when the module relationship is already loaded (get_owned_lesson
     # joinedloads it) — touching an unloaded relationship on AsyncSession
@@ -74,11 +125,11 @@ def _lesson_out(
 
 def _video_out(video: LessonVideo, user_id: str) -> LessonVideoOut:
     out = LessonVideoOut.model_validate(video)
-    out.video_url = storage_service.resign_url(out.video_url, user_id, expires_in=SIGNED_URL_TTL_VIDEO)
+    out.video_url = video_playback_url(video.lesson_id, video.id, video.video_url, user_id)
     return out
 
 
-router = APIRouter(prefix="/api/v1/lessons", tags=["lessons"])
+router = APIRouter(prefix=_LESSON_ROUTE_PREFIX, tags=["lessons"])
 
 
 @router.post("/", response_model=LessonOut, status_code=status.HTTP_201_CREATED)
@@ -856,3 +907,95 @@ async def publish_video(
     await db.refresh(video)
 
     return _video_out(video, str(user.id))
+
+
+def _relative_video_path(stored_url: str | None) -> str:
+    """Storage key of a lesson video, or 404 when absent / unrecognised. Confined
+    to the ``videos/`` prefix so this endpoint can never be coerced into reading
+    other stored objects."""
+    relative = storage_service.relative_path_from_url(stored_url)
+    if not relative or not relative.startswith("videos/"):
+        raise HTTPException(status_code=404, detail="Video not found")
+    return relative
+
+
+def _stream_video_response(relative: str, user_id: str) -> Response:
+    """Deliver a lesson MP4 to an already-authorised caller. The access guard has
+    run; this only chooses HOW the bytes reach the client, always keeping the byte
+    transfer out of the Python process AND off the same-origin proxy:
+
+    * S3 (primary): 302 to a short-lived presigned URL — the browser streams
+      straight from S3, which serves Range/seek. Within S3_PRESIGN_TTL_SECONDS
+      that URL is a bearer capability (see constants.py).
+    * local + nginx: empty body + X-Accel-Redirect to the internal
+      /protected-media/ location; nginx serves the file (Range/sendfile) and the
+      absolute FS path never leaves the server — nginx strips the header, so the
+      client never sees it.
+    * local + no nginx (dev): 302 to a signed absolute /files/* URL. The browser
+      then fetches bytes DIRECTLY from the backend (Range/seek) — NOT a
+      FileResponse streamed back through the Nuxt dev proxy, which hangs relaying
+      a 206. Bearer-signed with SIGNED_URL_TTL_VIDEO, the same model as covers;
+      dev-only (the /files/videos/* path is closed in prod — see files.py).
+    """
+    if settings.STORAGE_BACKEND == "s3":
+        if not settings.S3_BUCKET_NAME:
+            logger.error("video_stream_s3_misconfigured", relative=relative)
+            raise HTTPException(status_code=500, detail="Storage backend misconfigured")
+        url = storage_service.presign_stream_url(relative, S3_PRESIGN_TTL_SECONDS)
+        # no-store so no shared/CDN/proxy cache can retain this 302 and hand the
+        # presigned URL — a bearer capability for its TTL — to another student.
+        return RedirectResponse(
+            url=url, status_code=302, headers={"Cache-Control": "no-store"}
+        )
+
+    if not storage_service.exists(relative):
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    if VIDEO_XACCEL_ENABLED:
+        content_type = mimetypes.guess_type(relative)[0] or "video/mp4"
+        # quote() so a filename with spaces/unicode yields a valid internal URI;
+        # nginx URL-decodes it back against the /protected-media/ alias.
+        internal_uri = f"{VIDEO_XACCEL_INTERNAL_PREFIX}{quote(relative, safe='/')}"
+        return Response(
+            status_code=200,
+            headers={"X-Accel-Redirect": internal_uri, "Content-Type": content_type},
+        )
+
+    signed = storage_service.get_url(relative, user_id, expires_in=SIGNED_URL_TTL_VIDEO)
+    return RedirectResponse(
+        url=signed, status_code=302, headers={"Cache-Control": "no-store"}
+    )
+
+
+@router.get("/{lesson_id}/video/stream")
+async def stream_lesson_video(
+    access: tuple[User, Lesson, bool] = Depends(require_lesson_access),
+) -> Response:
+    """Authorised stream of a lesson's current video (the student player source).
+    Access — teacher-owner or enrolled student with the module/lesson published —
+    is enforced by require_lesson_access before any bytes or redirect are produced
+    (missing/hidden lesson → 404, non-enrolled → 403)."""
+    user, lesson, _is_owner = access
+    relative = _relative_video_path(lesson.video_url)
+    return _stream_video_response(relative, str(user.id))
+
+
+@router.get("/{lesson_id}/videos/{video_id}/stream")
+async def stream_lesson_video_render(
+    video_id: UUID,
+    access: tuple[User, Lesson, bool] = Depends(require_lesson_access),
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Authorised stream of one specific render. Owners may stream any render; an
+    enrolled student may stream only a published one — a draft render 404s, never
+    revealing that an unpublished render exists."""
+    user, lesson, is_owner = access
+    video = await db.scalar(
+        select(LessonVideo).where(
+            LessonVideo.id == video_id, LessonVideo.lesson_id == lesson.id
+        )
+    )
+    if video is None or (not is_owner and not video.is_published):
+        raise HTTPException(status_code=404, detail="Video not found")
+    relative = _relative_video_path(video.video_url)
+    return _stream_video_response(relative, str(user.id))

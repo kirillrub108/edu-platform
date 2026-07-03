@@ -1,9 +1,32 @@
+from app.config import settings
+
 # Signed URL lifetimes (seconds). SIGNED_URL_EXPIRES_IN in config.py is the
 # env-override cap for uncategorised files; these per-type values are tighter.
 # Videos need to outlive a full viewing session; slides only need to cover the
 # duration of an active editor session.
 SIGNED_URL_TTL_VIDEO: int = 1800   # 30 min
 SIGNED_URL_TTL_SLIDE: int = 600    # 10 min
+
+# Video streaming delivery — see the /stream endpoints in routers/lessons.py.
+# The endpoint authorises the request, then delegates the actual byte transfer
+# so Python never streams the MP4 in prod:
+#   * S3 (primary): 302 → short-lived presigned URL; the browser streams from S3.
+#   * local + nginx: empty body + X-Accel-Redirect to the internal prefix below;
+#     nginx serves the file (Range/sendfile). Tracks SERVE_STATIC_VIA_NGINX so it
+#     is on wherever nginx fronts the app (prod) and off in dev.
+#   * local + no nginx (dev): 302 → signed absolute /files URL. Dev serializers
+#     also hand the player that signed URL directly (video_playback_url), so the
+#     cross-origin <video> loads bytes straight from the backend instead of
+#     through the same-origin proxy, which can't relay a streamed 206.
+# The prefix is aliased to the storage root by nginx:
+#   location /protected-media/ { internal; alias /var/www/storage/; }
+VIDEO_XACCEL_ENABLED: bool = settings.SERVE_STATIC_VIA_NGINX
+VIDEO_XACCEL_INTERNAL_PREFIX: str = "/protected-media/"
+# <video> re-requests ranges directly against the presigned URL, so the TTL must
+# outlive a full viewing session — a short TTL would break seeking on long
+# lessons. Trade-off: within the TTL the URL is a bearer capability (un-enrolling
+# a student does not revoke an already-issued URL until it expires).
+S3_PRESIGN_TTL_SECONDS: int = 6 * 3600  # 6h — covers a long lesson + seeking
 
 # TTS
 SILERO_MAX_CHARS: int = 800  # conservative limit: Silero returns 500 on very long inputs

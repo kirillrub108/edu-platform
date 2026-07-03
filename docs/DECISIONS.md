@@ -984,6 +984,22 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 ---
 
+## 41. Отдача видео: авторизованный `/stream` (X-Accel / presigned) вместо signed-URL (KNOWN_PROBLEMS 3.4)
+
+**Контекст.** [KNOWN_PROBLEMS §3.4](KNOWN_PROBLEMS.md) описывает Python-стриминг видео как нагрузку на backend-CPU. Но в проде байты `/files/*` уже раздаёт nginx через `auth_request` (см. «Раздача `/files/*` через nginx»), Python-стриминг остался только в dev — CPU-приз в проде фактически взят. Реальная цель — **увести видео на S3** и заодно усилить модель доступа. Раньше `lesson.video_url` / `LessonVideo.video_url` = bearer signed-URL (§38): enrollment/visibility проверялись в момент выдачи DTO (роуты урока), а сам `/files/*` — только HMAC-подпись, без пере-проверки записи на курс.
+
+**Решение:**
+- **Два авторизованных эндпоинта** в `routers/lessons.py` под `require_lesson_access` (правило видимости не инлайнится — берётся из `visibility_service`): `GET /{lesson_id}/video/stream` (текущее видео — источник плеера) и `GET /{lesson_id}/videos/{video_id}/stream` (конкретный рендер; владелец видит любой, записанный студент — только `is_published`, черновой рендер → 404, не палит существование).
+- **Режим по `STORAGE_BACKEND`.** `s3` → `302` на короткоживущий presigned-URL (браузер стримит прямо из S3, range/seek держит S3). `local` + nginx → пустой ответ с `X-Accel-Redirect` на internal-локацию `/protected-media/` (alias на storage; nginx отдаёт с range/sendfile, абсолютный путь ФС клиенту не утекает). `local` без nginx (dev) → `302` на **подписанный абсолютный `/files/*` URL** (браузер грузит байты напрямую с backend). Флаги — только в `constants.py`: `VIDEO_XACCEL_ENABLED = settings.SERVE_STATIC_VIA_NGINX` (co-varies с наличием nginx), `VIDEO_XACCEL_INTERNAL_PREFIX`, `S3_PRESIGN_TTL_SECONDS`.
+- **Выбор URL плеера — same-origin `/stream` в проде, bearer-`/files` в dev.** `video_playback_url` (в `_lesson_out` / `_video_out` / студенческом роуте) отдаёт **относительный** `/stream` в проде (nginx same-origin, кука едет сама → X-Accel/302) и **подписанный абсолютный `/files` URL** в dev. Почему dev особый: dev-фронт зовёт backend **cross-origin** (`NUXT_PUBLIC_API_BASE=http://localhost:8000/api/v1`, Nitro-devProxy не задействован), а SameSite-кука на cross-origin `<video>` не уходит → `/stream` там недостижим; bearer-`/files` грузится напрямую, как обложки. В проде `apiBase=/api/v1` (same-origin за nginx), поэтому относительный `/stream` работает.
+- **Старый путь закрыт там, где это важно (prod).** `/files/videos/*` блокируется в **prod-verify** (`verify_file_signature`, регистрируется при `SERVE_STATIC_VIA_NGINX=true`) — nginx отдаёт `/files/*`, и видео-путь возвращает 403 даже с валидной подписью, так что единственный путь к байтам — `/stream` (X-Accel, live-check). В dev `serve_file` (единственный `/files`-роут без nginx) намеренно оставлен открытым как 302-цель. Письмо «видео готово» ссылается на страницу урока, не на файл, так что переходный период не нужен.
+
+**Главный trade-off — доступ в S3-режиме = bearer-на-TTL.** Live per-request re-check (каждый range проходит `require_lesson_access`) есть только на local-X-Accel-пути. В S3-режиме после `302` браузер ходит **напрямую к S3** по presigned-URL, валидному весь TTL: **отписка/скрытие урока НЕ отзывают доступ мгновенно**, только по истечении. Принято осознанно — окно ограничено TTL. `S3_PRESIGN_TTL_SECONDS = 6h`: должен покрывать длину урока, т.к. `<video>` перезапрашивает range напрямую по этому URL — короткий TTL (напр. 300 с) порвал бы перемотку на длинной лекции. `Cache-Control: no-store` на `302`, чтобы presigned не осел в общем/CDN-кеше и не утёк между студентами; относительный `/stream` в сериализаторе → фронт кеширует стабильный путь, presigned свежий на каждый заход.
+
+**Заметки:** на S3-таргете `/protected-media/` (local-X-Accel) — мёртвая ветка (видео физически не на диске ноды), но нужна для local-деплоя/dev-fallback. Эндпоинт не гейтится `require_verified_email` (воспроизведение — не AI-операция) и потому не входит в `AI_GATED_ENDPOINTS`. Схему `LessonVideo` и второй refresh-путь не трогали.
+
+---
+
 ## Связанные документы
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.
