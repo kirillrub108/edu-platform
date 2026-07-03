@@ -15,16 +15,30 @@ must delete.
 from __future__ import annotations
 
 import os
+import shutil
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Callable
 from urllib.parse import unquote
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.constants import ATTACHMENT_RETENTION_DAYS_AFTER_GRADED, SOFT_DELETE_PURGE_DAYS
+from app.config import settings
+from app.constants import (
+    ATTACHMENT_RETENTION_DAYS_AFTER_GRADED,
+    CACHE_GC_ENABLED,
+    LESSON_VIDEO_GC_ENABLED,
+    LESSON_VIDEO_KEEP_UNPUBLISHED,
+    LESSON_VIDEO_UNPUBLISHED_TTL_DAYS,
+    SLIDES_CACHE_MAX_BYTES,
+    SLIDES_CACHE_TTL_DAYS,
+    SOFT_DELETE_PURGE_DAYS,
+    SUMMARIES_CACHE_MAX_BYTES,
+    SUMMARIES_CACHE_TTL_DAYS,
+)
 from app.models.assignment import Assignment, AssignmentAttachment, AssignmentSubmission
 from app.models.course import Course
 from app.models.lesson import Lesson, Module
@@ -284,3 +298,234 @@ def purge_soft_deleted() -> dict:
         counts["expired_attachments"] = _purge_expired_submission_attachments(session)
     logger.info("purge_soft_deleted_done", **counts)
     return counts
+
+
+# ── Disk cache GC (reproducible slides_cache / summaries_cache) ────────────────
+
+# A crashed GC run can leave an entry half-renamed with this marker in its name;
+# enumeration skips those and clears the orphans on the next pass.
+_GC_STAGING_MARKER = ".gc-"
+
+
+def _entry_size(path: str, is_dir: bool) -> int:
+    """Total bytes of one cache entry. Resilient to files vanishing mid-walk (a
+    concurrent generation may be writing or a sibling evicting): a disappeared
+    file contributes 0 instead of raising."""
+    if not is_dir:
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for name in files:
+            try:
+                total += os.path.getsize(os.path.join(root, name))
+            except OSError:
+                continue
+    return total
+
+
+def _atomic_evict(path: str, is_dir: bool) -> None:
+    """Remove a cache entry atomically: rename to a sibling staging name, then
+    delete. The rename is atomic within the cache's filesystem, so an in-flight
+    lookup never sees a half-deleted entry masquerading as a valid hit — it finds
+    either the whole entry or nothing (→ clean cache miss, next run re-renders)."""
+    staging = f"{path}{_GC_STAGING_MARKER}{uuid.uuid4().hex}"
+    os.rename(path, staging)
+    if is_dir:
+        shutil.rmtree(staging, ignore_errors=True)
+    else:
+        try:
+            os.remove(staging)
+        except OSError:
+            logger.warning("gc_cache_staging_remove_failed", path=staging, exc_info=True)
+
+
+def _gc_cache(
+    root: str, ttl_days: int, max_bytes: int, *, entry_is_dir: bool
+) -> tuple[int, int]:
+    """Evict entries from one content-hash cache: first every entry whose mtime
+    is older than ttl_days, then — if the cache still exceeds max_bytes — the
+    least-recently-used first until it fits. Recency is the mtime we bump on
+    every hit (os.utime), so this is a true LRU. Returns (removed, bytes_freed)."""
+    if not os.path.isdir(root):
+        return 0, 0
+
+    ttl_cutoff = (datetime.now(timezone.utc) - timedelta(days=ttl_days)).timestamp()
+    entries: list[tuple[str, float, int]] = []  # (path, mtime, size)
+    for name in os.listdir(root):
+        path = os.path.join(root, name)
+        if _GC_STAGING_MARKER in name:
+            _atomic_evict(path, entry_is_dir)  # orphan from a crashed run
+            continue
+        try:
+            if os.path.islink(path):
+                continue  # never delete through a symlink
+            if entry_is_dir and not os.path.isdir(path):
+                continue
+            if not entry_is_dir and not (os.path.isfile(path) and name.endswith(".txt")):
+                continue
+            mtime = os.path.getmtime(path)
+        except OSError:
+            logger.warning("gc_cache_stat_failed", path=path, exc_info=True)
+            continue
+        entries.append((path, mtime, _entry_size(path, entry_is_dir)))
+
+    removed = 0
+    freed = 0
+
+    # ── TTL pass ──
+    survivors: list[tuple[str, float, int]] = []
+    for entry in entries:
+        path, mtime, size = entry
+        if mtime < ttl_cutoff:
+            try:
+                _atomic_evict(path, entry_is_dir)
+                removed += 1
+                freed += size
+            except OSError:
+                logger.warning("gc_cache_evict_failed", path=path, exc_info=True)
+                survivors.append(entry)
+        else:
+            survivors.append(entry)
+
+    # ── size-cap pass: oldest mtime first until under the cap ──
+    total = sum(size for _p, _m, size in survivors)
+    if total > max_bytes:
+        for path, _mtime, size in sorted(survivors, key=lambda e: e[1]):
+            if total <= max_bytes:
+                break
+            try:
+                _atomic_evict(path, entry_is_dir)
+                removed += 1
+                freed += size
+                total -= size
+            except OSError:
+                logger.warning("gc_cache_evict_failed", path=path, exc_info=True)
+
+    return removed, freed
+
+
+@celery_app.task(name="gc_disk_caches", queue="quiz")
+def gc_disk_caches() -> dict[str, int]:
+    """Daily reclaim of the reproducible slides_cache / summaries_cache. No-op
+    when CACHE_GC_ENABLED is false. Both caches are local even under the S3
+    backend, so they're addressed directly under STORAGE_PATH."""
+    structlog.contextvars.clear_contextvars()
+    counts = {
+        "slides_removed": 0,
+        "slides_bytes": 0,
+        "summaries_removed": 0,
+        "summaries_bytes": 0,
+    }
+    if not CACHE_GC_ENABLED:
+        logger.info("gc_disk_caches_disabled")
+        return counts
+    counts["slides_removed"], counts["slides_bytes"] = _gc_cache(
+        os.path.join(settings.STORAGE_PATH, "slides_cache"),
+        SLIDES_CACHE_TTL_DAYS,
+        SLIDES_CACHE_MAX_BYTES,
+        entry_is_dir=True,
+    )
+    counts["summaries_removed"], counts["summaries_bytes"] = _gc_cache(
+        os.path.join(settings.STORAGE_PATH, "summaries_cache"),
+        SUMMARIES_CACHE_TTL_DAYS,
+        SUMMARIES_CACHE_MAX_BYTES,
+        entry_is_dir=False,
+    )
+    logger.info("gc_disk_caches_done", **counts)
+    return counts
+
+
+# ── Stale unpublished LessonVideo GC ──────────────────────────────────────────
+
+def _evict_lesson_video(session: Session, video: LessonVideo) -> None:
+    """Delete a video's stored file (via storage_service — S3-safe) then its row.
+    File first so a crash between the two steps leaves an orphan file the next
+    run retries, never a row pointing at a deleted file. A missing file → warn
+    and still delete the row (the "row exists, file gone" case)."""
+    rel = storage_service.relative_path_from_url(video.video_url)
+    if rel is None:
+        logger.warning("gc_video_url_unresolvable", id=str(video.id), url=video.video_url)
+    else:
+        try:
+            if storage_service.exists(rel):
+                storage_service.delete_file(rel)
+                logger.info("gc_video_file_removed", id=str(video.id), path=rel)
+            else:
+                logger.warning("gc_video_file_missing", id=str(video.id), path=rel)
+        except Exception:
+            logger.warning(
+                "gc_video_file_remove_failed", id=str(video.id), path=rel, exc_info=True
+            )
+    session.delete(video)
+    session.flush()
+
+
+def _gc_lesson_videos_session(session: Session) -> int:
+    """Prune cold UNPUBLISHED video versions. Per lesson: keep every published
+    version, keep the newest KEEP_UNPUBLISHED unpublished, delete the remaining
+    unpublished only when older than the TTL. Invariant: a lesson is never left
+    with zero videos — with no published version, at least one (newest)
+    unpublished always survives regardless of KEEP_UNPUBLISHED. is_published=True
+    is NEVER a deletion candidate. Returns rows removed."""
+    cutoff = datetime.now(timezone.utc) - timedelta(days=LESSON_VIDEO_UNPUBLISHED_TTL_DAYS)
+    lesson_ids = (
+        session.execute(
+            select(LessonVideo.lesson_id)
+            .where(LessonVideo.is_published.is_(False))
+            .distinct()
+        )
+        .scalars()
+        .all()
+    )
+    removed = 0
+    for lesson_id in lesson_ids:
+        try:
+            published = session.scalar(
+                select(func.count())
+                .select_from(LessonVideo)
+                .where(
+                    LessonVideo.lesson_id == lesson_id,
+                    LessonVideo.is_published.is_(True),
+                )
+            )
+            unpublished = (
+                session.execute(
+                    select(LessonVideo)
+                    .where(
+                        LessonVideo.lesson_id == lesson_id,
+                        LessonVideo.is_published.is_(False),
+                    )
+                    .order_by(LessonVideo.created_at.desc())
+                )
+                .scalars()
+                .all()
+            )
+            # Never orphan the lesson: with no published version, keep ≥1 unpublished.
+            keep = LESSON_VIDEO_KEEP_UNPUBLISHED if published else max(LESSON_VIDEO_KEEP_UNPUBLISHED, 1)
+            for video in unpublished[keep:]:
+                if video.created_at is not None and video.created_at < cutoff:
+                    _evict_lesson_video(session, video)
+                    removed += 1
+            session.commit()
+        except Exception:
+            session.rollback()
+            logger.warning("gc_video_lesson_failed", lesson_id=str(lesson_id), exc_info=True)
+            continue
+    return removed
+
+
+@celery_app.task(name="gc_lesson_videos", queue="quiz")
+def gc_lesson_videos() -> dict[str, int]:
+    """Daily prune of stale unpublished LessonVideo versions. No-op when
+    LESSON_VIDEO_GC_ENABLED is false. NEVER touches is_published=True versions."""
+    structlog.contextvars.clear_contextvars()
+    if not LESSON_VIDEO_GC_ENABLED:
+        logger.info("gc_lesson_videos_disabled")
+        return {"videos_removed": 0}
+    with SyncSession() as session:
+        removed = _gc_lesson_videos_session(session)
+    logger.info("gc_lesson_videos_done", videos_removed=removed)
+    return {"videos_removed": removed}

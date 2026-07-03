@@ -152,6 +152,16 @@ def _pptx_cache_key(pptx_path: str) -> str:
     return f"{h.hexdigest()}_dpi{SLIDE_DPI}"
 
 
+def _bump_slides_recency(cache_entry_dir: str) -> None:
+    """Refresh the cache-entry directory's mtime to "now" on every hit so the
+    disk GC (tasks/purge_pipeline) treats it as recently used. Best-effort:
+    a read-only mount or a concurrent eviction must never break generation."""
+    try:
+        os.utime(cache_entry_dir, None)
+    except OSError:
+        pass
+
+
 # TTLCache is not thread-safe; the Lock serialises concurrent get/set.
 _slides_cache: TTLCache = TTLCache(
     maxsize=settings.SLIDES_CACHE_MAX_SIZE,
@@ -212,6 +222,10 @@ class VideoService:
                     cache_key=cache_key[:8],
                     count=len(cached_images),
                 )
+                # Bump disk recency even on a memory hit: a still-warm entry that
+                # never touches disk would look "cold" to the mtime-based cache GC
+                # and get evicted, forcing a full LibreOffice re-render next miss.
+                _bump_slides_recency(os.path.dirname(cached_images[0]))
                 return cached_images
 
             cached_dir = os.path.join(cache_dir, cache_key)
@@ -225,6 +239,8 @@ class VideoService:
                     cache_key=cache_key[:8],
                     count=len(cached_images),
                 )
+                # mtime bump = "last used" signal the cache GC evicts by (LRU).
+                _bump_slides_recency(cached_dir)
                 with _slides_cache_lock:
                     _slides_cache[cache_key] = cached_images
                 return cached_images

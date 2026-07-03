@@ -129,6 +129,19 @@ celery_app.conf.update(
             "schedule": timedelta(minutes=RECONCILE_INTERVAL_MINUTES),
             "options": {"queue": "quiz"},
         },
+        # Nightly disk GC (see tasks/purge_pipeline). Same `quiz` queue / single
+        # beat. Spread past the 03:00 purge so the three jobs don't contend for
+        # the celery_quiz worker's two slots at once.
+        "gc-disk-caches-daily": {
+            "task": "gc_disk_caches",
+            "schedule": crontab(hour=4, minute=0),
+            "options": {"queue": "quiz"},
+        },
+        "gc-lesson-videos-daily": {
+            "task": "gc_lesson_videos",
+            "schedule": crontab(hour=4, minute=30),
+            "options": {"queue": "quiz"},
+        },
     },
 )
 

@@ -350,12 +350,19 @@ class VisionAnalysisService:
         path = os.path.join(SUMMARY_CACHE_DIR, f"{key}.txt")
         try:
             with open(path, encoding="utf-8") as f:
-                return f.read().strip()
+                text = f.read().strip()
         except FileNotFoundError:
             return None
         except Exception:
             logger.exception("summary_cache_read_failed", path=str(path))
             return None
+        # Bump mtime = "last used" so the disk GC evicts by true recency, not by
+        # write time. Best-effort — never let a utime error fail a cache hit.
+        try:
+            os.utime(path, None)
+        except OSError:
+            pass
+        return text
 
     def _write_cache(self, key: str, text: str) -> None:
         path = os.path.join(SUMMARY_CACHE_DIR, f"{key}.txt")

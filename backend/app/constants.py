@@ -165,6 +165,32 @@ ASSIGNMENT_MAX_MESSAGE_CHARS: int = 4000       # one private-thread message
 # purge_soft_deleted Celery task physically removes it and its files.
 SOFT_DELETE_PURGE_DAYS: int = 30
 
+# ── Periodic disk GC (tasks/purge_pipeline.gc_disk_caches / gc_lesson_videos) ──
+# Reclaims disk the soft-delete purge never touches: the two reproducible
+# content-hash caches, and stale UNPUBLISHED LessonVideo re-gen versions.
+#
+# Recency for cache eviction is the FS mtime we bump on every cache HIT
+# (os.utime), NOT atime — containers run relatime/noatime so atime never
+# advances on read and an atime-LRU would evict the hottest entries. Both bounds
+# apply per cache: hard-TTL evicts anything unused that long, then a size cap
+# trims the least-recently-used until the cache fits. Caches are always local
+# (never S3) and fully reproducible — a deleted entry just forces a re-render.
+CACHE_GC_ENABLED: bool = True                   # kill-switch for the cache GC pass only
+SLIDES_CACHE_TTL_DAYS: int = 30                 # slides_cache/<hash>/ dirs unused this long → evict
+SLIDES_CACHE_MAX_BYTES: int = 5 * 1024**3       # 5 GiB cap (rendered PNGs are large)
+SUMMARIES_CACHE_TTL_DAYS: int = 60              # .txt summaries: LLM-costly to redo → keep longer
+SUMMARIES_CACHE_MAX_BYTES: int = 512 * 1024**2  # 512 MiB cap
+
+# LessonVideo GC has its OWN kill-switch (separate from the caches): deleting a
+# video version is IRREVERSIBLE, whereas a cache entry is reproducible — on an
+# incident you want to disable video pruning without losing the disk-reclaim
+# that may be the thing keeping storage from filling. NEVER deletes an
+# is_published=True version, and always keeps the newest KEEP_UNPUBLISHED
+# unpublished per lesson (a lesson is never left with zero videos).
+LESSON_VIDEO_GC_ENABLED: bool = True            # kill-switch for the LessonVideo GC pass only
+LESSON_VIDEO_UNPUBLISHED_TTL_DAYS: int = 30     # cold unpublished versions eligible after this
+LESSON_VIDEO_KEEP_UNPUBLISHED: int = 2          # newest N unpublished per lesson always survive
+
 # Startup reconciliation: lessons stuck in non-terminal status (analyzing /
 # processing) for longer than this window are presumed to have lost their Celery
 # task (Redis flushdb or crash without AOF) and are marked error on backend
