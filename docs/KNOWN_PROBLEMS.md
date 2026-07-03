@@ -7,6 +7,9 @@
 > - **Что не так** — симптом или потенциальный сбой
 > - **Почему опасно**
 > - **Фикс** — конкретный шаг, который её решает
+>
+> Решённые пункты из этого документа удалены; остаются только открытые. Нумерация
+> сохраняет исторические номера (на них ссылаются другие доки), поэтому в ней есть пропуски.
 
 ---
 
@@ -23,60 +26,6 @@
 
 ## 1. Security
 
-> **⚠️ Статус на 2026-06-09 — большой блок безопасности из этого раздела УЖЕ РЕШЁН.**
-> Аутентификацию переписали (см. [AUTH_FLOW.md](AUTH_FLOW.md)). Конкретно:
-> - **1.1 (JWT в localStorage)** — ✅ решено: токены теперь в **httpOnly-куках**, не в JS-доступном месте.
-> - **1.2 (refresh не используется)** — ✅ решено: `useApi.ts` делает реактивный refresh на 401 с singleflight.
-> - **1.3 (`bcrypt(sha256)`)** — ✅ решено: пароли на **Argon2id**, sha256-обёртки/bcrypt больше нет.
-> - **1.6 (refresh не отзывается)** — ✅ решено: ротация семейств + детект reuse + blacklist access-jti при logout.
-> - **1.7 (нет rate-limiting)** — ✅ решено: `slowapi` на `/auth/*` (login 5/min, refresh 10/min, register 3/min).
->
-> Подсекции ниже оставлены как исторический контекст «что и зачем чинили». Реально открытыми
-> в этом разделе остаются: **1.4** (`/files/*` — теперь HMAC-подписанные URL, частично закрыто),
-> **1.5** (дефолт `SECRET_KEY`), **1.8** (XXE в `.docx`), **1.9** (CORS).
-
-### 1.1 ⚠ ~~JWT в `localStorage`~~ → ✅ решено (httpOnly-куки), см. баннер выше
-
-- **Где:** [frontend/src/composables/useAuth.ts](../frontend/src/composables/useAuth.ts), [useApi.ts](../frontend/src/composables/useApi.ts).
-- **Что не так:** оба токена (access + refresh) хранятся в `localStorage`.
-- **Почему опасно:** `localStorage` доступен любому JS на странице → XSS немедленно даёт злоумышленнику обе сессии (включая refresh на 30 дней). Любая внешняя зависимость (npm-пакет с supply-chain атакой) тоже может его прочесть.
-- **Фикс:** перенести на httpOnly+Secure cookie + CSRF-токен (двойная отправка). Backend начнёт принимать токены либо из cookie, либо из `Authorization` заголовка, frontend перестанет хранить их в JS-доступном месте.
-
-### 1.2 ⚠ Refresh-токен не используется на фронте
-
-- **Где:** [frontend/src/composables/useApi.ts](../frontend/src/composables/useApi.ts), функция `apiFetch`.
-- **Что не так:** на 401 клиент чистит **оба** токена и редиректит на `/login`. Refresh не дёргается.
-- **Почему опасно:**
-  - UX: пользователя выкидывает каждые 30 минут с потерей контекста (несохранённые правки в SlideTextEditor, открытый PPTX-загрузчик).
-  - Security: если бы refresh-флоу был прикручен, можно было бы делать access-токены жизни 5-10 минут (вместо 30). Сейчас 30 минут — компромисс.
-- **Фикс:**
-  ```ts
-  // useApi.ts (псевдокод)
-  let refreshPromise: Promise<TokenResponse> | null = null
-  catch (err) {
-    if (err?.response?.status === 401 && refresh_token) {
-      if (!refreshPromise) {
-        refreshPromise = $fetch('/auth/refresh', { method: 'POST', body: {refresh_token} })
-          .finally(() => { refreshPromise = null })
-      }
-      const tokens = await refreshPromise
-      persistTokens(tokens)
-      return $fetch(path, { ...options, headers: { Authorization: `Bearer ${tokens.access_token}` } })
-    }
-    // ... existing logout flow
-  }
-  ```
-  Обязательно single-flight (`refreshPromise`) — иначе несколько параллельных 401 устроят гонку refresh-токенов, и часть запросов будет выкинута.
-
-### 1.3 ⚠ `bcrypt(sha256(password))` — уязвимо к password shucking
-
-- **Где:** [backend/app/services/auth_service.py:13](../backend/app/services/auth_service.py).
-- **Что не так:** пароль перед bcrypt хешируется sha256 (чтобы обойти 72-байтный лимит bcrypt). Это превращает любой пароль в 32-байтный SHA-256 digest.
-- **Почему опасно:** если злоумышленник получит отдельную базу sha256-хешей этих же паролей (с другого сервиса), он сразу имеет «плоский» bcrypt-вход — брутфорс упрощается. Это известный анти-паттерн.
-- **Фикс — два варианта:**
-  - **Простой:** ограничить `password: str = Field(min_length=6, max_length=72)` в `UserRegister` и убрать `sha256`-обёртку. Минус: пользователи не могут вводить эмодзи-пароли длиннее 18 символов.
-  - **Правильный:** перейти на argon2id через `passlib[argon2]` или `argon2-cffi`. Изменить `hash_password`/`verify_password` чтобы пробовали оба алгоритма (для миграции старых юзеров).
-
 ### 1.4 ⚠ `/files/*` отдаётся без авторизации — accepted-with-mitigation (MVP)
 
 - **Где:** `services/signed_url_service.py`, `routers/files.py`.
@@ -90,19 +39,6 @@
 - **Где:** [backend/app/config.py:25](../backend/app/config.py) — `SECRET_KEY: str = "change-me"`.
 - **Что не так:** если кто-то забыл поменять `.env`, JWT будут подписаны паролем `change-me`. Любой, кто это знает, сможет выписать себе токен с любой ролью.
 - **Фикс:** убрать дефолт — `SECRET_KEY: str` (без значения), pydantic-settings будет fail-fast если переменная не задана.
-
-### 1.6 Refresh-токен не отзывается
-
-- **Где:** [backend/app/routers/auth.py:refresh](../backend/app/routers/auth.py).
-- **Что не так:** старый refresh после `POST /auth/refresh` остаётся валидным до своего `exp`. Logout на фронте только чистит localStorage, на сервере токен живёт.
-- **Почему опасно:** если refresh утёк (через тот же localStorage XSS) — атакующий может пользоваться им 30 дней, и `logout` пользователя не помогает.
-- **Фикс:** добавить колонку `users.token_version: int = 0`. При выписке токенов класть `tv: user.token_version` в payload. В `decode_token` для refresh-типа сравнивать с текущим значением. `POST /auth/logout` инкрементирует `token_version`. Все refresh-токены этого пользователя инвалидируются.
-
-### 1.7 Нет rate-limiting
-
-- **Где:** весь backend.
-- **Что не так:** brute-force атаки на `/auth/login` ничем не ограничены. Атакующий может перебирать пароли с одного IP с любой скоростью.
-- **Фикс:** `slowapi` (расширение для FastAPI). Базово: на `/auth/login` — 5 запросов в минуту с одного IP. Также обязательно на `/auth/refresh`.
 
 ### 1.8 Загрузка `.docx` через `python-docx` — потенциально XXE / XML-bomb
 
@@ -183,28 +119,6 @@
 
 ## 3. Performance и масштабирование
 
-### 3.1 ~~Один Celery worker на всё~~ → ✅ решено (очереди разделены)
-
-> **✅ Статус на 2026-06-09:** реализовано ровно как предлагалось ниже. В
-> [docker-compose.yml](../docker-compose.yml) теперь отдельные воркеры на очереди `video`/`vision`/`quiz`/`celery_email`
-> (плюс beat в `celery_quiz`). Текст ниже — исторический контекст.
-
-- **Где:** [docker-compose.yml](../docker-compose.yml) — `celery_worker` командой `-c 2`.
-- **Что не так:** обе задачи (`generate_video_lesson` и `analyze_presentation_task`) идут в одну очередь. Когда vision-анализ занимает все 2 слота — генерация видео простаивает.
-- **Фикс:** разделить на 2 очереди:
-  ```python
-  # celery_app.py
-  celery_app.conf.task_routes = {
-      "app.tasks.video_pipeline.*": {"queue": "video"},
-      "app.tasks.vision_pipeline.*": {"queue": "vision"},
-  }
-  ```
-  И запускать два worker'а:
-  ```yaml
-  celery_video:    command: celery ... -Q video -c 2
-  celery_vision:   command: celery ... -Q vision -c 1
-  ```
-
 ### 3.2 N+1 в `_get_owned_lesson` и `_get_owned_course`
 
 - **Где:** [backend/app/routers/lessons.py:26-34](../backend/app/routers/lessons.py), [routers/slides.py:31-39](../backend/app/routers/slides.py), [routers/courses.py:25-31](../backend/app/routers/courses.py).
@@ -243,18 +157,6 @@
   - Запускать LibreOffice как отдельный демон-сервис (libreoffice headless `--accept`) и общаться через UNO API.
   - Или вынести в отдельный микросервис `pptx-renderer` (отдельный контейнер, REST API).
 
-### 3.6 `summarize_presentation` — `Semaphore(4)` фиксированно
-
-- **Где:** [backend/app/services/vision_analysis.py:_SUMMARY_CONCURRENCY](../backend/app/services/vision_analysis.py).
-- **Что не так:** магическое число. На GPU-сервере можно безопасно ставить 8-16, на слабом CPU-хосте даже 4 могут OOM'нуть Ollama.
-- **Фикс:** переменная окружения `VISION_CONCURRENCY=4` с дефолтом.
-
-### 3.7 Два thread-pool в одной задаче — потенциальная контентность
-
-- **Где:** [backend/app/tasks/video_pipeline.py:217-251](../backend/app/tasks/video_pipeline.py).
-- **Что не так:** `tts_pool=4` + `enc_pool=3` = 7 одновременных потоков **на одну задачу**. С двумя prefork worker'ами Celery — до 14 потоков → CPU contention с LibreOffice (одной задачи) и другими процессами.
-- **Фикс:** свести оба пула к одному thread-pool с приоритетами; либо сделать константы env-зависимыми.
-
 ### 3.8 Pre-render слайдов не делается на этапе загрузки PPTX
 
 - **Где:** [backend/app/routers/uploads.py:upload_pptx](../backend/app/routers/uploads.py).
@@ -264,41 +166,6 @@
 ---
 
 ## 4. Maintainability и developer experience
-
-### 4.1 ~~⚠ Нет тестов вообще~~ → ✅ решено (есть suite + CI gate)
-
-> **✅ Статус на 2026-06-09:** в `backend/tests/` теперь есть `unit/` и `integration/` (≈30 файлов)
-> с async-клиентом, фабриками и `testcontainers`-Postgres; CI требует `--cov-fail-under=70`
-> ([.github/workflows/ci.yml](../.github/workflows/ci.yml)). Есть и фронт-тесты на Vitest
-> (`frontend/tests/`). Запуск — см. [CLAUDE.md](../CLAUDE.md) / [DEPLOYMENT.md](DEPLOYMENT.md).
-> Текст ниже — исторический контекст.
-
-- **Где:** `backend/tests/` пуст.
-- **Что не так:** ни одного теста — ни юнит, ни интеграционного. Любой рефакторинг — слепая зона.
-- **Почему опасно:** баг с `MissingGreenlet` после UPDATE Course (раздел 2 [DECISIONS.md](DECISIONS.md)) был бы пойман простым тестом `client.put('/courses/{id}/publish')`.
-- **Фикс:** минимальный набор:
-  ```python
-  # tests/conftest.py
-  @pytest.fixture
-  async def client():
-      transport = httpx.ASGITransport(app=app)
-      async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
-          yield c
-
-  @pytest.fixture
-  async def teacher_token(client):
-      r = await client.post("/api/v1/auth/register", json={...})
-      return r.json()["access_token"]
-
-  # tests/test_courses.py
-  async def test_publish_toggle(client, teacher_token):
-      r = await client.post("/api/v1/courses/", headers={"Authorization": f"Bearer {teacher_token}"}, json={"title": "t"})
-      cid = r.json()["id"]
-      r2 = await client.put(f"/api/v1/courses/{cid}/publish", headers={"Authorization": f"Bearer {teacher_token}"})
-      assert r2.status_code == 200
-      assert r2.json()["is_published"] is True
-  ```
-  Достаточно ~10 тестов на критичные эндпоинты — резко поднимет уверенность при изменениях.
 
 ### 4.2 ⚠ `pages/lessons/[id].vue` — 640 строк
 
@@ -339,24 +206,14 @@
   - `_SILERO_MAX_CHARS = 800` в [tts_service.py](../backend/app/services/tts_service.py).
   - `_SLIDE_DPI = 150` в [video_service.py](../backend/app/services/video_service.py).
   - `MAX_SCRIPT_BYTES = 10 * 1024 * 1024` в [uploads.py](../backend/app/routers/uploads.py).
-  - `_TTS_WORKERS = 4`, `_ENCODE_WORKERS = 3` в [video_pipeline.py](../backend/app/tasks/video_pipeline.py).
-  - `_SUMMARY_CONCURRENCY = 4` в [vision_analysis.py](../backend/app/services/vision_analysis.py).
-- **Что не так:** не очевидно, что эти значения связаны (например, `_TTS_WORKERS` в коде пайплайна должно совпадать с `NUMBER_OF_THREADS=4` в compose-конфиге Silero).
-- **Фикс:** собрать все в `config.py` как `Settings` поля. Связанные — задокументировать в комментарии.
+- **Что не так:** значения-константы разбросаны по сервисам вместо единого места. Часть уже переехала в `app/constants.py` (в т.ч. concurrency-бюджет video/vision), но не всё.
+- **Фикс:** дособрать оставшиеся в `app/constants.py` / `config.py` как `Settings` поля; связанные — задокументировать в комментарии.
 
-### 4.5 ~~Нет линтера/форматтера/CI~~ → частично решено (CI есть, линтер — нет)
+### 4.5 Нет eslint/prettier для frontend
 
-> **Статус на 2026-06-09:** CI появился ([.github/workflows/ci.yml](../.github/workflows/ci.yml),
-> `lint.yml`): test + coverage-gate + build/deploy-скелет под Yandex Cloud. **Но** `lint`-job — пока
-> заглушка: `ruff` ещё не сконфигурирован в `backend/pyproject.toml`, так что линт по факту
-> пропускается (no-op). Открытым остаётся именно подключение ruff/eslint, а не «нет CI».
-
-- **Где:** репозиторий.
-- **Что не так:** `pyrightconfig.json` есть, но не запускается автоматически. Нет `ruff`/`black`/`mypy`. Нет `eslint`/`prettier` для frontend.
-- **Фикс:**
-  - Backend: `ruff` + `black` через `pre-commit`.
-  - Frontend: `eslint` + `prettier` (vue-eslint-parser).
-  - GitHub Actions: lint → tests → build.
+- **Где:** репозиторий (frontend).
+- **Что не так:** backend линтуется `ruff` (правила E/F/I), а для frontend нет `eslint`/`prettier` — стиль и потенциальные баги в `.vue`/`.ts` не проверяются автоматически.
+- **Фикс:** `eslint` + `prettier` (vue-eslint-parser) и отдельный lint-job для frontend в CI.
 
 ### 4.6 Нет CONTRIBUTING.md, нет CHANGELOG.md
 
@@ -380,14 +237,11 @@
 
 ## 5. Operational риски
 
-### 5.1 Миграции запускаются в `lifespan`
+### 5.1 Миграции: race при горизонтальном масштабировании
 
-- **Где:** [backend/app/main.py:_ensure_schema_at_head](../backend/app/main.py).
-- **Что не так:** при старте backend автоматически делает `alembic upgrade head`. В dev — удобно. В проде:
-  - Если миграция тяжёлая (десятки секунд) — readiness probe k8s упадёт.
-  - Если в одной реплике миграция начала выполняться, а вторая стартовала параллельно — race condition (Alembic берёт advisory lock, но всё равно).
-  - Если миграция упадёт — backend не стартует, рестарт-цикл.
-- **Статус: РЕШЕНО.** Авто-`upgrade head` спрятан за флагом `RUN_MIGRATIONS_ON_STARTUP` ([config.py](../backend/app/config.py), дефолт `true` — dev не меняется). В проде `.env.prod` ставит `false`, а миграция запускается one-shot сервисом `migrate` в [docker-compose.prod.yml](../docker-compose.prod.yml) ДО роллаута. Multi-replica race остаётся актуальным только при горизонтальном масштабировании.
+- **Где:** [backend/app/main.py:_ensure_schema_at_head](../backend/app/main.py), [docker-compose.prod.yml](../docker-compose.prod.yml) (сервис `migrate`).
+- **Что не так:** авто-`upgrade head` спрятан за `RUN_MIGRATIONS_ON_STARTUP` (dev), а прод гоняет миграцию one-shot сервисом `migrate` до роллаута — базовый кейс закрыт. Открытым остаётся горизонтальное масштабирование: несколько реплик backend, стартующих параллельно, могут одновременно инициировать миграцию (Alembic берёт advisory lock, но это снижает риск, а не устраняет его).
+- **Фикс:** держать миграцию строго отдельным pre-deploy шагом (в проде уже так); при multi-replica не полагаться на lifespan.
 
 ### 5.2 Нет healthcheck для celery_worker
 
@@ -403,11 +257,11 @@
       retries: 3
   ```
 
-### 5.3 Нет backup БД
+### 5.3 Бэкап БД только на том же хосте
 
-- **Где:** инфра.
-- **Что не так:** `postgres_data` — единственный volume с данными пользователей. Удалили docker volume = потеряли всё.
-- **Статус: РЕШЕНО (single-instance).** Сайдкар `db_backup` в [docker-compose.prod.yml](../docker-compose.prod.yml) периодически делает `pg_dump -Fc` в volume `db_backups` (интервал `BACKUP_INTERVAL_SECONDS`, ретенция `BACKUP_RETENTION_DAYS`). Восстановление — `pg_restore` (см. DEPLOYMENT §7). Off-host копия в Object Storage — post-MVP.
+- **Где:** инфра, [docker-compose.prod.yml](../docker-compose.prod.yml) (сайдкар `db_backup`).
+- **Что не так:** `db_backup` делает `pg_dump -Fc` в volume `db_backups` (ретенция `BACKUP_RETENTION_DAYS`) — это спасает от `docker volume rm`/повреждения данных, но не от потери самого хоста: off-site копии нет.
+- **Фикс:** выгружать дампы в Object Storage / внешнее хранилище (post-MVP).
 
 ### 5.4 `host.docker.internal` не работает на Linux по умолчанию
 
@@ -547,14 +401,13 @@
 
 ## Карта приоритетов
 
-Если есть один спринт на починку, я бы взял в таком порядке:
+Если есть один спринт на починку, разумный порядок среди открытых пунктов:
 
-1. [1.2](#12--refresh-токен-не-используется-на-фронте) — refresh-флоу. Самое заметное для UX.
-2. [4.1](#41--нет-тестов-вообще) — минимальный набор интеграционных тестов на критичные эндпоинты. Защитит от регрессий при следующих фиксах.
-3. [1.4](#14--files-отдаётся-без-авторизации) — авторизованная раздача файлов. Серьёзная утечка контента.
-4. [3.1](#31-один-celery-worker-на-всё) — разделение очередей. Существенно улучшит ощущение скорости.
-5. [2.1](#21--access_code-курса-не-уникален) — UNIQUE на access_code. Простой фикс, легко стрельнуть.
-6. [5.1](#51-миграции-запускаются-в-lifespan) — вынос миграций из lifespan для прода.
+1. **1.4** — авторизованная раздача `/files/*` (per-request signed URLs). Серьёзная утечка контента.
+2. **2.1** — UNIQUE на `access_code`. Простой фикс, легко стрельнуть.
+3. **1.8** — XXE / XML-bomb при загрузке `.docx`.
+4. **2.2** — UNIQUE на `LessonProgress` (гонка двойного insert).
+5. **5.1** — миграции при горизонтальном масштабировании.
 
 ---
 
