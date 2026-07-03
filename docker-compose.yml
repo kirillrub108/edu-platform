@@ -16,6 +16,11 @@ services:
       retries: 10
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   redis:
     image: redis:8-alpine
@@ -26,6 +31,11 @@ services:
       - "6379:6379"
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   silero-tts:
     image: navatusein/silero-tts-service
@@ -42,6 +52,11 @@ services:
     restart: unless-stopped
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   backend:
     build:
@@ -89,6 +104,11 @@ services:
         condition: service_started
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   celery_video:
     build:
@@ -118,6 +138,11 @@ services:
       - silero-tts
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   celery_vision:
     build:
@@ -147,6 +172,11 @@ services:
       - silero-tts
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   celery_quiz:
     build:
@@ -179,6 +209,11 @@ services:
       - redis
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   celery_email_worker:
     build:
@@ -209,6 +244,11 @@ services:
       - redis
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   nginx:
     image: nginx:1.27-alpine
@@ -225,6 +265,11 @@ services:
       - backend
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   prometheus:
     image: prom/prometheus:latest
@@ -240,6 +285,11 @@ services:
       - backend
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   grafana:
     image: grafana/grafana:latest
@@ -257,6 +307,11 @@ services:
       - prometheus
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   flower:
     build:
@@ -274,6 +329,11 @@ services:
       - backend
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   frontend:
     build:
@@ -299,6 +359,11 @@ services:
       - backend
     networks:
       - edu-network
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   postgres_data:
