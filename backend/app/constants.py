@@ -22,6 +22,13 @@ POLZA_TTS_VOICES: tuple[str, ...] = (
 )
 TTS_CACHE_TTL_DAYS: int = 7
 
+# Chunk-level TTS disk cache (tts_service, keyed on _split_for_tts output). This
+# is finer-grained than the whole-slide cache in tasks/video_pipeline.py: a
+# single edited sentence in a long script only re-synthesizes its own chunk
+# instead of invalidating the whole slide's cached audio.
+TTS_CHUNK_CACHE_ENABLED: bool = True
+TTS_CHUNK_CACHE_DIR_NAME: str = "tts_chunk_cache"
+
 # Slide rendering
 SLIDE_DPI: int = 150  # indistinguishable from 300 DPI on 1080p, 4× smaller PNGs
 
@@ -145,6 +152,13 @@ STUCK_LESSON_GRACE_MINUTES: int = 120
 # Worker concurrency
 TTS_WORKERS: int = 4     # matches NUMBER_OF_THREADS in silero-tts docker-compose service
 ENCODE_WORKERS: int = 3  # concurrent FFmpeg processes; leaves headroom for LO and TTS threads
+
+# Segment encoding (still-image slide + narration audio). All segments must use
+# identical params — concatenate_segments joins them with `-c copy` (no re-encode).
+SEGMENT_FPS: int = 5                  # slide is static; 25fps was pure waste
+SEGMENT_AUDIO_BITRATE: str = "96k"    # mono narration doesn't need 192k
+SEGMENT_AUDIO_CHANNELS: int = 1
+SEGMENT_KEYFRAME_SECONDS: int = 2     # keyframe every ~2s keeps in-slide seeking smooth
 
 # ── LLM / vision provider request tuning ─────────────────────────────────────
 # Cloud providers (Polza AI, Yandex AI Studio) add network latency and enforce

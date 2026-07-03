@@ -1,5 +1,6 @@
 import structlog
 import base64
+import hashlib
 import os
 import re
 import subprocess
@@ -16,6 +17,8 @@ from app.constants import (
     POLZA_TTS_MAX_RETRIES,
     POLZA_TTS_VOICES,
     SILERO_MAX_CHARS,
+    TTS_CHUNK_CACHE_DIR_NAME,
+    TTS_CHUNK_CACHE_ENABLED,
 )
 from app.services import usage_service
 
@@ -184,6 +187,54 @@ def _transcode_to_wav(audio: bytes, output_path: str) -> None:
         )
 
 
+# ── Chunk-level TTS disk cache ───────────────────────────────────────────────
+# Cache path: storage/tts_chunk_cache/{sha256[:2]}/{sha256}.wav — mirrors the
+# slides_cache / summaries_cache layout (two-level dir to avoid one directory
+# accumulating thousands of files). Key covers every parameter that affects the
+# resulting audio, so different providers/voices/models/speeds never collide.
+
+def _chunk_cache_key(chunk: str, provider: str, voice: str, model: str, speed: float | None) -> str:
+    h = hashlib.sha256()
+    h.update(chunk.encode("utf-8"))
+    for part in (provider, voice, model or "", "" if speed is None else str(speed)):
+        h.update(b"|")
+        h.update(part.encode("utf-8"))
+    return h.hexdigest()
+
+
+def _chunk_cache_path(cache_key: str) -> str:
+    cache_dir = os.path.join(settings.STORAGE_PATH, TTS_CHUNK_CACHE_DIR_NAME, cache_key[:2])
+    return os.path.join(cache_dir, f"{cache_key}.wav")
+
+
+def _read_chunk_cache(cache_path: str) -> bytes | None:
+    try:
+        if os.path.getsize(cache_path) == 0:
+            return None
+        with open(cache_path, "rb") as f:
+            return f.read()
+    except (FileNotFoundError, OSError):
+        return None
+
+
+def _write_chunk_cache(cache_path: str, data: bytes) -> None:
+    """Write atomically: a sibling tts_pool thread may be reading this same key
+    concurrently, so the file must never be observed half-written."""
+    cache_dir = os.path.dirname(cache_path)
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+        fd, tmp_path = tempfile.mkstemp(dir=cache_dir, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            os.replace(tmp_path, cache_path)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
+    except Exception:
+        logger.warning("tts_chunk_cache_write_failed", path=cache_path)
+
+
 class TTSService:
     def synthesize(self, text: str, output_path: str, voice: str | None = None) -> str:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -238,20 +289,35 @@ class TTSService:
                 tmp.close()
                 tmp_paths.append(tmp.name)
 
-                try:
-                    response = httpx.get(
-                        url,
-                        params={"INPUT_TEXT": chunk, "VOICE": voice},
-                        timeout=120,
-                    )
-                    response.raise_for_status()
-                except httpx.HTTPError as exc:
-                    raise RuntimeError(
-                        f"Silero TTS request failed ({settings.SILERO_TTS_URL}): {exc}"
-                    ) from exc
+                cache_path = (
+                    _chunk_cache_path(_chunk_cache_key(chunk, "silero", voice, "", None))
+                    if TTS_CHUNK_CACHE_ENABLED
+                    else None
+                )
+                cached = _read_chunk_cache(cache_path) if cache_path else None
 
-                with open(tmp.name, "wb") as f:
-                    f.write(response.content)
+                if cached is not None:
+                    logger.info("tts_chunk_cache_hit", chunk=i)
+                    with open(tmp.name, "wb") as f:
+                        f.write(cached)
+                else:
+                    try:
+                        response = httpx.get(
+                            url,
+                            params={"INPUT_TEXT": chunk, "VOICE": voice},
+                            timeout=120,
+                        )
+                        response.raise_for_status()
+                    except httpx.HTTPError as exc:
+                        raise RuntimeError(
+                            f"Silero TTS request failed ({settings.SILERO_TTS_URL}): {exc}"
+                        ) from exc
+
+                    with open(tmp.name, "wb") as f:
+                        f.write(response.content)
+
+                    if cache_path:
+                        _write_chunk_cache(cache_path, response.content)
 
             _concat_wav(tmp_paths, output_path)
         finally:
@@ -297,11 +363,28 @@ class TTSService:
         tmp_paths: list[str] = []
         try:
             for chunk in chunks:
-                audio = self._polza_speech_request(chunk, polza_voice)
                 tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                 tmp.close()
                 tmp_paths.append(tmp.name)
-                _transcode_to_wav(audio, tmp.name)
+
+                cache_key = _chunk_cache_key(
+                    chunk, "polza", polza_voice, settings.POLZA_TTS_MODEL, settings.POLZA_TTS_SPEED
+                )
+                cache_path = _chunk_cache_path(cache_key) if TTS_CHUNK_CACHE_ENABLED else None
+                cached = _read_chunk_cache(cache_path) if cache_path else None
+
+                if cached is not None:
+                    logger.info("tts_chunk_cache_hit", provider="polza")
+                    with open(tmp.name, "wb") as f:
+                        f.write(cached)
+                else:
+                    # Result is cached post-transcode (WAV) so a hit skips both
+                    # the HTTP call and the ffmpeg transcode below.
+                    audio = self._polza_speech_request(chunk, polza_voice)
+                    _transcode_to_wav(audio, tmp.name)
+                    if cache_path:
+                        with open(tmp.name, "rb") as f:
+                            _write_chunk_cache(cache_path, f.read())
 
             _concat_wav(tmp_paths, output_path)
         finally:

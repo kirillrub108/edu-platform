@@ -29,6 +29,15 @@ from app.services.tts_service import (
 pytestmark = pytest.mark.unit
 
 
+@pytest.fixture(autouse=True)
+def _isolate_tts_chunk_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests reuse identical text/voice across functions and assert the
+    (mocked) network call happens every time; the session-wide STORAGE_PATH
+    would let the new chunk cache serve a later test from an earlier test's
+    cache entry. Give each test its own cache directory instead."""
+    monkeypatch.setattr(tts_mod.settings, "STORAGE_PATH", str(tmp_path))
+
+
 # ── _strip_ssml_tags ────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize(
@@ -531,7 +540,9 @@ def test_polza_long_text_chunks_and_concats(
 
     monkeypatch.setattr(tts_mod.httpx, "post", _fake_post)
 
-    text = "Это первое предложение. " * 10  # ~240 chars → must split at 60
+    # Each sentence is distinct (unlike a literal repeat) so the new chunk-level
+    # cache in tts_service doesn't dedupe identical chunks within this call.
+    text = "".join(f"Это предложение номер {i}. " for i in range(10))  # ~290 chars → must split at 60
     out_path = tmp_path / "long.wav"
     tts_service.synthesize(text, str(out_path))
 

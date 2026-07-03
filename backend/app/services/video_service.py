@@ -13,7 +13,14 @@ from cachetools import TTLCache
 from pptx import Presentation
 
 from app.config import settings
-from app.constants import ENCODE_WORKERS as _ENCODE_WORKERS_DEFAULT, SLIDE_DPI
+from app.constants import (
+    ENCODE_WORKERS as _ENCODE_WORKERS_DEFAULT,
+    SEGMENT_AUDIO_BITRATE,
+    SEGMENT_AUDIO_CHANNELS,
+    SEGMENT_FPS,
+    SEGMENT_KEYFRAME_SECONDS,
+    SLIDE_DPI,
+)
 
 # Bundled LibreOffice font-substitution profile; maps Windows/macOS emoji fonts
 # (Segoe UI Emoji, Apple Color Emoji) to Noto Color Emoji which is installed in
@@ -154,7 +161,7 @@ _slides_cache_lock = threading.Lock()
 
 
 class VideoService:
-    FRAME_RATE = 25
+    FRAME_RATE = SEGMENT_FPS
     _ENCODE_WORKERS = _ENCODE_WORKERS_DEFAULT
 
     def extract_slide_texts(self, pptx_path: str) -> list[str]:
@@ -330,12 +337,16 @@ class VideoService:
                 "fast",
                 "-r",
                 str(self.FRAME_RATE),
+                "-g",
+                str(self.FRAME_RATE * SEGMENT_KEYFRAME_SECONDS),
                 "-bf",
                 "0",
                 "-c:a",
                 "aac",
+                "-ac",
+                str(SEGMENT_AUDIO_CHANNELS),
                 "-b:a",
-                "192k",
+                SEGMENT_AUDIO_BITRATE,
                 "-ar",
                 "48000",
                 "-pix_fmt",
