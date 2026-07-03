@@ -161,6 +161,9 @@ const videoExamples = computed(() => {
 })
 
 const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
+
+// ── Top-up temporarily disabled — see docs/DECISIONS.md ────────────────────────
+const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScoZQb5VAXVRV2XuWIBxZcdCIfJBPJ5Kujz9-hpxxVf3PoOag/viewform'
 </script>
 
 <template>
@@ -276,8 +279,33 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
             </div>
           </section>
 
-          <!-- Top-up packs -->
-          <section id="packs" class="scroll-mt-24">
+          <!-- Top-up packs (temporarily disabled — blurred behind an overlay, logic kept intact) -->
+          <section id="packs" class="relative scroll-mt-24">
+            <!-- Overlay -->
+            <div
+              class="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/50 p-4"
+            >
+              <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 max-w-sm text-center space-y-3">
+                <h3 class="text-base font-semibold text-gray-900">В разработке</h3>
+                <p class="text-sm text-gray-500">
+                  Если вам интересен данный продукт, напишите нам, и мы сможем предоставить вам
+                  дополнительные генерации.
+                </p>
+                <a
+                  :href="GOOGLE_FORM_URL"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="inline-flex items-center justify-center gap-2 text-sm font-medium px-5 py-2.5 rounded-xl
+                         bg-brand-gradient text-white shadow-soft hover:shadow-soft-hover hover:brightness-110
+                         active:brightness-95 active:scale-[0.97] transition-all duration-150 ease-out"
+                >
+                  Написать нам
+                </a>
+              </div>
+            </div>
+
+            <!-- Blurred content, non-interactive -->
+            <div class="pointer-events-none select-none blur-sm">
             <h2 class="text-base font-semibold text-gray-900 mb-1">Разовое пополнение</h2>
             <p class="text-xs text-gray-500 mb-3">
               Кредиты не сгорают.
@@ -356,6 +384,7 @@ const signed = (n: number) => (n > 0 ? `+${n}` : `${n}`)
                   Купить
                 </UiButton>
               </div>
+            </div>
             </div>
           </section>
 
