@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Callable
+from urllib.parse import unquote
 
 import structlog
 from sqlalchemy import select
@@ -51,7 +52,9 @@ def _rel_from_url(url: str | None) -> str | None:
     idx = url.find(marker)
     if idx == -1:
         return None
-    return url[idx + len(marker):].split("?", 1)[0]
+    # generate_signed_url percent-encodes the path segment; undo that to get
+    # the actual on-disk relative path.
+    return unquote(url[idx + len(marker):].split("?", 1)[0])
 
 
 def _remove_file(rel_path: str | None) -> None:

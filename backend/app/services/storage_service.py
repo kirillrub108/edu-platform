@@ -4,7 +4,7 @@ import os
 import uuid
 from pathlib import Path
 from typing import Protocol
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from fastapi import UploadFile
 
@@ -217,7 +217,9 @@ class StorageService:
             idx = stored_url.find(marker)
             if idx == -1:
                 return None
-            rel = stored_url[idx + len(marker):].split("?", 1)[0]
+            # generate_signed_url percent-encodes the path; undo that so callers
+            # (e.g. resign_url -> get_url) get the raw path and don't double-encode.
+            rel = unquote(stored_url[idx + len(marker):].split("?", 1)[0])
             return rel or None
         # S3: object key sits after the /{bucket}/ prefix of the presigned URL.
         return self._extract_s3_relative(stored_url)

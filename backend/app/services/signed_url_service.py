@@ -9,7 +9,7 @@ to avoid timing side-channels. The signature *is* the auth mechanism for
 import hashlib
 import hmac
 import time
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from app.config import settings
 
@@ -39,7 +39,11 @@ def generate_signed_url(file_path: str, user_id: str, expires_in: int | None = N
     payload = f"{clean_path}:{user_id}:{expires_at}"
     sig = _sign(payload)
     query = urlencode({"uid": user_id, "expires": expires_at, "sig": sig})
-    return f"/files/{clean_path}?{query}"
+    # Percent-encode the path (keeping "/" as a separator) so filenames with
+    # "#", spaces, etc. can't truncate the URL as a fragment or break the query
+    # string. The consuming routes (files.py) decode this back before verifying.
+    encoded_path = quote(clean_path, safe="/")
+    return f"/files/{encoded_path}?{query}"
 
 
 def verify_signed_url(file_path: str, user_id: str, expires: int, sig: str) -> bool:
