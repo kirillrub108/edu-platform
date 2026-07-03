@@ -118,6 +118,47 @@ class Settings(BaseSettings):
     # by its own rate limits instead, so the pool is tunable per deployment.
     POLZA_TTS_WORKERS: int = 4
 
+    # ── Worker-concurrency overrides (auto-derived from CPU in constants.py) ──
+    # Each is None → constants._derive_concurrency picks a value from the usable
+    # CPU count (with floors/caps). Set one to PIN it (manual mode, used
+    # verbatim). CPU_BUDGET caps the core count the formula sees, for
+    # cgroup-limited containers where os.cpu_count() reports host cores.
+    # Blank / non-numeric / <=0 → treated as unset (auto). TTS_WORKERS is ALSO
+    # read by docker-compose as the Silero NUMBER_OF_THREADS, so pinning it keeps
+    # the TTS pool and the Silero container in lockstep (a hard invariant).
+    CPU_BUDGET: int | None = None
+    TTS_WORKERS: int | None = None
+    ENCODE_WORKERS: int | None = None
+    VIDEO_CONCURRENCY: int | None = None
+    VISION_SUMMARY_CONCURRENCY: int | None = None
+
+    @field_validator(
+        "CPU_BUDGET",
+        "TTS_WORKERS",
+        "ENCODE_WORKERS",
+        "VIDEO_CONCURRENCY",
+        "VISION_SUMMARY_CONCURRENCY",
+        mode="before",
+    )
+    @classmethod
+    def _sanitize_concurrency_override(cls, v: object) -> int | None:
+        """Blank / non-numeric / <=0 env → None (fall back to auto-derivation).
+
+        Keeps a typo'd or empty override from crashing boot; constants.py then
+        supplies a safe floored value instead.
+        """
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return None
+        try:
+            n = int(v)
+        except (TypeError, ValueError):
+            return None
+        return n if n > 0 else None
+
     # Billing admin — shared secret for /api/v1/billing/admin/* endpoints,
     # checked against the X-Admin-Token header. Empty disables admin access.
     ADMIN_API_TOKEN: str = ""

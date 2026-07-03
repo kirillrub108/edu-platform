@@ -143,7 +143,9 @@ services:
   silero-tts:
     image: navatusein/silero-tts-service
     environment:
-      NUMBER_OF_THREADS: 4
+      # Single source of truth with the TTS pool in constants.py — MUST stay
+      # equal (both read ${TTS_WORKERS}). Pin TTS_WORKERS in .env.prod per host.
+      NUMBER_OF_THREADS: ${TTS_WORKERS:-4}
       LANGUAGE: ru
       SAMPLE_RATE: 48000
     volumes:
@@ -234,7 +236,7 @@ services:
     command: >
       celery -A app.celery_app worker
       --pool=prefork
-      --concurrency=2
+      --concurrency=${VIDEO_CONCURRENCY:-2}
       --queues=video
       --hostname=video@%h
       --loglevel=info
@@ -265,7 +267,7 @@ services:
     command: >
       celery -A app.celery_app worker
       --pool=prefork
-      --concurrency=1
+      --concurrency=${VISION_TASK_CONCURRENCY:-1}
       --queues=vision
       --hostname=vision@%h
       --loglevel=info

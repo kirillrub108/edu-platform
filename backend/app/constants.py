@@ -1,3 +1,5 @@
+import os
+
 from app.config import settings
 
 # Signed URL lifetimes (seconds). SIGNED_URL_EXPIRES_IN in config.py is the
@@ -198,9 +200,57 @@ LESSON_VIDEO_KEEP_UNPUBLISHED: int = 2          # newest N unpublished per lesso
 # in-flight tasks during a rolling restart are not disturbed.
 STUCK_LESSON_GRACE_MINUTES: int = 120
 
-# Worker concurrency
-TTS_WORKERS: int = 4     # matches NUMBER_OF_THREADS in silero-tts docker-compose service
-ENCODE_WORKERS: int = 3  # concurrent FFmpeg processes; leaves headroom for LO and TTS threads
+# ── Worker-concurrency budget ────────────────────────────────────────────────
+# Video/vision pool sizes are derived from the usable CPU count so a small host
+# doesn't oversubscribe (thread contention, KNOWN_PROBLEMS §3.7) and a big host
+# scales up. Each knob has an env-override in config.Settings (None → auto);
+# an override is used VERBATIM (manual mode) and is NOT re-clamped.
+#
+# INVARIANT: TTS_WORKERS must equal the Silero container's NUMBER_OF_THREADS.
+# Both docker-compose services read the SAME ${TTS_WORKERS} env var, so pinning
+# it moves the pool and Silero together; not re-clamping the override is what
+# keeps them exactly equal. Leave it unset only on ~4-core hosts, where the auto
+# value (4) matches the compose fallback (see .env.example).
+_CORE_CAP: int = 12   # ignore cores beyond this when scaling pools
+_PEAK_MULT: int = 3   # guardrail asserted in tests: VIDEO_CONCURRENCY*(TTS+ENCODE)
+                      # stays <= _PEAK_MULT * cores. >1 because TTS/vision threads
+                      # mostly block on Silero/LLM IO, not local CPU.
+
+
+def _clamp(value: int, low: int, high: int) -> int:
+    return max(low, min(value, high))
+
+
+def _derive_concurrency(cores: int) -> dict[str, int]:
+    """Derive video/vision pool sizes from the usable CPU count.
+
+    Floors keep the pipeline functional on tiny hosts (TTS>=2, ENCODE>=1,
+    VIDEO>=1, VISION>=1); caps stop a many-core host from spawning hundreds of
+    threads. At 4 cores this returns the historical 4/3/4 with 1 parallel lesson.
+    """
+    c = _clamp(cores, 1, _CORE_CAP)
+    return {
+        "TTS_WORKERS": _clamp(c, 2, 6),                 # == Silero NUMBER_OF_THREADS
+        "ENCODE_WORKERS": _clamp(c - 1, 1, 4),          # ffmpeg, CPU-bound
+        "VISION_SUMMARY_CONCURRENCY": _clamp(c, 1, 6),  # IO-bound provider calls
+        # parallel lessons — 2nd lesson only from 8 cores so peak threads stay
+        # under _PEAK_MULT*cores at every core count (verified in the unit test).
+        "VIDEO_CONCURRENCY": 1 if c <= 7 else (2 if c <= 11 else 3),
+    }
+
+
+# os.cpu_count() over-reports inside a cgroup-limited container, so CPU_BUDGET
+# (env) caps it; None-safe fallback to 1 core.
+_HOST_CORES: int = os.cpu_count() or 1
+_USABLE_CORES: int = min(_HOST_CORES, settings.CPU_BUDGET) if settings.CPU_BUDGET else _HOST_CORES
+_AUTO: dict[str, int] = _derive_concurrency(_USABLE_CORES)
+
+# Env-override wins verbatim; None → derived value.
+TTS_WORKERS: int = settings.TTS_WORKERS or _AUTO["TTS_WORKERS"]
+ENCODE_WORKERS: int = settings.ENCODE_WORKERS or _AUTO["ENCODE_WORKERS"]
+# Parallel video lessons per worker. The pipeline itself is one-lesson-per-task;
+# this is the celery_video --concurrency, wired from the same env in compose.
+VIDEO_CONCURRENCY: int = settings.VIDEO_CONCURRENCY or _AUTO["VIDEO_CONCURRENCY"]
 
 # Segment encoding (still-image slide + narration audio). All segments must use
 # identical params — concatenate_segments joins them with `-c copy` (no re-encode).
@@ -221,9 +271,12 @@ LLM_REQUEST_TIMEOUT_SECONDS: float = 120.0
 LLM_MAX_RETRIES: int = 3
 VISION_REQUEST_TIMEOUT_SECONDS: float = 180.0  # base64 images → heavier requests
 VISION_MAX_RETRIES: int = 3
-# Parallel vision-summary calls (the alignment-hint pass). Bounded to stay under
-# provider rate limits.
-VISION_SUMMARY_CONCURRENCY: int = 4
+# Parallel vision-summary calls (the alignment-hint pass) — bounded to stay under
+# provider rate limits. Auto-derived from CPU; see the worker-concurrency budget
+# above and its config.Settings override.
+VISION_SUMMARY_CONCURRENCY: int = (
+    settings.VISION_SUMMARY_CONCURRENCY or _AUTO["VISION_SUMMARY_CONCURRENCY"]
+)
 
 # Quiz
 # default for new quizzes; per-quiz override in Quiz.pass_threshold
