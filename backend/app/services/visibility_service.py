@@ -17,7 +17,12 @@ independent; hiding is purely a read-time effect of this AND.
 
 from app.models.course import Course
 from app.models.lesson import Lesson, Module
-from app.schemas.course import LessonShort, ModuleOut
+from app.schemas.course import (
+    LessonShort,
+    ModuleOut,
+    PreviewLessonRead,
+    PreviewModuleRead,
+)
 
 
 def module_visible_to_student(module: Module) -> bool:
@@ -45,5 +50,25 @@ def visible_module_tree(course: Course) -> list[ModuleOut]:
             for lesson in module.lessons
             if lesson_visible_to_student(module, lesson)
         ]
+        tree.append(out)
+    return tree
+
+
+def annotated_module_tree(course: Course) -> list[PreviewModuleRead]:
+    """Owner preview ('view as student'): the FULL tree, nothing pruned, with
+    each node annotated with its effective student visibility.
+
+    Same eager-loading expectations as `visible_module_tree`.
+    """
+    tree: list[PreviewModuleRead] = []
+    for module in course.modules:
+        out = PreviewModuleRead.model_validate(module)
+        out.visible_to_student = module_visible_to_student(module)
+        lessons: list[PreviewLessonRead] = []
+        for lesson in module.lessons:
+            lesson_out = PreviewLessonRead.model_validate(lesson)
+            lesson_out.visible_to_student = lesson_visible_to_student(module, lesson)
+            lessons.append(lesson_out)
+        out.lessons = lessons
         tree.append(out)
     return tree

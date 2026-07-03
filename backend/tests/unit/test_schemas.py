@@ -39,25 +39,28 @@ def test_video_generate_request_rejects_invalid_voice(voice: str) -> None:
 
 # ── UserRegister ────────────────────────────────────────────────────────────
 
+CONSENTS = {"accepted_privacy": True, "accepted_terms": True}
+
+
 def test_user_register_accepts_teacher_role() -> None:
-    u = UserRegister(email="x@y.com", password="password123", role="teacher")
+    u = UserRegister(email="x@y.com", password="password123", role="teacher", **CONSENTS)
     assert u.role.value == "teacher"
 
 
 def test_user_register_accepts_student_role() -> None:
-    u = UserRegister(email="x@y.com", password="password123", role="student")
+    u = UserRegister(email="x@y.com", password="password123", role="student", **CONSENTS)
     assert u.role.value == "student"
 
 
 def test_user_register_rejects_unknown_role() -> None:
     with pytest.raises(ValidationError):
-        UserRegister(email="x@y.com", password="password123", role="admin")
+        UserRegister(email="x@y.com", password="password123", role="admin", **CONSENTS)
 
 
 @pytest.mark.parametrize("password", ["short", "1234567", ""])
 def test_user_register_rejects_short_password(password: str) -> None:
     with pytest.raises(ValidationError):
-        UserRegister(email="x@y.com", password=password)
+        UserRegister(email="x@y.com", password=password, **CONSENTS)
 
 
 # ── CourseCreate ────────────────────────────────────────────────────────────

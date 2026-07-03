@@ -7,6 +7,7 @@ from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from redis.asyncio import Redis
 from sqlalchemy import desc, func, select, update
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -63,6 +64,11 @@ def _lesson_out(
     out = LessonOut.model_validate(lesson)
     out.video_url = storage_service.resign_url(out.video_url, user_id, expires_in=SIGNED_URL_TTL_VIDEO)
     out.published_video = published_video
+    # Only when the module relationship is already loaded (get_owned_lesson
+    # joinedloads it) — touching an unloaded relationship on AsyncSession
+    # would raise MissingGreenlet.
+    if "module" not in sa_inspect(lesson).unloaded:
+        out.course_id = lesson.module.course_id
     return out
 
 

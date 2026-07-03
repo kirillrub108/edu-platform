@@ -1,11 +1,14 @@
 /**
- * Guards the student lesson page's tabbed layout.
+ * Guards the student lesson view's tabbed layout.
  *
  * Same constraint as teacher-lesson-comments.test.ts: there is no component-mount
  * harness here (@vue/test-utils isn't a dependency and npm is banned), so these
- * assert that the page source wires the tab interface up the same way the teacher
+ * assert that the view source wires the tab interface up the same way the teacher
  * page does — UiTabs + query-driven ?tab, three accessible tab panels, status
  * badges, and a single repositioned CommentsPanel.
+ *
+ * The page body lives in components/student/LessonView.vue (shared between the
+ * student page and the teacher preview); the page itself is a thin wrapper.
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -16,10 +19,20 @@ const studentLessonPage = resolve(
   process.cwd(),
   'src/pages/student/courses/[courseId]/lessons/[lessonId].vue',
 )
+const lessonView = resolve(process.cwd(), 'src/components/student/LessonView.vue')
 const uiTabs = resolve(process.cwd(), 'src/components/UiTabs.vue')
 
-describe('student lesson page tabs', () => {
+describe('student lesson page wrapper', () => {
   const source = readFileSync(studentLessonPage, 'utf-8')
+
+  it('renders the shared LessonView without the preview flag', () => {
+    expect(source).toMatch(/<StudentLessonView[^>]*:lesson-id="lessonId"/)
+    expect(source).not.toContain(' preview')
+  })
+})
+
+describe('student lesson view tabs', () => {
+  const source = readFileSync(lessonView, 'utf-8')
 
   it('renders the shared UiTabs with the three lesson tabs', () => {
     expect(source).toContain('<UiTabs')

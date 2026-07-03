@@ -6,6 +6,9 @@ const props = defineProps<{
   lessonId: string
   canDelete: (c: Comment) => boolean
   canEdit?: (c: Comment) => boolean
+  // Preview mode: comments are visible but the composer is hidden — the
+  // teacher's dry-run must not write anything.
+  readonly?: boolean
 }>()
 
 const commentsStore = useCommentsStore()
@@ -83,7 +86,7 @@ onBeforeUnmount(() => {
       </h3>
     </header>
 
-    <form class="p-4 border-b border-gray-100 space-y-2" @submit.prevent="submit">
+    <form v-if="!readonly" class="p-4 border-b border-gray-100 space-y-2" @submit.prevent="submit">
       <textarea
         v-model="draft"
         rows="3"

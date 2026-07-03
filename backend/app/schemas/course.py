@@ -104,6 +104,34 @@ class CourseDetail(CourseOut):
     modules: list[ModuleOut] = []
 
 
+class PreviewLessonRead(LessonShort):
+    visible_to_student: bool = False
+
+
+class PreviewModuleRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    order: int
+    is_published: bool
+    visible_to_student: bool = False
+    lessons: list[PreviewLessonRead] = []
+
+
+class CoursePreviewTreeRead(BaseModel):
+    """Owner-only 'view as student' tree: the FULL module/lesson list where
+    every node carries its effective student visibility."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    title: str
+    description: str | None
+    is_published: bool
+    modules: list[PreviewModuleRead] = []
+
+
 class CoursePreview(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

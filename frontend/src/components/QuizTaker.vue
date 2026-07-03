@@ -31,6 +31,9 @@ interface AttemptsData {
 
 const props = defineProps<{
   lessonId: string
+  // Teacher «view as student» dry-run: owner endpoints + client-side grading,
+  // nothing is written to the backend (no attempts, no LLM grading).
+  preview?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -42,17 +45,26 @@ const emit = defineEmits<{
 
 const lessonIdRef = computed(() => props.lessonId)
 
+// `preview` is fixed for the component's lifetime (set by the page), so the
+// conditional composable call is stable across re-renders.
+const previewAttempt = props.preview ? useQuizPreview(lessonIdRef) : null
 const {
   info, attemptId, questions, responses, result,
   loading, submitting, error, hasQuiz, saveStatus, gradingPending,
   fetchInfo, start, setResponse, submit, reset,
-} = useQuizAttempt(lessonIdRef)
+} = previewAttempt ?? useQuizAttempt(lessonIdRef)
+
+const quizStatus = previewAttempt?.quizStatus ?? ref<'draft' | 'published' | null>(null)
+const previewDraftQuiz = computed(
+  () => props.preview && hasQuiz.value && quizStatus.value !== 'published',
+)
 
 const { apiFetch } = useApi()
 const attemptsData = ref<AttemptsData | null>(null)
 const attemptsLoading = ref(false)
 
 const loadAttempts = async () => {
+  if (props.preview) return // dry-run: no attempts exist, endpoint is student-only
   if (!hasQuiz.value) return
   attemptsLoading.value = true
   try {
@@ -172,7 +184,13 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
 <template>
   <section class="bg-white rounded-2xl border border-gray-100 shadow-soft p-5 space-y-4">
     <header class="flex items-center justify-between gap-3 flex-wrap">
-      <h2 class="text-lg font-semibold text-gray-900">Тест</h2>
+      <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
+        Тест
+        <span
+          v-if="previewDraftQuiz"
+          class="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700"
+        >Студент не увидит</span>
+      </h2>
       <div v-if="info" class="text-xs text-gray-500">
         Попыток: {{ info.attempts_used }}<template v-if="info.attempts_allowed !== null"> / {{ info.attempts_allowed }}</template>
         <span class="ml-2">Порог: {{ Math.round(Number(info.pass_threshold) * 100) }}%</span>
@@ -197,9 +215,9 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
         <span
           v-if="result.status === 'graded'"
           class="text-xl font-semibold"
-          :class="result.passed ? 'text-green-600' : 'text-red-600'"
+          :class="result.passed === null ? 'text-gray-600' : result.passed ? 'text-green-600' : 'text-red-600'"
         >
-          {{ result.passed ? 'Тест пройден' : 'Тест не пройден' }}
+          {{ result.passed === null ? 'Ответы проверены' : result.passed ? 'Тест пройден' : 'Тест не пройден' }}
         </span>
         <span
           v-else-if="result.status === 'submitted'"
@@ -255,6 +273,12 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
             </template>
             <template v-else-if="q.type === 'short_answer'">
               Эталон: <b>{{ answerFor(q.id)!.correct_payload!.reference_answer }}</b>
+              <template v-if="preview && answerFor(q.id)!.correct_payload!.rubric">
+                <br />Критерии: {{ answerFor(q.id)!.correct_payload!.rubric }}
+              </template>
+            </template>
+            <template v-else-if="q.type === 'essay'">
+              Критерии: <b>{{ answerFor(q.id)!.correct_payload!.rubric }}</b>
             </template>
           </div>
 
@@ -398,7 +422,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
           :disabled="submitting"
           @click="submit"
         >
-          {{ submitting ? '…' : 'Отправить ответы' }}
+          {{ submitting ? '…' : preview ? 'Проверить' : 'Отправить ответы' }}
         </button>
         <span v-if="!allAnswered" class="text-xs text-gray-500">
           Можно отправить и без всех ответов — пустые засчитаются как неверные.
@@ -409,7 +433,10 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
     <!-- Lobby -->
     <template v-else-if="info">
       <div class="text-sm text-gray-600">
-        <p v-if="remaining !== null && remaining === 0" class="text-rose-600">
+        <p v-if="preview">
+          Пробное прохождение — результат нигде не сохранится.
+        </p>
+        <p v-else-if="remaining !== null && remaining === 0" class="text-rose-600">
           Лимит попыток исчерпан.
         </p>
         <p v-else>
@@ -420,7 +447,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
       <button
         type="button"
         class="px-4 py-2 bg-violet-600 text-white rounded-lg text-sm"
-        :disabled="remaining === 0"
+        :disabled="!preview && remaining === 0"
         @click="start"
       >Начать тест</button>
     </template>

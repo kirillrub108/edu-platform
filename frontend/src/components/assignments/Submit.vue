@@ -10,7 +10,13 @@ import {
   submissionIsComplete,
 } from '~/utils/assignments'
 
-const props = defineProps<{ assignment: AssignmentStudent }>()
+const props = defineProps<{
+  assignment: AssignmentStudent
+  // Teacher «view as student» dry-run: all submission actions are disabled.
+  preview?: boolean
+}>()
+
+const PREVIEW_TOOLTIP = 'Недоступно в предпросмотре'
 
 const store = useAssignmentsStore()
 
@@ -61,6 +67,7 @@ const refresh = async () => {
 }
 
 const onSaveDraft = async () => {
+  if (props.preview) return
   saving.value = true
   error.value = null
   try {
@@ -77,6 +84,7 @@ const onSaveDraft = async () => {
 }
 
 const onSubmit = async () => {
+  if (props.preview) return
   submitting.value = true
   error.value = null
   try {
@@ -95,6 +103,7 @@ const onSubmit = async () => {
 const onPickFile = () => fileInput.value?.click()
 
 const onFileChange = async (event: Event) => {
+  if (props.preview) return
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
   input.value = '' // allow re-selecting the same file later
@@ -185,8 +194,17 @@ const onSendMessage = async (body: string) => {
 
     <!-- Answer -->
     <div>
+      <div v-if="preview" class="space-y-1.5" :title="PREVIEW_TOOLTIP">
+        <span class="block text-sm font-medium text-gray-400">Ваш ответ</span>
+        <textarea
+          disabled
+          rows="4"
+          placeholder="Введите текст ответа…"
+          class="w-full rounded-xl border border-gray-200 bg-gray-50 px-4 py-2.5 text-sm cursor-not-allowed"
+        />
+      </div>
       <UiInput
-        v-if="!locked"
+        v-else-if="!locked"
         v-model="text"
         as="textarea"
         :rows="6"
@@ -210,7 +228,8 @@ const onSendMessage = async (body: string) => {
           size="sm"
           variant="secondary"
           :loading="uploading"
-          :disabled="submissionFiles.length >= assignment.max_files"
+          :disabled="preview || submissionFiles.length >= assignment.max_files"
+          :title="preview ? PREVIEW_TOOLTIP : undefined"
           @click="onPickFile"
         >
           <template #icon><Paperclip class="w-3.5 h-3.5" /></template>
@@ -250,10 +269,23 @@ const onSendMessage = async (body: string) => {
     <p v-if="error" class="text-sm text-rose-600">{{ error }}</p>
 
     <div v-if="!locked" class="flex items-center gap-2">
-      <UiButton variant="secondary" size="sm" :loading="saving" :disabled="isSubmitted && !hasChanges" @click="onSaveDraft">
+      <UiButton
+        variant="secondary"
+        size="sm"
+        :loading="saving"
+        :disabled="preview || (isSubmitted && !hasChanges)"
+        :title="preview ? PREVIEW_TOOLTIP : undefined"
+        @click="onSaveDraft"
+      >
         Сохранить черновик
       </UiButton>
-      <UiButton size="sm" :loading="submitting" :disabled="!canSubmit || (isSubmitted && !hasChanges)" @click="onSubmit">
+      <UiButton
+        size="sm"
+        :loading="submitting"
+        :disabled="preview || !canSubmit || (isSubmitted && !hasChanges)"
+        :title="preview ? PREVIEW_TOOLTIP : undefined"
+        @click="onSubmit"
+      >
         Сдать работу
       </UiButton>
     </div>

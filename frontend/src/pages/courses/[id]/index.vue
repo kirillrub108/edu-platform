@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Trash2, Archive } from 'lucide-vue-next'
+import { Trash2, Archive, Eye } from 'lucide-vue-next'
 
 definePageMeta({ middleware: ['auth', 'teacher'] })
 
@@ -73,6 +73,16 @@ const updateModuleTitle = async (moduleId: string, newTitle: string) => {
     savingModuleTitle.value = { ...savingModuleTitle.value, [moduleId]: false }
   }
 }
+
+// Teacher «view as student» preview entry points; ?from returns the teacher
+// here on exit, ?module_id autofocuses a module.
+const previewCourseUrl = computed(
+  () => `/courses/${route.params.id}/preview?from=/courses/${route.params.id}`,
+)
+const previewModuleUrl = (moduleId: string) =>
+  `${previewCourseUrl.value}&module_id=${moduleId}`
+const previewLessonUrl = (lessonId: string) =>
+  `/courses/${route.params.id}/preview/lessons/${lessonId}?from=/courses/${route.params.id}`
 
 const activeTab = ref<'content' | 'access'>('content')
 const accessLoading = ref(false)
@@ -431,6 +441,14 @@ onMounted(async () => {
       <div class="flex flex-col items-end gap-2">
         <div class="flex gap-2">
           <NuxtLink
+            :to="previewCourseUrl"
+            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center inline-flex items-center gap-1.5"
+            title="Посмотреть курс глазами студента"
+          >
+            <Eye class="w-4 h-4" />
+            Предпросмотр
+          </NuxtLink>
+          <NuxtLink
             :to="`/courses/${route.params.id}/gradebook`"
             class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center"
           >
@@ -550,6 +568,13 @@ onMounted(async () => {
             </span>
             <span v-if="moduleTitleError[m.id]" class="text-xs text-rose-600">{{ moduleTitleError[m.id] }}</span>
             <div class="ml-auto flex items-center gap-2">
+              <NuxtLink
+                :to="previewModuleUrl(m.id)"
+                class="text-gray-300 hover:text-brand transition p-1"
+                title="Посмотреть модуль глазами студента"
+              >
+                <Eye class="w-4 h-4" />
+              </NuxtLink>
               <button
                 class="text-xs px-2 py-1 rounded-lg border transition disabled:opacity-40 whitespace-nowrap"
                 :class="m.is_published
@@ -594,6 +619,13 @@ onMounted(async () => {
                     {{ statusLabel[l.status] ?? l.status }}
                   </span>
                 </span>
+              </NuxtLink>
+              <NuxtLink
+                :to="previewLessonUrl(l.id)"
+                class="text-gray-300 hover:text-brand transition p-1"
+                title="Посмотреть урок глазами студента"
+              >
+                <Eye class="w-4 h-4" />
               </NuxtLink>
               <button
                 class="text-xs px-2 py-1 rounded-lg border transition disabled:opacity-40 whitespace-nowrap"

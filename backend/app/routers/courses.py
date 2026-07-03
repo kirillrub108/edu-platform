@@ -11,7 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.constants import ACCESS_CODE_ALPHABET, ACCESS_CODE_LENGTH, ACCESS_CODE_MAX_RETRIES
 from app.database import get_db
-from app.dependencies import require_teacher
+from app.dependencies import get_current_user, require_teacher
 from app.models.course import AccessMode, Course
 from app.models.enrollment import Enrollment
 from app.models.lesson import Module
@@ -22,11 +22,13 @@ from app.schemas.course import (
     CourseGroupedResponse,
     CourseOut,
     CoursePartialUpdate,
+    CoursePreviewTreeRead,
     CourseUpdate,
     ModuleCreate,
     ModuleOut,
     ModuleUpdate,
 )
+from app.services import visibility_service
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/courses", tags=["courses"])
@@ -184,6 +186,27 @@ async def get_course(
         or 0
     )
     return _course_detail_out(course, str(user.id))
+
+
+@router.get("/{course_id}/preview", response_model=CoursePreviewTreeRead)
+async def course_preview(
+    course_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner-only «view as student» tree. Read-only: no rows are written, no
+    tasks enqueued. Non-owners of any role get 404 (never reveal the course)."""
+    course = await db.scalar(
+        select(Course)
+        .where(Course.id == course_id)
+        .options(selectinload(Course.modules).selectinload(Module.lessons))
+    )
+    if not course or course.owner_id != user.id:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    resp = CoursePreviewTreeRead.model_validate(course)
+    resp.modules = visibility_service.annotated_module_tree(course)
+    return resp
 
 
 @router.put("/{course_id}", response_model=CourseOut)

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertCircle, MessageSquare, X } from 'lucide-vue-next'
+import { AlertCircle, Eye, MessageSquare, X } from 'lucide-vue-next'
 import type { Comment } from '~/stores/comments'
 
 definePageMeta({ middleware: ['auth', 'teacher'], layout: 'workspace' })
@@ -445,6 +445,15 @@ watch(lessonId, (newId, oldId) => {
       @update:title="updateTitle"
     >
       <template #actions>
+        <NuxtLink
+          v-if="lesson.course_id"
+          :to="`/courses/${lesson.course_id}/preview/lessons/${lesson.id}?from=/lessons/${lesson.id}`"
+          class="text-sm px-3 py-1.5 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition inline-flex items-center gap-1.5"
+          title="Посмотреть урок глазами студента"
+        >
+          <Eye class="w-4 h-4" />
+          Как студент
+        </NuxtLink>
         <button
           type="button"
           class="text-sm px-3 py-1.5 rounded-lg border transition disabled:opacity-50"

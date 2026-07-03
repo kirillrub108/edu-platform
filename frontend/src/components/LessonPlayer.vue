@@ -8,6 +8,9 @@ const props = defineProps<{
     text_content?: string | null
     status: string
   }
+  // Teacher «view as student» dry-run: only the published video is shown, so a
+  // missing URL means «no published version» rather than a pipeline status.
+  preview?: boolean
 }>()
 
 const emit = defineEmits<{ 'video-url-expired': [] }>()
@@ -46,7 +49,7 @@ const onVideoError = () => {
       v-else
       class="absolute inset-0 grid place-items-center text-sm text-gray-300"
     >
-      Видео: {{ lesson.status }}
+      {{ preview ? 'Видео не опубликовано' : `Видео: ${lesson.status}` }}
     </div>
   </div>
 

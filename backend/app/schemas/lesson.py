@@ -48,6 +48,9 @@ class LessonOut(BaseModel):
 
     id: UUID
     module_id: UUID
+    # Parent course id — populated only when the ORM lesson already has its
+    # module relationship loaded (see routers/lessons.py:_lesson_out).
+    course_id: UUID | None = None
     title: str
     order: int
     content_type: ContentType
