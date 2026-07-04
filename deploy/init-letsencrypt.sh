@@ -10,13 +10,28 @@
 # Run ONCE on the VM, from the directory holding docker-compose.prod.yml, after
 # the DNS A record for $DOMAIN points at this VM and .env.prod exists.
 #
-#   DOMAIN=edllm.ru EMAIL=you@example.com ./deploy/init-letsencrypt.sh
+# DOMAIN and CERTBOT_EMAIL are read from .env.prod (the same file compose uses).
+# Override either inline if needed:
+#
+#   ./deploy/init-letsencrypt.sh
+#   DOMAIN=example.com CERTBOT_EMAIL=you@example.com ./deploy/init-letsencrypt.sh
 #
 # Renewal afterwards is handled by deploy/systemd/certbot-renew.{service,timer}.
 set -euo pipefail
 
-DOMAIN="${DOMAIN:-edllm.ru}"
-EMAIL="${EMAIL:?Set EMAIL=you@example.com for Let's Encrypt expiry notices}"
+ENV_FILE="${ENV_FILE:-.env.prod}"
+
+# Print the value of KEY=... from .env.prod (empty if absent); never fails.
+read_env_var() {
+  [ -f "$ENV_FILE" ] || return 0
+  grep -E "^$1=" "$ENV_FILE" | tail -n1 | cut -d= -f2- | tr -d '\r' || true
+}
+
+# .env.prod is the source of truth; an inline env var still overrides it.
+DOMAIN="${DOMAIN:-$(read_env_var DOMAIN)}"
+DOMAIN="${DOMAIN:?Set DOMAIN in .env.prod (or inline) — e.g. DOMAIN=edllm.ru}"
+EMAIL="${CERTBOT_EMAIL:-$(read_env_var CERTBOT_EMAIL)}"
+EMAIL="${EMAIL:?Set CERTBOT_EMAIL in .env.prod (or inline) for Let's Encrypt expiry notices}"
 COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
 # Path INSIDE the certbot/nginx containers (the letsencrypt volume).
 LIVE="/etc/letsencrypt/live/${DOMAIN}"
