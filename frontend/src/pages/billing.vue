@@ -285,11 +285,11 @@ const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScoZQb5VAXVRV2
             <div
               class="absolute inset-0 z-10 flex items-center justify-center rounded-2xl bg-white/50 p-4"
             >
-              <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 max-w-sm text-center space-y-3">
+              <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-6 max-w-xl text-center space-y-3">
                 <h3 class="text-base font-semibold text-gray-900">В разработке</h3>
                 <p class="text-sm text-gray-500">
-                  Если вам интересен данный продукт, напишите нам, и мы сможем предоставить вам
-                  дополнительные генерации.
+                  Если вам интересен данный продукт, напишите нам, указав свою электронную почту на которую зарегистрирован аккаунт Edllm,
+                  и мы сможем предоставить вам дополнительные генерации.
                 </p>
                 <a
                   :href="GOOGLE_FORM_URL"
