@@ -28,7 +28,7 @@
 | **Resend + itsdangerous** | транзакционные письма (верификация, «видео готово») через провайдер Resend; подписанные stateless-токены верификации. |
 | **Sentry + Prometheus + structlog** | наблюдаемость: трейсы/ошибки (Sentry), метрики (`prometheus-fastapi-instrumentator` + Celery-сигналы), структурные JSON-логи с `request_id`. |
 | **OpenAI SDK** | универсальный клиент к LLM. Ollama и YandexGPT эмулируют OpenAI API → один и тот же код работает для обоих провайдеров. |
-| **Silero TTS** | бесплатный OSS-TTS для русского. Запускается отдельным docker-контейнером (`navatusein/silero-tts-service`) и общается по HTTP. |
+| **Silero TTS** | TTS для русского, **бесплатный только для НЕкоммерческого использования** (русские модели `v5_ru`/`v5_5_ru` — CC-BY-NC 4.0; для коммерции — Silero EE или лицензированный провайдер Polza/Yandex SpeechKit, см. [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md)). Запускается отдельным docker-контейнером (`navatusein/silero-tts-service`) и общается по HTTP. |
 | **LibreOffice headless** | единственный надёжный способ конвертировать PPTX в PDF без потери шрифтов и эмодзи. Альтернатив на Python нет. |
 | **FFmpeg + poppler (pdftoppm)** | индустриальный стандарт для рендеринга PDF в PNG и склейки кадров с аудио в MP4. |
 

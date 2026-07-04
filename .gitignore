@@ -56,3 +56,33 @@ frontend/.nuxt/*
 
 # Logs
 *.log
+
+# Python test / lint / type caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+# Coverage
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# ML model weights (e.g. Silero .pt pulled into the tts volume at runtime)
+*.pt
+*.onnx
+
+# Database dumps & backups (pg_dump / db_backup sidecar)
+*.sql
+*.dump
+*.bak
+db_backups/
+backups/
+
+# TLS material & ACME data — never commit private keys or issued certs
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+letsencrypt/
+certbot/

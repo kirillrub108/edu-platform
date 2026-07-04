@@ -352,7 +352,7 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 **Trade-offs:**
 - + Изолированная зависимость, не утяжеляет backend.
 - + Можно скейлить отдельно от backend.
-- + Бесплатный, OSS.
+- + Бесплатно для **некоммерческого** использования (русские модели — CC-BY-NC 4.0); для коммерции нужна Silero EE (hello@silero.ai) или лицензированный TTS-провайдер (Polza / Yandex SpeechKit). См. [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md).
 - − Ещё один контейнер.
 - − HTTP overhead на каждый запрос (vs прямой Python-вызов).
 

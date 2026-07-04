@@ -10,7 +10,7 @@
 # Run ONCE on the VM, from the directory holding docker-compose.prod.yml, after
 # the DNS A record for $DOMAIN points at this VM and .env.prod exists.
 #
-#   DOMAIN=edllm.ru EMAIL=admin@edllm.ru ./deploy/init-letsencrypt.sh
+#   DOMAIN=edllm.ru EMAIL=you@example.com ./deploy/init-letsencrypt.sh
 #
 # Renewal afterwards is handled by deploy/systemd/certbot-renew.{service,timer}.
 set -euo pipefail

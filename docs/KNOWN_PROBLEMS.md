@@ -215,11 +215,11 @@
 - **Что не так:** backend линтуется `ruff` (правила E/F/I), а для frontend нет `eslint`/`prettier` — стиль и потенциальные баги в `.vue`/`.ts` не проверяются автоматически.
 - **Фикс:** `eslint` + `prettier` (vue-eslint-parser) и отдельный lint-job для frontend в CI.
 
-### 4.6 Нет CONTRIBUTING.md, нет CHANGELOG.md
+### 4.6 Нет CHANGELOG.md · ~~нет CONTRIBUTING.md~~ (частично закрыто)
 
 - **Где:** корень.
-- **Что не так:** нет единого описания, как добавлять новые эндпоинты, новые миграции, новые Celery-задачи. Нет changelog.
-- **Фикс:** создать `CONTRIBUTING.md` со ссылками на этот `docs/`.
+- **Что не так:** ~~нет единого описания, как добавлять новые эндпоинты, новые миграции, новые Celery-задачи~~. Нет changelog.
+- **Фикс:** ✅ `CONTRIBUTING.md` создан (описывает добавление роутов/моделей/Celery-задач, запрет npm, команды через docker-compose); заодно добавлены `LICENSE`, `SECURITY.md`, `THIRD_PARTY_LICENSES.md`. Осталось: завести `CHANGELOG.md`.
 
 ### 4.7 `StatusBadge` хардкодит список статусов
 

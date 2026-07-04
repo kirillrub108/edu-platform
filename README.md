@@ -1,186 +1,254 @@
-# Edllm — AI для учебного контента
+<h1 align="center">Edllm</h1>
 
-SaaS-платформа: преподаватель загружает PPTX/PDF и текст доклада → система генерирует видеолекцию с озвучкой → курс публикуется студентам.
+<p align="center">
+  <strong>LMS + AI-фабрика озвученных видеоуроков.</strong><br/>
+  Превращает <code>PPTX + текст доклада</code> в готовую видеолекцию с закадровой озвучкой и раздаёт её студентам.
+</p>
 
-## 1. О проекте
+<p align="center">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+  <img alt="Python" src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white">
+  <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white">
+  <img alt="Nuxt" src="https://img.shields.io/badge/Nuxt-3-00DC82?logo=nuxtdotjs&logoColor=white">
+  <img alt="Celery" src="https://img.shields.io/badge/Celery-4%20queues-37814A?logo=celery&logoColor=white">
+  <img alt="Status" src="https://img.shields.io/badge/status-active-success.svg">
+</p>
 
-Платформа автоматизирует рутину создания видеокурсов:
-- автоматическая нарезка текста доклада по слайдам через LLM;
-- TTS-озвучка каждого слайда;
-- сборка готового MP4 (LibreOffice + FFmpeg);
-- доступ для студентов по ссылке/коду, прогресс и тесты.
+<!-- Скриншоты/GIF: положите файлы в docs/assets/ и раскомментируйте.
+![Кабинет преподавателя](docs/assets/dashboard.png)
+![Пайплайн генерации](docs/assets/pipeline.gif)
+-->
 
-## 2. Архитектура
+> [!WARNING]
+> **TTS по умолчанию — Silero, русские модели (CC-BY-NC 4.0): бесплатно только для НЕкоммерческого использования.**
+> Для коммерческого запуска переключите `TTS_PROVIDER=polza` (или Yandex SpeechKit), либо возьмите Silero Enterprise-лицензию (hello@silero.ai). Подробности — [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
 
-| Компонент    | Технология                          | Назначение                                 |
-|--------------|-------------------------------------|--------------------------------------------|
-| Backend      | FastAPI 0.136 + SQLAlchemy 2 (async)| HTTP API, бизнес-логика                    |
-| БД           | PostgreSQL 17                       | пользователи, курсы, уроки, прогресс       |
-| Очередь      | Celery 5.6 + Redis 7                | пайплайн генерации видео в фоне            |
-| LLM          | OpenAI-совместимый (Ollama/YandexGPT)| разбиение текста, генерация скриптов и тестов |
-| TTS          | Sileroшка                           | синтез речи                                |
-| Конвертация  | LibreOffice headless + FFmpeg       | PPTX → PNG → MP4                           |
-| Frontend     | Nuxt 3 + Tailwind CSS               | SPA-кабинет преподавателя и студента       |
+---
 
-Все сервисы поднимаются через `docker-compose`.
+## Что это и для кого
 
-## 3. Быстрый старт
+**Edllm** — самостоятельно хостимая SaaS-LMS для связки «преподаватель ↔ студент».
+Её ключевая фича — конвейер, который из презентации и текста лекции автоматически
+собирает **narrated MP4**: LLM режет текст по слайдам, vision-модель разбирает
+каждый слайд, TTS озвучивает, FFmpeg склеивает видео. Готовый урок публикуется
+записанным на курс студентам.
+
+Вокруг этого ядра — полноценный LMS: курсы и модули, AI-квизы, задания с загрузкой
+файлов, журнал оценок, аналитика и биллинг по кредитам.
+
+- **Преподавателю** — не нужен видеоредактор: загрузил PPTX + скрипт → получил курс с озвученными уроками.
+- **Студенту** — записался по коду доступа → смотрит уроки, проходит квизы, сдаёт задания, видит прогресс.
+
+## Ключевые фичи
+
+- 🎬 **PPTX → видеоурок** — LLM-нарезка текста → vision-разбор слайдов → TTS → FFmpeg-сборка MP4 (стриминговый конвейер: кодирование слайда стартует, как только готово его аудио).
+- 📼 **Прямая загрузка видео** — готовый MP4/WebM/MOV без AI-пайплайна и без списания кредитов.
+- 📚 **Курсы, модули, уроки** — публикация по флагам, доступ по коду записи, обложки курсов.
+- 🧠 **AI-квизы** — генерация 8 типов вопросов; бесплатная LLM-проверка открытых ответов студентов с анти-абьюз лимитами.
+- 📝 **Задания** — текстовые задачи, загрузка файлов студентом, оценки и приватный тред «преподаватель ↔ студент» на каждую сдачу.
+- 💬 **Комментарии** к урокам, 📊 **журнал оценок** и **аналитика** (посещаемость квизов, средний балл, pass rate, ручной override оценок).
+- 💳 **Биллинг по кредитам** — AI-операции резервируют кредиты и списывают по факту; планы, помесячные лимиты, разовые пакеты; платежи через **YooKassa**.
+- 🔐 **Аутентификация на httpOnly-cookie + double-submit CSRF**, Argon2id, ротация refresh-токенов с детекцией повторного использования.
+
+## Архитектура
+
+Асинхронный FastAPI принимает запросы; долгие задачи уходят в **синхронные** Celery-воркеры (4 очереди + один beat), связь через Redis, состояние — в PostgreSQL, файлы — в `storage/` (local) или S3.
+
+```mermaid
+flowchart TB
+    subgraph Client["Клиент"]
+        FE["Nuxt 3 SPA<br/>кабинет преподавателя / студента"]
+    end
+
+    subgraph Edge["Edge"]
+        NGINX["nginx<br/>(prod: TLS + отдача /files/*)"]
+    end
+
+    subgraph Backend["Backend — async (FastAPI)"]
+        API["routers → services<br/>auth · billing · quiz · video · ..."]
+    end
+
+    subgraph Workers["Celery — sync · 4 очереди (+ beat)"]
+        VIDEO["celery_video<br/>PPTX → MP4"]
+        VISION["celery_vision<br/>разбор слайдов"]
+        QUIZ["celery_quiz (+beat)<br/>квизы · purge"]
+        EMAIL["celery_email<br/>письма"]
+    end
+
+    subgraph Data["Данные"]
+        PG[("PostgreSQL")]
+        REDIS[("Redis<br/>broker + cache")]
+        STORE[["storage/<br/>PPTX · PNG · WAV · MP4"]]
+    end
+
+    subgraph Providers["Внешние провайдеры"]
+        LLM["LLM + Vision<br/>Polza AI / Ollama / YandexGPT"]
+        TTSP["TTS<br/>Silero / Polza"]
+    end
+
+    FE -->|"httpOnly cookie + CSRF"| NGINX --> API
+    API --> PG
+    API -->|"enqueue (tier priority)"| REDIS
+    REDIS --> VIDEO & VISION & QUIZ & EMAIL
+    VIDEO & VISION & QUIZ --> PG
+    VIDEO & VISION --> STORE
+    API --> STORE
+    VISION --> LLM
+    QUIZ --> LLM
+    VIDEO --> TTSP
+```
+
+**Конвейер генерации видео:**
+
+```mermaid
+flowchart LR
+    IN["PPTX + текст<br/>лекции"] --> LO["LibreOffice<br/>PPTX → PDF"]
+    LO --> PPM["pdftoppm<br/>PDF → PNG"]
+    IN --> SPLIT["LLM<br/>нарезка текста<br/>по слайдам"]
+    PPM --> VIS["Vision<br/>разбор слайда"]
+    SPLIT --> VIS
+    VIS --> TTS["TTS<br/>WAV на слайд"]
+    PPM --> FF
+    TTS --> FF["FFmpeg<br/>сборка MP4"]
+    FF --> OUT[["MP4 → storage<br/>→ студентам"]]
+```
+
+Подробнее — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), сквозные сценарии — [docs/DATA_FLOW.md](docs/DATA_FLOW.md), авторизация — [docs/AUTH_FLOW.md](docs/AUTH_FLOW.md).
+
+## Стек
+
+| Слой | Технологии |
+|---|---|
+| **Backend** | FastAPI 0.136 · SQLAlchemy 2 (async) · asyncpg · Alembic · Pydantic v2 |
+| **Фон** | Celery 5.6 (4 очереди + beat) · Redis 7 |
+| **БД** | PostgreSQL 17 |
+| **AI** | OpenAI-совместимый LLM/Vision (Polza AI · Ollama · YandexGPT) · Silero / Polza TTS |
+| **Медиа** | LibreOffice headless · poppler (`pdftoppm`) · FFmpeg |
+| **Frontend** | Nuxt 3 (SPA) · Vue 3 · Pinia · Tailwind CSS |
+| **Хранилище** | local (`storage/`) или S3 / Yandex Object Storage |
+| **Платежи / почта** | YooKassa · Resend |
+| **Наблюдаемость** | Sentry · Prometheus · Grafana · Flower · structlog (JSON) |
+| **Инфра** | Docker Compose · nginx · certbot (prod) |
+
+## Быстрый старт
 
 ```bash
-git clone <repo> && cd edllm
-cp .env.example .env
+git clone <repo-url> && cd edu-platform
+cp .env.example .env        # значения-плейсхолдеры уже проставлены; см. комментарии в файле
 
-# 1. Поднять Ollama локально (https://ollama.com/download) и скачать модель
-ollama pull qwen3:8b
-ollama pull qwen2.5vl:7b
-
-# 2. Поднять стек
 docker-compose up --build
 
-# 3. В отдельном терминале применить миграции
+# Первый запуск: создать и применить схему БД (миграции генерируются локально,
+# в репозиторий не коммитятся — модели являются источником истины).
 docker-compose exec backend alembic revision --autogenerate -m "init"
 docker-compose exec backend alembic upgrade head
 ```
 
-Открыть:
-- Фронтенд: http://localhost:3000
-- API + Swagger: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+> [!CAUTION]
+> **Никогда не запускайте `npm install` / `npm ci`** — ни на хосте, ни в контейнере.
+> На Windows это создаёт `node_modules` с Windows-бинарниками, ломающими Linux-контейнер frontend'а.
+> Все JS-зависимости управляются образом. Подробности — [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## 4. Переменные окружения
+Проверить, что стек поднялся:
 
-| Переменная                     | Описание                                  | Пример                                                   |
-|-------------------------------|-------------------------------------------|----------------------------------------------------------|
-| `POSTGRES_USER/PASSWORD/DB`   | креды БД                                  | `edu_user / edu_password / edllm`                |
-| `DATABASE_URL`                | async-строка подключения                  | `postgresql+asyncpg://edu_user:...@postgres:5432/edllm` |
-| `REDIS_URL`                   | брокер Celery                             | `redis://redis:6379/0`                                  |
-| `SECRET_KEY`                  | ключ подписи JWT                          | `change-me-in-prod`                                     |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | срок жизни access-токена                  | `30`                                                    |
-| `REFRESH_TOKEN_EXPIRE_DAYS`   | срок жизни refresh-токена                 | `30`                                                    |
-| `LLM_BASE_URL`                | OpenAI-совместимый endpoint               | `http://host.docker.internal:11434/v1` (Ollama)          |
-| `LLM_MODEL`                   | имя модели                                | `qwen3:8b`, `yandexgpt/latest`                          |
-| `LLM_API_KEY`                 | ключ                                      | `ollama` (для локального — любая строка)                |
-| `TTS_PROVIDER`                | имя провайдера                            | `silero`, `yandex`                                      |
-| `STORAGE_PATH`                | путь к локальному хранилищу               | `/app/storage`                                          |
-| `BASE_URL`                    | публичный URL backend                     | `http://localhost:8000`                                 |
-| `CORS_ORIGINS`                | JSON-список разрешённых origin'ов         | `["http://localhost:3000"]`                             |
+| | URL |
+|---|---|
+| Frontend | http://localhost:3000 |
+| API + Swagger | http://localhost:8000/docs |
+| Health | http://localhost:8000/health |
+| Grafana · Flower · Prometheus | http://localhost:3001 · http://localhost:5555 · http://localhost:9090 |
 
-## 5. API документация
+**Нужен внешний LLM/Vision-провайдер** — единственное, что не поднимают контейнеры.
+По умолчанию `.env.example` указывает на **Polza AI** (облако, OpenAI-совместимый). Без рабочего провайдера генерация видео падает на шаге LLM-нарезки / vision-разбора.
 
-Все эндпоинты сгруппированы по тегам в Swagger (`/docs`):
+## Конфигурация
 
-- **auth** — регистрация, логин, refresh, текущий пользователь
-- **courses** — CRUD курсов, модули, публикация (только для роли `teacher`)
-- **lessons** — CRUD уроков, обновление скрипта, постановка задачи генерации видео, статус задачи
-- **uploads** — загрузка PPTX и видео
-- **students** — запись на курс, мои курсы, прогресс, результаты тестов
+Вся настройка — через `.env` (шаблон: [.env.example](.env.example), для прода — [.env.prod.example](.env.prod.example)). Каждая переменная прокомментирована в файле; здесь — только основные переключатели.
 
-OpenAPI JSON: `/openapi.json`.
+**LLM / Vision** — смена провайдера это правка env, без изменения кода (все говорят по OpenAI-протоколу):
 
-## 6. Пайплайн генерации видео
+```env
+# Облако (дефолт) — Polza AI
+LLM_BASE_URL=https://api.polza.ai/v1
+LLM_API_KEY=pza_...
 
-```
-PPTX (загрузка) ──► LibreOffice (PDF) ──► pdftoppm (PNG)
-                                              │
-                       LLM (split + script) ──┤
-                                              ▼
-                               TTS (WAV per slide)
-                                              │
-                                              ▼
-                                 FFmpeg (MP4) ──► storage
+# Локально — Ollama на хосте (ollama pull qwen3 && ollama pull qwen2.5vl:7b)
+LLM_BASE_URL=http://host.docker.internal:11434/v1
+LLM_MODEL=qwen3:8b
+LLM_API_KEY=ollama
 ```
 
-Шаги:
-1. `POST /api/v1/uploads/pptx` — загружаете PPTX, получаете `file_path`.
-2. Создаёте урок (`POST /api/v1/lessons/`).
-3. `PUT /api/v1/lessons/{id}/script` — закладываете текст лекции.
-4. `POST /api/v1/lessons/{id}/generate-video` с `pptx_path` — кладёт задачу в Celery, возвращает `task_id`.
-5. Статус: `GET /api/v1/lessons/{id}/task-status/{task_id}` (или просто следите за `lesson.status`: `processing → published / error`).
+**TTS** — `TTS_PROVIDER=silero` (локальный контейнер, self-host/dev, **non-commercial**) или `TTS_PROVIDER=polza` (облако, пригодно для коммерции). См. предупреждение о лицензии выше.
 
-## 7. Разработка
+**Секреты** — `SECRET_KEY` сгенерируйте через `openssl rand -hex 32`; в продакшене слабый ключ отклоняется на старте. Заполненные `.env` / `.env.prod` **не коммитятся** (в `.gitignore`).
 
-### Запуск backend без Docker
+> 🌐 **Форкаете под свой домен?** В `nginx/prod.conf`, `deploy/init-letsencrypt.sh`, `docker-compose.prod.yml` и `.env.prod.example` замените `edllm.ru` на свой домен, а `you@example.com` — на свой email для Let's Encrypt.
 
-```bash
-cd backend
-python -m venv .venv && source .venv/bin/activate  # или .venv\Scripts\activate
-pip install -r requirements.txt
-export DATABASE_URL=postgresql+asyncpg://edu_user:edu_password@localhost:5432/edllm
-uvicorn app.main:app --reload
-```
-
-### Создать новую миграцию
-
-```bash
-docker-compose exec backend alembic revision --autogenerate -m "describe change"
-docker-compose exec backend alembic upgrade head
-```
-
-### Добавить роутер
-
-1. Создать `backend/app/routers/<name>.py`, объявить `router = APIRouter(prefix=..., tags=[...])`.
-2. Импортировать и подключить в `app/main.py`: `app.include_router(<name>.router)`.
-
-### Структура папок
+## Структура проекта
 
 ```
 backend/
   app/
-    main.py            # FastAPI app, CORS, статика, lifespan
-    config.py          # настройки (pydantic-settings)
-    database.py        # async engine, get_db
-    dependencies.py    # auth-зависимости (get_current_user, require_*)
-    celery_app.py      # инстанс Celery
-    models/            # SQLAlchemy ORM-модели
-    schemas/           # Pydantic v2 DTO
-    routers/           # HTTP-маршруты
-    services/          # бизнес-сервисы (LLM, TTS, storage, video, auth)
-    tasks/             # Celery-задачи
-  alembic/             # миграции
-  storage/             # файловое хранилище (PPTX, аудио, видео)
+    main.py          # FastAPI-приложение, middleware, lifespan
+    config.py        # настройки (pydantic-settings)
+    constants.py     # все тюнинги: пулы, лимиты, планы, тарифы
+    celery_app.py    # Celery: очереди, роутинг, beat
+    dependencies.py  # авторизация (require_teacher / require_verified_* / ...)
+    routers/         # тонкие HTTP-маршруты
+    services/        # вся бизнес-логика (llm, tts, video, auth, billing, quiz, ...)
+    tasks/           # Celery-задачи (video/vision/quiz/purge/email pipeline)
+    models/          # SQLAlchemy ORM
+    schemas/         # Pydantic v2 DTO
+  alembic/           # миграции (генерируются локально)
+  tests/             # unit/ + integration/
 frontend/
   src/
-    pages/             # Nuxt-страницы (роутинг файловый)
-    components/        # переиспользуемые Vue-компоненты
-    composables/       # useAuth, useApi
+    pages/           # файловый роутинг Nuxt
+    components/      # Vue-компоненты
+    composables/     # useApi (единый fetch-wrapper), ...
+    stores/          # Pinia (auth, billing, comments, ...)
+docs/                # ARCHITECTURE, DATA_FLOW, AUTH_FLOW, DECISIONS, ...
+nginx/ · deploy/ · monitoring/   # инфраструктура
 ```
 
-## 8. Переключение провайдеров
+## Разработка
 
-### LLM: Ollama → YandexGPT
+Всё выполняется внутри контейнеров:
 
-В `.env`:
-```env
-LLM_BASE_URL=https://llm.api.cloud.yandex.net/v1
-LLM_MODEL=yandexgpt/latest
-LLM_API_KEY=<ваш Yandex IAM-токен>
+```bash
+# Тесты бэкенда (testcontainers поднимает sibling-Postgres через host-сокет)
+docker-compose exec backend pytest -m "not slow"     # канонический прогон
+docker-compose exec backend pytest tests/unit          # только unit
+docker-compose exec backend pytest tests/integration   # только роуты
+
+# Линт (ruff: E, F, I · длина строки 100 · target py313)
+docker-compose exec backend ruff check app
+
+# Тесты фронтенда (npm запрещён — вызываем бинарь напрямую)
+docker-compose exec frontend node_modules/.bin/vitest run
+
+# Новая миграция после правки моделей
+docker-compose exec backend alembic revision --autogenerate -m "describe change"
 ```
 
-`LLMService` использует `openai.AsyncOpenAI` — никакого кода менять не нужно.
+Как добавить роут / модель / Celery-задачу и прочие конвенции — в [CONTRIBUTING.md](CONTRIBUTING.md).
+Продакшен-развёртывание (gunicorn, миграции как деплой-шаг, TLS, бэкапы) — в [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-### TTS: Sileroшка → Yandex SpeechKit
+## Документация
 
-Откройте `backend/app/services/tts_service.py` и замените тело `synthesize()`:
-1. Вызовите `httpx.AsyncClient` к Yandex SpeechKit API.
-2. Запишите полученный аудиопоток в `output_path`.
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — общая картина и неочевидные решения
+- [docs/DATA_FLOW.md](docs/DATA_FLOW.md) — сквозные сценарии
+- [docs/AUTH_FLOW.md](docs/AUTH_FLOW.md) — аутентификация и сессии
+- [docs/DECISIONS.md](docs/DECISIONS.md) — журнал архитектурных решений
+- [docs/KNOWN_PROBLEMS.md](docs/KNOWN_PROBLEMS.md) — известный техдолг (загляните сюда прежде, чем «чинить» странное)
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · [docs/ROADMAP.md](docs/ROADMAP.md) · [docs/GROWTH.md](docs/GROWTH.md)
 
-Интерфейс остаётся прежним — пайплайн `tasks/video_pipeline.py` менять не нужно.
+## Лицензия
 
-## 9. Дорожная карта
+Исходный код — **[MIT](LICENSE)**.
 
-**MVP** (текущее)
-- Регистрация, базовый кабинет преподавателя и студента.
-- Загрузка PPTX, Sileroшка TTS, рабочий пайплайн → MP4.
-- Простой плеер уроков, отметка прохождения.
+> [!IMPORTANT]
+> ⚠️ **Про лицензию TTS.** MIT покрывает только код этого репозитория и **не** перелицензирует зависимости. Дефолтный движок TTS — **Silero (русские модели `v5_ru`/`v5_5_ru`) — CC-BY-NC 4.0, только некоммерческое использование.** Для коммерции: `TTS_PROVIDER=polza` / Yandex SpeechKit, либо Silero Enterprise (hello@silero.ai). Также обратите внимание на FFmpeg/poppler (GPL/LGPL) и лицензионную историю Redis.
 
-**Рост**
-- Полноценный TTS (Yandex SpeechKit, голоса).
-- Хостинг файлов в S3/Yandex Object Storage.
-- Аналитика прогресса, дашборд преподавателя.
-- Тесты с автопроверкой и системой оценок.
-
-**Масштаб**
-- Multi-tenant (организации, биллинг).
-- Совместная работа над курсами, версии лекций.
-- Интерактивные элементы: субтитры, поиск по транскриптам, чат-бот по материалам курса.
-- ML-рекомендации курсов студентам.
+Полная инвентаризация сторонних лицензий — [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+Как сообщить об уязвимости — [SECURITY.md](SECURITY.md).
