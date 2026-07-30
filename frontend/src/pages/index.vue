@@ -51,6 +51,7 @@ onMounted(restoreScroll)
       <LandingFeatures />
       <LandingMetrics />
       <LandingPricing />
+      <LandingFaq />
       <LandingCta />
     </main>
 

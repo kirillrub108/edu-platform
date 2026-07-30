@@ -1104,6 +1104,78 @@ html:has(.ldg) {
 }
 
 /* ============================================================
+   FAQ
+   ============================================================ */
+.ldg .faq {
+  max-width: 760px;
+  margin: 0 auto;
+}
+.ldg .faq-item {
+  border-bottom: 1px solid var(--line);
+}
+.ldg .faq-item:last-child {
+  border-bottom: none;
+}
+.ldg .faq-heading {
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+}
+.ldg .faq-q {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  width: 100%;
+  padding: 22px 4px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 16.5px;
+  font-weight: 700;
+  color: var(--ink);
+  text-align: left;
+}
+.ldg .faq-q:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 8px;
+}
+.ldg .faq-icon {
+  flex: none;
+  display: inline-block;
+  margin-top: 2px;
+  color: var(--accent);
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ldg .faq-icon.open {
+  transform: rotate(90deg);
+}
+.ldg .faq-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.35s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.ldg .faq-panel.open {
+  grid-template-rows: 1fr;
+}
+.ldg .faq-panel-inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.ldg .faq-a {
+  padding: 0 4px 22px;
+  color: var(--ink-soft);
+  font-size: 14.5px;
+  line-height: 1.6;
+  max-width: 620px;
+}
+
+/* ============================================================
    FINAL CTA
    ============================================================ */
 .ldg .final {
