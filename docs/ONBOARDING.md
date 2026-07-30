@@ -3,7 +3,7 @@
 Пошаговый маршрут для нового разработчика: день за днём, что прочитать, какие файлы открыть и как проверить себя. Справочники (ARCHITECTURE, DATA_FLOW, AUTH_FLOW, DECISIONS, KNOWN_PROBLEMS, DEPLOYMENT) дают глубину — этот документ связывает их в порядок и доводит до «могу вносить изменения».
 
 > Источник истины — **код**. Если этот план и код расходятся — верь коду и поправь план.
-> Обновлено: **2026-06-21**.
+> Обновлено: **2026-07-30**.
 
 ---
 
@@ -90,9 +90,10 @@ Edllm — SaaS, который из **PPTX + текста лекции** соб�
 
 **Цель:** фоновая инфраструктура и денежная логика.
 
-1. [../backend/app/celery_app.py](../backend/app/celery_app.py): четыре очереди, `include`-список тасков, **ровно один beat** в `celery_quiz`, приоритеты на Redis (меньше = важнее). Разбор: [articles/03-celery-queues-priority.md](articles/03-celery-queues-priority.md).
+1. [../backend/app/celery_app.py](../backend/app/celery_app.py): четыре очереди, `include`-список из **шести** модулей тасков, **ровно один beat** в `celery_quiz` (4 периодические задачи: purge, reconcile платежей, 2×disk-GC), приоритеты на Redis (меньше = важнее). Разбор: [articles/03-celery-queues-priority.md](articles/03-celery-queues-priority.md).
 2. Биллинг: [../backend/app/services/billing_service.py](../backend/app/services/billing_service.py) — `reserve → charge/release`, `CREDIT_WEIGHTS`, видео по формуле, пожизненный триал. (DECISIONS, [articles/10-teacher-who-and-pricing.md](articles/10-teacher-who-and-pricing.md))
-3. Квизы и проверка: [../backend/app/services/quiz_service.py](../backend/app/services/quiz_service.py), [../backend/app/services/grading_service.py](../backend/app/services/grading_service.py); решения — [DECISIONS.md](DECISIONS.md) §31–33 (polymorphic JSONB, snapshot, hybrid grading, versioned questions).
+3. Платежи: [../backend/app/tasks/payment_pipeline.py](../backend/app/tasks/payment_pipeline.py) — вебхук ЮKassa верит только source-IP, начисление в Celery через единый `_settle_payment` (FOR UPDATE), reconcile-бэкстоп. (DECISIONS §39–40)
+4. Квизы и проверка: [../backend/app/services/quiz_service.py](../backend/app/services/quiz_service.py), [../backend/app/services/grading_service.py](../backend/app/services/grading_service.py); решения — [DECISIONS.md](DECISIONS.md) §31–33 (polymorphic JSONB, snapshot, hybrid grading, versioned questions).
 
 **Self-check:**
 - На Redis-брокере приоритет 0 — это «раньше» или «позже»? Какие три настройки делают `apply_async(priority=...)` рабочим?

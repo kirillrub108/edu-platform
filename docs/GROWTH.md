@@ -53,7 +53,7 @@ Edllm стоит на **стыке «AI-контент + LMS-доставка»*
 | # | Внедрение | Что даёт | Точка врезки в код | Оценка |
 |---|---|---|---|---|
 | 1 | **Премиум RU-голоса + эмоции + «голосовые личности»** | Догоняем iSpring по глубине TTS; эмоции = живее уроки | `services/tts_service.py` уже плагинный (`TTS_PROVIDER=silero\|polza`) → добавить `yandex` (SpeechKit). SSML уже генерится в `_SSML_SYSTEM`, но Silero его срезает — Yandex/Polza его **исполнят** | S–M (+провайдер) |
-| 2 | **AI-копайлот в редакторе урока** | Пишет/сокращает/переписывает скрипт под «5 мин / 9 класс / экзамен», генерит план курса | reuse `services/llm_service.py`; новый async-эндпоинт + панель в `pages/lessons/[id].vue` | M |
+| 2 | **AI-копайлот в редакторе урока** | Пишет/сокращает/переписывает скрипт под «5 мин / 9 класс / экзамен», генерит план курса | reuse `services/llm_service.py`; новый async-эндпоинт + панель в `pages/lessons/[id]/index.vue` | M |
 | 3 | **One-click курс из темы/PDF/ссылки** | Тема → курс→модули→уроки→скрипты→квизы | оркестрация `llm_service` + `routers/uploads.py:_extract_*`; Celery-таск в очередь `quiz`/`video` | M–L |
 | 4 | **Аватар / говорящая голова** | Главный вау-gap vs HeyGen/Synthesia | новый `creation_mode=avatar`; рендер = **ещё одна версия `LessonVideo`** (версии уже есть); провайдер: HeyGen/D-ID API или Sber/локальный SadTalker | L (+решение по провайдеру/гео) |
 | 5 | **Интерактивное видео** | Квиз/опрос по таймкодам прямо в плеере (Synthesia Interactivity 2.0) | новая модель `VideoCheckpoint(lesson_video_id, t_seconds, quiz_question_id)`; пауза в `components/LessonPlayer.vue`; **reuse quiz-модуль** | M |

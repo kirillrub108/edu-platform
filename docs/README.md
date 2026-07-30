@@ -4,7 +4,9 @@
 и текста доклада собирает озвученную видеолекцию и публикует её студентам.
 
 > Источник истины — **код**. Доки сверяются с исходниками; расхождения отмечаются явно.
-> Сгенерировано/обновлено: **2026-06-15** · обновление индекса **2026-06-21** (добавлены ONBOARDING.md, `articles/`, `marketing/`).
+> Сгенерировано/обновлено: **2026-06-15** · индекс **2026-06-21** · полная сверка с кодом
+> **2026-07-30** (платежи ЮKassa + reconcile, дисковый GC, стриминг видео, сброс пароля,
+> согласия при регистрации, preview «глазами студента», бюджет конкурентности, nginx-шаблон).
 
 ## С чего начать
 
@@ -51,9 +53,9 @@ FastAPI (:8000) ── routers (thin) → services (fat) → PostgreSQL (asyncpg
    │ .delay()                          └─ Redis (broker + auth state)
    ▼
 Celery workers (sync, psycopg2):
-   • video   — PPTX→MP4 пайплайн
+   • video   — PPTX→MP4 пайплайн (чекпоинты/resume в Redis)
    • vision  — vision-LLM анализ слайдов
-   • quiz    — генерация/проверка тестов (+ beat: суточный purge)
+   • quiz    — тесты + платежи; beat: purge, reconcile платежей, 2×disk-GC
    • email   — транзакционные письма
    │   внешнее: LibreOffice · pdftoppm · FFmpeg · LLM+vision (Polza AI облако по умолчанию / Ollama локально) · Silero TTS
    ▼
@@ -70,11 +72,14 @@ Local/S3 storage (PPTX, PNG, WAV, MP4)   ·   Monitoring: Prometheus/Grafana/Flo
 - **Публикация и видимость** (course/module/lesson `is_published`, AND-правило) → [DATA_FLOW.md](DATA_FLOW.md) §7, [DECISIONS.md](DECISIONS.md) §34, `app/services/visibility_service.py`
 - **Версии видео урока** (`LessonVideo`, превью → публикация версии) → [DATA_FLOW.md](DATA_FLOW.md) §5.2, [DECISIONS.md](DECISIONS.md) §35
 - **Email-верификация** → [AUTH_FLOW.md](AUTH_FLOW.md) §8, [DECISIONS.md](DECISIONS.md)
-- **Soft-delete + суточный purge** → [DECISIONS.md](DECISIONS.md), [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md)
+- **Сброс/смена пароля** → [AUTH_FLOW.md](AUTH_FLOW.md) §8b
+- **Платежи ЮKassa** (вебхук → Celery-settle → reconcile, IP-allowlist) → [ARCHITECTURE.md](ARCHITECTURE.md) §9b, [DECISIONS.md](DECISIONS.md) §39–40, `app/tasks/payment_pipeline.py`
+- **Стриминг видео** (S3 presigned / X-Accel / dev-302) → [DECISIONS.md](DECISIONS.md) §41, `routers/lessons.py:/stream`
+- **Soft-delete + суточный purge + дисковый GC** → [DECISIONS.md](DECISIONS.md), [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md), `app/tasks/purge_pipeline.py`
 - **Прогресс задач (SSE)** → `app/routers/lessons.py:progress-stream`, `composables/useProgressStream.ts`
 - **Деплой и эксплуатация** (dev + prod-compose) → [DEPLOYMENT.md](DEPLOYMENT.md)
 
 > Для повседневной работы в репозитории также см. [CLAUDE.md](../CLAUDE.md) в корне (команды,
-> грабли, конвенции). Он синхронизирован с этими доками (cookie+CSRF-auth, очереди Celery,
-> биллинг, prod-деплой); по аутентификации канонический источник — [AUTH_FLOW.md](AUTH_FLOW.md).
+> грабли, конвенции). Синхронизирован с кодом и этими доками при сверке 2026-07-30;
+> по аутентификации канонический источник — [AUTH_FLOW.md](AUTH_FLOW.md).
 </content>

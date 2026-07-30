@@ -11,9 +11,14 @@
 >   как «SSE + поллинг-fallback».
 > - **Добавлено (2026-06-15):** §7 расширен публикацией модулей/уроков и правилом видимости;
 >   §9 описывает задания (assignments); §5.2 учитывает версии видео (`LessonVideo`).
+> - **Добавлено (2026-07-30):** §5.2 учитывает Redis-чекпоинты/resume и сохранение `work_dir`
+>   при ошибке; отдача видео студенту идёт через авторизованные `/stream`-эндпоинты
+>   ([DECISIONS.md](DECISIONS.md) §41); пути teacher-страниц исправлены на `[id]/index.vue`.
 > - **Ещё не описаны здесь** пошагово: квизы (создание/прохождение/проверка), биллинг/списание
->   кредитов при генерации, email-верификация и AI-гейтинг, soft-delete. См.
->   [ARCHITECTURE.md](ARCHITECTURE.md) §9b и [DECISIONS.md](DECISIONS.md) §31–37.
+>   кредитов при генерации, платежи ЮKassa (вебхук → Celery-settle → reconcile,
+>   [DECISIONS.md](DECISIONS.md) §39–40), email-верификация и AI-гейтинг, сброс пароля,
+>   soft-delete, preview «глазами студента». См. [ARCHITECTURE.md](ARCHITECTURE.md) §9b
+>   и [DECISIONS.md](DECISIONS.md) §31–41.
 
 ---
 
@@ -82,7 +87,7 @@
 
 ### Модуль
 
-1. На странице курса ([pages/courses/[id].vue](../frontend/src/pages/courses/[id].vue)) — форма «+ Модуль».
+1. На странице курса ([pages/courses/[id]/index.vue](../frontend/src/pages/courses/[id]/index.vue)) — форма «+ Модуль».
 2. `POST /api/v1/courses/{course_id}/modules` с `{title, order}`.
 3. На бэкенде:
    - `_get_owned_course(...)` — проверка владения (404/403).
@@ -104,7 +109,7 @@
 
 ## 3. Загрузка PPTX-файла
 
-1. На странице урока ([pages/lessons/[id].vue](../frontend/src/pages/lessons/[id].vue)) — `<input type="file">` принимает `.pptx,.ppt,.pdf`.
+1. На странице урока ([pages/lessons/[id]/index.vue](../frontend/src/pages/lessons/[id]/index.vue)) — `<input type="file">` принимает `.pptx,.ppt,.pdf`.
 2. После выбора файла — кнопка «Загрузить».
 3. Build FormData: `form.append('file', pptxFile)`, `form.append('lesson_id', id)`.
 4. `POST /api/v1/uploads/pptx?lesson_id={id}` с multipart body.
@@ -150,7 +155,7 @@
 
 ### 5.1 Запуск
 
-1. Пользователь жмёт «Создать видео» в [pages/lessons/[id].vue](../frontend/src/pages/lessons/[id].vue).
+1. Пользователь жмёт «Создать видео» в [pages/lessons/[id]/index.vue](../frontend/src/pages/lessons/[id]/index.vue).
 2. Frontend:
    - `await saveScript()` — сохраняет текущее значение textarea через `PUT /lessons/{id}/script`.
    - `POST /api/v1/lessons/{id}/generate-video` с body `{voice: "xenia"}` (или другой выбранный).
@@ -215,8 +220,15 @@
    - `_set_status(lesson, published)` (один commit персистит и `LessonVideo`), SSE-событие `{"status":"published","video_url":...}`, постановка письма «видео готово» в `celery_email`.
    - Возвращает `{"status": "ok", "video_id": ..., "video_url": ...}`.
    - **Выбор активной версии:** `GET /lessons/{id}/videos` отдаёт все версии (новые сверху); `POST /lessons/{id}/videos/{video_id}/publish` помечает одну `is_published=True`, снимает остальные и синхронит `lesson.video_url` — её и видит студент. Прямая загрузка готового видео (`/upload-video`) публикуется сразу.
-10. **Cleanup.**
-    - `finally: rmtree(work_dir)` — удаляет `storage/video_jobs/<lesson_id>/` со всеми временными файлами.
+10. **Cleanup (обновлено).**
+    - В `finally` сначала финализируется биллинг (charge при успехе / release при ошибке; при
+      кооперативной отмене — частичное списание уже проведено обработчиком cancel).
+    - `work_dir` (`storage/video_jobs/<lesson_id>/`) удаляется **только при успехе**; при
+      ошибке/отмене он сохраняется (`work_dir_retained` в логах) для post-mortem.
+    - Синтезированные слайды чекпоинтятся в Redis (`job:{lesson_id}:checkpoint`); при ошибке или
+      отмене чекпоинт **не удаляется** — повторный запуск восстанавливает готовые WAV и не платит
+      за них повторно. Отмена: `POST /lessons/{id}/cancel-generation` (кооперативная — задача
+      проверяет флаг на чекпоинтах).
 
 ### 5.3 Что делает frontend во время работы воркера
 
@@ -302,7 +314,7 @@
 ### 6.4 После редактирования — генерация видео
 
 1. Кнопка «Генерировать видео →» в редакторе → `emit('ready')`.
-2. Родитель ([lessons/[id].vue](../frontend/src/pages/lessons/[id].vue)) вызывает `generateVideo()` (тот же эндпоинт `/generate-video`).
+2. Родитель ([lessons/[id]/index.vue](../frontend/src/pages/lessons/[id]/index.vue)) вызывает `generateVideo()` (тот же эндпоинт `/generate-video`).
 3. В `tasks/video_pipeline.py:generate_video_lesson` ветка `use_per_slide=True`:
    - Если `creation_mode == presentation_auto` И есть `SlideText` для каждого слайда → пропускает VLM-summary и LLM-split.
    - Использует `edited_text or generated_text` напрямую, оборачивая в `<p>...</p>`.
@@ -342,7 +354,7 @@ lesson_visible_to_student = module.is_published AND lesson.is_published
 
 ### 7.3 Фронт
 
-На странице курса ([courses/[id].vue](../frontend/src/pages/courses/[id].vue)) — кнопки публикации на курсе/модуле/уроке; карточки курса показывают статус публикации, после действия `await load()` перезагружает данные с новыми флагами. Перед снятием курса с публикации при наличии записанных (`enrollment_count > 0` из `CourseDetail`) показывается `window.confirm`: записанные сохранят доступ, новые записаться не смогут, курс уйдёт из каталога.
+На странице курса ([courses/[id]/index.vue](../frontend/src/pages/courses/[id]/index.vue)) — кнопки публикации на курсе/модуле/уроке; карточки курса показывают статус публикации, после действия `await load()` перезагружает данные с новыми флагами. Перед снятием курса с публикации при наличии записанных (`enrollment_count > 0` из `CourseDetail`) показывается `window.confirm`: записанные сохранят доступ, новые записаться не смогут, курс уйдёт из каталога.
 
 ---
 
@@ -374,7 +386,7 @@ lesson_visible_to_student = module.is_published AND lesson.is_published
    - `select(Course).options(selectinload(Course.owner), selectinload(Course.modules).selectinload(Module.lessons))`.
    - Возвращает `CourseDetail`, где `modules` обрезаны под видимость (`module.is_published AND lesson.is_published`) — завязки на `course.is_published` нет, поэтому доступ сохраняется и после снятия курса с публикации.
 4. UI: слева sidebar с модулями/уроками, справа — `LessonPlayer`.
-5. `LessonPlayer` ([components/LessonPlayer.vue](../frontend/src/components/LessonPlayer.vue)) для `content_type === 'video'` показывает `<video :src="lesson.video_url" controls>` (URL — полный, выдан бэкендом при генерации).
+5. Плеер (`LessonPlayer.vue` / [components/student/LessonView.vue](../frontend/src/components/student/LessonView.vue)) для `content_type === 'video'` показывает `<video>`; источник — `video_playback_url` из сериализатора либо авторизованный `GET /lessons/{id}/video/stream` (S3 → 302 на presigned; прод local → `X-Accel-Redirect` в nginx; dev → 302 на подписанный `/files/*`). При 403 на протухшей подписи фронт прозрачно перезапрашивает свежий URL. Квиз урока проходится через `QuizTaker.vue`.
 
 ### 8.3 Отметка прохождения
 
@@ -429,7 +441,8 @@ lesson_visible_to_student = module.is_published AND lesson.is_published
 2. Прогресс хранится в Redis. После рестарта Redis он теряется.
 3. `task_id` сохраняется в `lessons.video_task_id` / `lessons.analyze_task_id` — это позволяет фронту resume polling после refresh страницы.
 4. `task_id` обнуляется при финальном `_set_status(...)` (см. в `tasks/video_pipeline.py:_set_status` логику для статусов `published`, `error`, `ready_for_edit`).
-5. Если задача упала с исключением — `try/except` ловит, ставит `lesson.status = error`, `finally rmtree(work_dir)` чистит временные файлы. **Файлы для post-mortem не сохраняются.**
+5. Если задача упала с исключением — `try/except` ловит, ставит `lesson.status = error`; `work_dir` и Redis-чекпоинт при этом **сохраняются** (post-mortem + resume при повторном запуске). Удаление — только при успехе.
+6. Уроки, зависшие в `analyzing`/`processing` дольше `STUCK_LESSON_GRACE_MINUTES` (120 мин — потерянный таск после рестарта Redis без AOF), помечаются `error` при старте backend (`main.py:_reconcile_stuck_lessons`).
 
 ---
 

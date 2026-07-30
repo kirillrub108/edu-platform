@@ -27,7 +27,7 @@
 | **slowapi** | per-route rate limiting (`limiter.py`); 429-handler в `main.py`. |
 | **Resend + itsdangerous** | транзакционные письма (верификация, «видео готово») через провайдер Resend; подписанные stateless-токены верификации. |
 | **Sentry + Prometheus + structlog** | наблюдаемость: трейсы/ошибки (Sentry), метрики (`prometheus-fastapi-instrumentator` + Celery-сигналы), структурные JSON-логи с `request_id`. |
-| **OpenAI SDK** | универсальный клиент к LLM. Ollama и YandexGPT эмулируют OpenAI API → один и тот же код работает для обоих провайдеров. |
+| **OpenAI SDK** | универсальный клиент к LLM. Polza AI (облачный дефолт), Ollama и YandexGPT говорят на OpenAI-протоколе → один и тот же код для всех провайдеров; выбор — правкой env. |
 | **Silero TTS** | TTS для русского, **бесплатный только для НЕкоммерческого использования** (русские модели `v5_ru`/`v5_5_ru` — CC-BY-NC 4.0; для коммерции — Silero EE или лицензированный провайдер Polza/Yandex SpeechKit, см. [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md)). Запускается отдельным docker-контейнером (`navatusein/silero-tts-service`) и общается по HTTP. |
 | **LibreOffice headless** | единственный надёжный способ конвертировать PPTX в PDF без потери шрифтов и эмодзи. Альтернатив на Python нет. |
 | **FFmpeg + poppler (pdftoppm)** | индустриальный стандарт для рендеринга PDF в PNG и склейки кадров с аудио в MP4. |
@@ -41,7 +41,7 @@
 | **Tailwind CSS 3.4** | utility-first CSS — UI пишется быстро без отдельных `.css` файлов. |
 | **lucide-vue-next** | современная библиотека SVG-иконок. |
 
-| **Pinia 2** | канонический слой состояния. Сторы: `auth`, `billing`, `comments`, `student` (`frontend/src/stores/`). |
+| **Pinia 3** | канонический слой состояния. Сторы: `auth`, `billing`, `comments`, `assignments`, `student`, `studentCabinet`, `courseEditor`, `preview` (`frontend/src/stores/`). |
 
 **State теперь на Pinia, а не на `useState`.** Раньше глобальное состояние держали в `useState('key', factory)` — сейчас канонический слой это **Pinia** (`useAuthStore` и др.). `composables/useCreationMode.ts` — это *не* стор, а модуль констант. Новое shared-состояние добавляем стором, а не `useState`-синглтоном.
 
@@ -73,7 +73,8 @@
 │                quiz · grading · gradebook · comment · billing · │
 │                email · email_token · signed_url · analytics ·   │
 │                assignment · visibility · file_validation        │
-│   tasks (Celery): video · vision · quiz · email · purge          │
+│   tasks (Celery): video · vision · quiz · email · purge ·        │
+│                   payment (settle/reconcile) · disk-GC           │
 └──────┬──────────────────────────────────┬───────────────────────┘
        │                                  │
        ▼                                  ▼
@@ -124,7 +125,7 @@
 | `backend` | (build ./backend) | 8000 | FastAPI с uvicorn `--reload` |
 | `celery_video` | образ backend | — | queue `video`, `-c 2` — PPTX→MP4 пайплайн |
 | `celery_vision` | образ backend | — | queue `vision`, `-c 1` — vision-LLM анализ слайдов |
-| `celery_quiz` | образ backend | — | queue `quiz`, `-c 2`, **`--beat`** — генерация/проверка тестов + суточный `purge_soft_deleted` |
+| `celery_quiz` | образ backend | — | queue `quiz`, `-c 2`, **`--beat`** — генерация/проверка тестов, расчёт платежей + 4 периодические задачи (см. ниже) |
 | `celery_email_worker` | образ backend | — | queue `celery_email`, `-c 2` — транзакционные письма |
 | `nginx` | nginx:1.27-alpine | 8080 | в dev простаивает (FastAPI сам отдаёт `/files/*`); в проде отдаёт `/files/*` + TLS-термирование |
 | `prometheus` | prom/prometheus | 9090 | сбор метрик с backend |
@@ -139,7 +140,13 @@
 > **Важно про очереди:** каждый воркер слушает свою очередь (`--queues=…`). Новая Celery-задача
 > попадёт к воркеру, только если её зароутить в правильную очередь — иначе её никто не возьмёт.
 > **Beat-планировщик** встроен ровно в один воркер (`celery_quiz --beat`); в кластере он должен быть
-> единственным. См. [DECISIONS.md](DECISIONS.md) и [docker-compose.yml](../docker-compose.yml).
+> единственным. Beat гоняет **четыре** периодические задачи (все в очередь `quiz`, см.
+> [celery_app.py](../backend/app/celery_app.py) `beat_schedule`):
+> `purge_soft_deleted` (ежедневно 03:00), `reconcile_pending_payments` (каждые
+> `RECONCILE_INTERVAL_MINUTES`=15 мин, бэкстоп зависших платежей ЮKassa),
+> `gc_disk_caches` (04:00, TTL+size-cap eviction для `slides_cache`/`summaries_cache`) и
+> `gc_lesson_videos` (04:30, прунинг холодных НЕопубликованных версий `LessonVideo`).
+> См. [DECISIONS.md](DECISIONS.md) и [docker-compose.yml](../docker-compose.yml).
 
 ---
 
@@ -147,17 +154,23 @@
 
 ```
 backend/app/
-├── main.py            ← точка входа (FastAPI app, middleware, lifespan)
-├── config.py          ← pydantic-settings, читает .env
-├── database.py        ← async engine, get_db, Base
-├── dependencies.py    ← get_current_user, require_teacher, require_student
-├── celery_app.py      ← инстанс Celery (broker=Redis)
+├── main.py            ← точка входа (FastAPI app, middleware, lifespan,
+│                        startup-reconciliation зависших уроков)
+├── config.py          ← pydantic-settings, читает .env (SECRET_KEY обязателен,
+│                        prod-guard на слабый ключ)
+├── constants.py       ← ВСЕ тюнинг-параметры (пулы, лимиты, тарифы, TTL)
+├── database.py        ← async engine, get_db, Base, глобальный soft-delete фильтр
+├── dependencies.py    ← get_current_user, require_teacher/_student/_verified_*,
+│                        CSRF, AI_GATED_ENDPOINTS, require_lesson_access
+├── celery_app.py      ← инстанс Celery (broker=Redis), очереди, beat, приоритеты
+├── limiter.py         ← slowapi rate limiting
+├── logging_config.py  ← structlog (JSON-логи, request_id)
+├── redis_client.py    ← Redis-клиент (auth-state, чекпоинты)
 ├── models/            ← SQLAlchemy ORM (один файл = одна доменная сущность)
 ├── schemas/           ← Pydantic DTO (вход/выход API)
 ├── routers/           ← HTTP endpoints, по одному файлу на ресурс
 ├── services/          ← переиспользуемая бизнес-логика
-├── tasks/             ← Celery-задачи (PPTX→MP4 пайплайн)
-└── utils/             ← вспомогательные модули
+└── tasks/             ← Celery-задачи (video/vision/quiz/email/purge/payment)
 ```
 
 **Важная архитектурная конвенция:**
@@ -173,43 +186,66 @@ backend/app/
 
 ```
 frontend/src/
-├── app.vue                  ← <NuxtLayout><NuxtPage/></NuxtLayout>
+├── app.vue                  ← <NuxtLayout><NuxtPage/></NuxtLayout> + brand-токены
 ├── layouts/
 │   ├── default.vue          ← AppHeader + контейнер
-│   └── bare.vue             ← без header (лендинг, dashboard)
+│   ├── bare.vue             ← без header (лендинг, dashboard)
+│   ├── workspace.vue        ← teacher-кабинет (страница урока и т.п.)
+│   ├── student-cabinet.vue  ← студенческий кабинет (сайдбар, /student/*)
+│   └── student.vue          ← старый студенческий layout (легаси, не сливать)
 ├── stores/                  ← Pinia (канонический state)
 │   ├── auth.ts              ← useAuthStore: user/isAuthenticated/login/logout
-│   ├── billing.ts · comments.ts · student.ts
+│   ├── billing.ts · comments.ts · assignments.ts
+│   ├── student.ts · studentCabinet.ts
+│   └── courseEditor.ts · preview.ts   ← редактор курса, «глазами студента»
 ├── middleware/
 │   ├── auth.ts              ← opt-in на странице: редирект на /login (не глобальный)
 │   ├── guest.ts             ← уводит залогиненных с /login,/register
-│   └── teacher.ts           ← студентов отправляет в /student/dashboard
+│   ├── teacher.ts           ← студентов отправляет в /student/dashboard
+│   └── student.ts           ← преподавателей уводит из /student/*
 ├── composables/
 │   ├── useApi.ts            ← API-клиент: cookie-auth (credentials:include),
 │   │                          double-submit CSRF, реактивный refresh на 401
 │   ├── useProgressStream.ts ← SSE-подписка на прогресс Celery-задачи
 │   ├── useAiGuard.ts        ← открывает «подтвердите email» на AI-действиях
-│   └── useCreationMode.ts   ← режимы создания урока (модуль констант, не стор)
-├── pages/                   ← file-based routing
+│   ├── useCreationMode.ts   ← режимы создания урока (модуль констант, не стор)
+│   ├── useVideoGeneration / useVisionAnalysis / useLessonData
+│   ├── useQuizAttempt / useQuizAuthoring / useQuizPreview
+│   └── useBillingMeta / useMetrika / useLanding* / useScroll*
+├── plugins/                 ← metrika.client.ts (Яндекс.Метрика), scroll-*
+├── pages/                   ← file-based routing (дети всегда в foo/index.vue!)
 │   ├── index.vue            ← лендинг
-│   ├── login.vue / register.vue
+│   ├── login.vue / register.vue / forgot-password.vue / reset-password.vue
+│   ├── verify-email.vue / account.vue / billing.vue / join.vue
 │   ├── dashboard.vue        ← teacher: список курсов
 │   ├── courses/
-│   │   ├── create.vue
-│   │   └── [id].vue         ← модули + уроки + публикация
-│   ├── lessons/
-│   │   └── [id].vue         ★ главная рабочая страница (640 строк)
-│   └── student/
-│       ├── dashboard.vue
-│       └── courses/[id].vue ← плеер уроков
+│   │   ├── create.vue / index.vue
+│   │   └── [id]/            ← index.vue (модули+уроки+публикация), gradebook.vue,
+│   │       └── preview/     ← курс «глазами студента» (+ preview урока)
+│   ├── lessons/[id]/        ← index.vue ★ главная рабочая страница (~820 строк),
+│   │                          quiz-results.vue
+│   ├── analytics/           ← quiz-results.vue (+ [lessonId].vue)
+│   ├── legal/               ← offer, privacy, refund, contacts, pdn-consent
+│   └── student/             ← dashboard, courses/[id], courses/[courseId]/lessons/
+│                              [lessonId], assignments, quizzes, results
 └── components/
-    ├── SlideTextEditor.vue  ★ редактор текстов слайдов (320 строк)
+    ├── SlideTextEditor.vue  ★ редактор текстов слайдов
+    ├── lesson/              ← PptxUploader, ScriptPanel, VideoGenerationPanel,
+    │                          VisionPanel, WorkflowNav, LessonHeader
+    ├── quiz/QuestionForm · QuizEditor · QuizTaker · AttemptListPanel
+    ├── assignments/         ← Editor, Review, Submit, Thread, панели teacher/student
+    ├── student/             ← LessonView (плеер+квиз+задания), StudentSidebar
+    ├── Landing*             ← секции лендинга
     ├── PipelineStages.vue   ← stepper прогресса
-    ├── CreationModeChooser.vue
-    ├── CourseCard.vue / SkeletonCard.vue / StatusBadge.vue
-    ├── AppHeader.vue / AppSidebar.vue / LessonPlayer.vue
-    └── UiButton.vue / UiInput.vue
+    ├── CreationModeChooser / CourseCard / CourseCoverUpload / StatusBadge
+    ├── CreditBalanceWidget / GenerationCostModal / VerifyEmailModal
+    ├── AppHeader / AppSidebar / AppLogo / LessonPlayer
+    └── UiButton / UiInput / UiTabs
 ```
+
+> ⚠️ Правило роутинга: страница с детьми — всегда каталог с `index.vue`
+> (`pages/lessons/[id]/index.vue`), а не `pages/lessons/[id].vue` рядом с каталогом —
+> иначе Nuxt рендерит детей в несуществующий `<NuxtPage>` (пустой экран).
 
 ---
 
@@ -234,10 +270,14 @@ frontend/src/
 - **Почему:** Celery с `prefork`-пулом сам не async. Каждая задача — отдельный процесс. Делать async внутри prefork-процесса нет смысла — overhead есть, выгоды нет.
 - **Trade-off:** в воркере используется `_sync_url = DATABASE_URL.replace("+asyncpg", "+psycopg2")`. Две точки настройки connection pool. Если попробуешь `await db.commit()` через `AsyncSession` в Celery-задаче — словишь runtime errors.
 
-### 8.2 Локальное файловое хранилище вместо S3
-- **Решение:** всё (PPTX, PNG слайдов, MP4) лежит в `backend/storage/` volume.
-- **Почему:** MVP-скорость. `storage_service` уже абстрагирован, чтобы при необходимости подменить бекенд на S3.
-- **Trade-off:** не масштабируется на горизонталь (несколько backend-инстансов не увидят файлов друг друга), нет CDN, потеря контейнера = потеря всего контента.
+### 8.2 Локальное файловое хранилище по умолчанию, S3 — опция
+- **Решение (обновлено):** дефолт — `backend/storage/` volume (`STORAGE_BACKEND=local`);
+  S3-бекенд (Yandex Object Storage / совместимый) **уже реализован** в
+  `storage_service.py` и включается `STORAGE_BACKEND=s3` (+ `S3_*`-переменные).
+- **Почему:** MVP-скорость; интерфейс абстрагирован с самого начала.
+- **Trade-off:** local-режим не масштабируется на горизонталь (несколько backend-инстансов
+  не увидят файлов друг друга) и без бэкапа volume контент теряется; переезд на S3 — операционный
+  шаг (перенос уже существующих файлов), код готов.
 
 ### 8.3 Несколько Celery-воркеров по очередям
 - **Решение (обновлено):** раньше был один воркер на всё. Сейчас — **отдельный воркер на очередь**:
@@ -302,7 +342,7 @@ frontend/src/
 3. **`alembic upgrade head` запускается автоматически** на старте — забыл сгенерировать миграцию = backend не стартует.
 4. **`task_id` хранится в БД** (`analyze_task_id`, `video_task_id`), чтобы фронт мог продолжить poll'ить после refresh страницы.
 5. **`creation_mode` определяет шаги пайплайна** — особенно пропуск VLM-summary в auto-режиме.
-6. **Vision-LLM качается вручную** на хост: `ollama pull qwen2.5vl:7b`.
+6. **AI-провайдер по умолчанию — облако Polza** (`.env.example`); локальный Ollama — альтернатива, и только тогда модели качаются вручную (`ollama pull ...`).
 7. **CORS-порядок middleware** в `main.py` — CORS должен быть зарегистрирован *последним*, чтобы оказаться снаружи `log_and_catch` (см. длинный комментарий в файле).
 8. **`__mapper_args__ = {"eager_defaults": True}`** на моделях с `onupdate=func.now()` — без этого `MissingGreenlet` при сериализации после `UPDATE`.
 
@@ -326,6 +366,16 @@ frontend/src/
 | **Журнал оценок / аналитика** | `services/gradebook_service.py`, `analytics_service.py`, `routers/gradebook.py`, `analytics.py` | Сводки по курсу/уроку, ручные override оценок, аналитика по квизам. |
 | **S3-бэкенд хранилища** | `services/storage_service.py`, `signed_url_service.py`, `config.py` (`STORAGE_BACKEND`) | Хранилище переключается `local`↔`s3` (Yandex Object Storage/совместимое). При `local` отдаётся через `/files/*` с HMAC-подписанными URL; `files`-роутер регистрируется только в `local`-режиме. |
 | **Наблюдаемость** | `main.py`, `celery_app.py`, `logging_config.py`, `monitoring/` | Sentry (FastAPI+Celery+SQLAlchemy), Prometheus-метрики (HTTP + Celery-сигналы) → Grafana, Flower для Celery, structlog с `request_id`. |
+| **Платежи ЮKassa (hardened)** | `routers/billing.py`, `services/yookassa_service.py`, `webhook_security.py`, `tasks/payment_pipeline.py` | Вебхук проверяет source-IP (allowlist CIDR + доверенные прокси), телу не верит: ставит `process_yookassa_payment` в очередь и сразу отвечает 200. Задача re-fetch'ит платёж из API ЮKassa и проводит через **единый** `_settle_payment` (FOR UPDATE, анти-double-credit). Бэкстоп — beat-задача `reconcile_pending_payments` (15 мин) + алерт по зависшим (`Payment.alerted_at`). См. [DECISIONS.md](DECISIONS.md) §39–40. |
+| **Стриминг видео** | `routers/lessons.py` (`/video/stream`, `/videos/{id}/stream`), `constants.py` (`VIDEO_XACCEL_*`) | Авторизованная отдача видео: S3 → 302 на presigned URL; local+nginx (прод) → `X-Accel-Redirect` на internal-префикс `/protected-media/`; dev → 302 на подписанный `/files/*`. Python в проде байты не гоняет. См. [DECISIONS.md](DECISIONS.md) §41. |
+| **Дисковый GC** | `tasks/purge_pipeline.py` (`gc_disk_caches`, `gc_lesson_videos`), `constants.py` (`CACHE_GC_*`, `LESSON_VIDEO_GC_*`) | Ночные beat-задачи: TTL + size-cap LRU-эвикция `slides_cache`/`summaries_cache` (recency = mtime, бампается на cache-hit) и прунинг холодных неопубликованных `LessonVideo` (никогда не трогает опубликованные; у каждой задачи свой kill-switch). Кеши больше **не растут бесконечно**. |
+| **Сброс/смена пароля** | `services/password_reset_service.py`, `models/password_reset_token.py`, `routers/auth.py` | `POST /auth/forgot-password` → одноразовый токен (в БД только hash, TTL 30 мин) → письмо через `celery_email` → `POST /auth/reset-password`; `POST /auth/change-password` для залогиненных. Страницы `forgot-password.vue`/`reset-password.vue`. |
+| **Согласия при регистрации (152-ФЗ)** | `models/user.py` (`pdn_consent_at`, `marketing_consent*`, `consent_policy_version`, `consent_ip`), `schemas/auth.py` | Обязательные согласия (ПДн/оферта) валидируются при регистрации, версия документов фиксируется (`CONSENT_POLICY_VERSION`), маркетинговое — опционально. |
+| **Preview «глазами студента»** | `routers/courses.py` (`GET /{id}/preview`), `stores/preview.ts`, `pages/courses/[id]/preview/` | Teacher-владелец смотрит курс/урок так, как его видит записанный студент (с учётом правила видимости), не записываясь на курс. |
+| **Обложка курса** | `routers/courses.py` (`POST /{id}/cover`), `CourseCoverUpload.vue` | Загрузка изображения (≤5 MB) в `storage/covers/`; `CourseOut` несёт `cover_image_url` (загруженная) и `cover_url` (внешняя ссылка) — сериализатор предпочитает загруженную. |
+| **TTS chunk-кеш** | `services/tts_service.py`, `constants.py` (`TTS_CHUNK_CACHE_*`) | Дисковый кеш WAV на уровне TTS-чанков (`storage/tts_chunk_cache/`, ключ — sha256 текста+голоса): правка одного предложения пересинтезирует только свой чанк, а не весь слайд. |
+| **Checkpoint/resume пайплайна** | `tasks/video_pipeline.py` (Redis `job:{lesson_id}:checkpoint`) | Синтезированные слайды чекпоинтятся в Redis; при ошибке/отмене чекпоинт и `work_dir` сохраняются — повторный запуск переиспользует готовое. Кооперативная отмена: `POST /lessons/{id}/cancel-generation`. |
+| **Startup-reconciliation** | `main.py` (`_reconcile_stuck_lessons`), `constants.py` (`STUCK_LESSON_GRACE_MINUTES`) | На старте backend уроки, зависшие в `analyzing`/`processing` дольше 120 мин (потерянный Celery-таск после flushdb/крэша), помечаются `error` — фронт не поллит вечно. |
 
 ---
 

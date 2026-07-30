@@ -1,6 +1,6 @@
 # AUTH_FLOW — авторизация, токены, роли
 
-> Документ описывает **текущую** реализацию как есть (проверено по коду на 2026-06-09).
+> Документ описывает **текущую** реализацию как есть (проверено по коду на 2026-07-30).
 > ⚠️ Раньше аутентификация работала на `Authorization: Bearer` + `localStorage` + bcrypt.
 > Сейчас это **httpOnly-cookie + double-submit CSRF + Argon2id + ротация refresh-семейств**.
 > Если встретишь в других доках (или в `CLAUDE.md`) описание Bearer/localStorage/bcrypt — это
@@ -202,6 +202,34 @@ AI-роут и забыть его туда внести. Проверка ст�
 
 На фронте непроверенному юзеру `useAiGuard` открывает `VerifyEmailModal` при клике на AI-действие.
 
+### Согласия при регистрации (152-ФЗ)
+
+`UserRegister` ([schemas/auth.py](../backend/app/schemas/auth.py)) требует обязательные галочки
+(обработка ПДн, оферта) — без них 422. На `User` фиксируются `pdn_consent_at`,
+`marketing_consent(_at)` (опционально), `consent_policy_version` (= `CONSENT_POLICY_VERSION` из
+`constants.py`, бампается при изменении документов) и `consent_ip`. У старых пользователей поля
+пустые — «не значит согласился», значит «регистрировался до внедрения».
+
+---
+
+## 8b. Сброс и смена пароля
+
+Код: [services/password_reset_service.py](../backend/app/services/password_reset_service.py),
+[models/password_reset_token.py](../backend/app/models/password_reset_token.py),
+[routers/auth.py](../backend/app/routers/auth.py); страницы —
+[forgot-password.vue](../frontend/src/pages/forgot-password.vue) /
+[reset-password.vue](../frontend/src/pages/reset-password.vue).
+
+- `POST /auth/forgot-password` (3/min, без CSRF — сессии нет) — **всегда 204** (guard от
+  перечисления аккаунтов). Для существующего юзера минтится одноразовый токен
+  (`secrets.token_urlsafe(32)`); в БД хранится **только SHA-256-hash** (`password_reset_tokens`),
+  TTL `PASSWORD_RESET_TTL_SECONDS` = 30 мин. Письмо со ссылкой
+  `FRONTEND_URL + PASSWORD_RESET_PATH?token=…` уходит через `celery_email`.
+- `POST /auth/reset-password` (5/min) — `consume` сжигает токен (`used_at`) в одной транзакции с
+  новым Argon2id-хешем, затем **отзываются все refresh-семейства** юзера. Любая проблема токена
+  (неизвестен/просрочен/использован) схлопывается в один непрозрачный **400**.
+- `POST /auth/change-password` (5/min) — для залогиненного: проверка старого пароля → новый хеш.
+
 ---
 
 ## 9. Logout
@@ -220,7 +248,8 @@ AI-роут и забыть его туда внести. Проверка ст�
 ## 10. Rate limiting
 
 `slowapi` (см. [limiter.py](../backend/app/limiter.py)) с per-route декораторами:
-`register` 3/min, `login` 5/min, `refresh` 10/min, `resend-verification` 3/min. Превышение → 429
+`register` 3/min, `login` 5/min, `refresh` 10/min, `resend-verification` 3/min,
+`forgot-password` 3/min, `reset-password` 5/min, `change-password` 5/min. Превышение → 429
 (отдельный handler в `main.py`).
 
 ---

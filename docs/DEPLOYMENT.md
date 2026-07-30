@@ -9,12 +9,12 @@
 | Что | Версия | Зачем |
 |---|---|---|
 | **Docker Desktop** (Win/Mac) или Docker Engine + Compose v2 (Linux) | 24+ | вся инфра поднимается через docker-compose |
-| **Ollama** | latest | локальный LLM-сервер. Запускается **на хосте**, не в Docker. См. https://ollama.com/download |
-| **Свободного места на диске** | ~30 GB | Docker-образы + LibreOffice (~500MB) + модели Ollama (qwen3:14b ≈ 9GB, qwen2.5vl:7b ≈ 5GB) + модели Silero (~50MB) |
-| **RAM** | 16+ GB | Ollama при инференсе qwen3:14b держит ~10GB; параллельно работают backend, postgres, redis, frontend |
-| **CPU** | 4+ ядра | Celery prefork использует 2 worker'а + thread-pool'ы для FFmpeg |
+| **LLM+vision-провайдер** | — | дефолт `.env.example` — облако **Polza AI** (нужен только API-ключ `pza_...`). Альтернатива — **Ollama на хосте** (см. шаг 3-Б) |
+| **Свободного места на диске** | ~10 GB (облако) / ~30 GB (локальный Ollama) | Docker-образы + LibreOffice (~500MB) + модели Silero (~50MB); модели Ollama добавляют 10–15 GB |
+| **RAM** | 8+ GB (облако) / 16+ GB (Ollama) | параллельно работают backend, postgres, redis, 4 celery-воркера, frontend; локальный инференс LLM добавляет ~10GB |
+| **CPU** | 4+ ядра | пулы TTS/FFmpeg авто-масштабируются от числа ядер (`constants._derive_concurrency`, cap 12) |
 
-GPU не обязателен (Ollama работает на CPU), но с GPU vision-анализ ускоряется в 5-10 раз.
+GPU не обязателен; актуален только для локального Ollama (vision-анализ ускоряется в 5-10 раз).
 
 ---
 
@@ -43,22 +43,43 @@ cp .env.example .env
 
 Полный список переменных — раздел 5 этого файла.
 
-### Шаг 3. Установить и запустить Ollama на хосте
+### Шаг 3. Настроить LLM+vision-провайдера
+
+**Вариант А — Polza AI (облако, дефолт `.env.example`).** Ничего ставить не нужно — только
+ключ в `.env`:
+
+```
+LLM_BASE_URL=https://api.polza.ai/v1
+LLM_MODEL=qwen/qwen3-30b-a3b-instruct-2507
+LLM_API_KEY=pza_...            # ваш ключ
+VISION_OLLAMA_BASE_URL=https://api.polza.ai/v1
+VISION_MODEL=qwen/qwen3.6-27b
+VISION_API_KEY=pza_...
+```
+
+Опционально: `LLM_PROVIDER_ORDER` / `VISION_PROVIDER_ORDER` пинят upstream-провайдера гейтвея
+(OpenRouter-стиль), `VISION_REASONING_DISABLED=true` глушит chain-of-thought у reasoning-моделей.
+
+**Вариант Б — Ollama на хосте (локально, бесплатно).**
 
 ```bash
 # 1. Скачать с https://ollama.com/download → установить.
 # 2. Проверить, что демон запущен и слушает 11434:
 curl http://localhost:11434/api/tags
-# должен вернуть JSON со списком моделей (возможно пустым)
 
-# 3. Скачать обе модели:
-ollama pull qwen3:14b      # для текстовых задач (split, SSML)
+# 3. Скачать модели (имена = LLM_MODEL/VISION_MODEL в .env):
+ollama pull qwen3:8b       # для текстовых задач (split, SSML)
 ollama pull qwen2.5vl:7b   # для vision-анализа слайдов
 ```
 
-Ollama должна остаться запущенной — Docker-контейнеры будут к ней обращаться по `host.docker.internal:11434`.
+И в `.env`: `LLM_BASE_URL=http://host.docker.internal:11434/v1`, `LLM_MODEL=qwen3:8b`,
+`VISION_OLLAMA_BASE_URL=http://host.docker.internal:11434/v1`, `VISION_MODEL=qwen2.5vl:7b`,
+ключи — любая строка (`ollama`). Ollama должна остаться запущенной.
 
-> **Linux:** `host.docker.internal` по умолчанию не резолвится. Либо используй `--add-host=host.docker.internal:host-gateway` в compose, либо замени `LLM_BASE_URL` и `VISION_OLLAMA_BASE_URL` на `http://172.17.0.1:11434/v1` (адрес docker bridge).
+> **Linux:** `host.docker.internal` резолвится через `extra_hosts: host-gateway`, который уже
+> прописан для сервиса `backend` в [docker-compose.yml](../docker-compose.yml). У celery-воркеров
+> его нет — при локальном Ollama на Linux добавь тот же блок воркерам (`celery_vision` ходит в
+> vision-LLM, `celery_video`/`celery_quiz` — в текстовый).
 
 ### Шаг 4. Поднять весь стек
 
@@ -125,9 +146,10 @@ docker-compose down -v
 # Пересобрать только backend (например, после изменения requirements.txt)
 docker-compose up --build backend
 
-# Тейлить логи одного сервиса
+# Тейлить логи одного сервиса (воркеры: celery_video, celery_vision,
+# celery_quiz, celery_email_worker)
 docker-compose logs -f --timestamps backend
-docker-compose logs -f --timestamps celery_worker
+docker-compose logs -f --timestamps celery_video
 ```
 
 ### Работа с миграциями
@@ -166,14 +188,18 @@ cat dump.sql | docker-compose exec -T postgres psql -U edu_user -d edllm
 
 ### Работа с Celery
 
+Воркеров четыре — по одному на очередь: `celery_video` (video), `celery_vision` (vision),
+`celery_quiz` (quiz, + `--beat`), `celery_email_worker` (celery_email).
+
 ```bash
-# Перезапустить только celery_worker (без backend)
-docker-compose restart celery_worker
+# Перезапустить один воркер (без backend)
+docker-compose restart celery_video
 
-# Зайти в shell celery (для отладки)
-docker-compose exec celery_worker celery -A app.celery_app inspect active
+# Посмотреть активные задачи (можно на любом воркере)
+docker-compose exec celery_quiz celery -A app.celery_app inspect active
 
-# Очистить очередь
+# Очистить ВСЁ состояние Redis (очереди, refresh-семейства, чекпоинты пайплайна,
+# result backend) — только как крайняя мера в dev:
 docker-compose exec redis redis-cli -a "$REDIS_PASSWORD" flushdb
 ```
 
@@ -243,7 +269,9 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ## 5. Полный список переменных окружения
 
-Все живут в `.env` в корне проекта.
+Все живут в `.env` в корне проекта. **Источник истины по дефолтам —
+[config.py](../backend/app/config.py)** (pydantic-settings); `.env.example` — шаблон с
+рабочими облачными значениями, `.env.prod.example` — прод-надстройка. Ниже — по группам.
 
 ### PostgreSQL
 
@@ -259,39 +287,104 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 | Переменная | Дефолт | Использование |
 |---|---|---|
 | `REDIS_PASSWORD` | change-me | передаётся в `redis-server --requirepass` |
-| `REDIS_URL` | `redis://:change-me@redis:6379/0` | broker + result backend для Celery |
+| `REDIS_URL` | `redis://:change-me@redis:6379/0` | broker + result backend Celery + auth-state + чекпоинты |
 
-> Пароль в `REDIS_URL` должен совпадать с `REDIS_PASSWORD`. Это **отдельные переменные** — рассинхрон вызовет «WRONGPASS» в логах celery_worker.
+> Пароль в `REDIS_URL` должен совпадать с `REDIS_PASSWORD`. Это **отдельные переменные** — рассинхрон вызовет «WRONGPASS» в логах воркеров.
 
-### JWT
+### JWT / cookies
 
-| Переменная | Дефолт | Использование |
+| Переменная | Дефолт (config.py) | Использование |
 |---|---|---|
-| `SECRET_KEY` | (нужно поменять) | подпись JWT, HS256 |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | 30 | срок жизни access |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | 30 | срок refresh |
+| `SECRET_KEY` | **нет дефолта — обязателен** | подпись JWT (HS256), email-verify-токенов и HMAC `/files/*`. При `ENVIRONMENT=production` слабый/шаблонный ключ (<32 симв.) валит старт |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | 15 | срок жизни access |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | 14 | sliding-окно refresh при `remember_me` (`.env.example` ставит 120) |
+| `REFRESH_TOKEN_SESSION_DAYS` | 1 | sliding-окно без `remember_me` |
+| `REFRESH_TOKEN_ABSOLUTE_MAX_DAYS` | 90 | абсолютный потолок семейства (`.env.example` — 365) |
+| `COOKIE_SECURE` | false | в проде `true` (HTTPS-only куки) |
+| `COOKIE_SAMESITE` | Lax | samesite всех auth-кук |
 
 ### LLM (текстовый)
 
-| Переменная | Дефолт | Использование |
-|---|---|---|
-| `LLM_BASE_URL` | `http://host.docker.internal:11434/v1` | OpenAI-совместимый endpoint |
-| `LLM_MODEL` | qwen3:14b | имя модели |
-| `LLM_API_KEY` | ollama | для Ollama любая строка; для YandexGPT — IAM-токен |
-| `LLM_TEMPERATURE` | 0.7 | для `enhance_lecture_text` |
-| `LLM_MAX_TOKENS` | 2048 | для всех LLM-вызовов |
+| Переменная | Дефолт (config.py) | `.env.example` | Использование |
+|---|---|---|---|
+| `LLM_BASE_URL` | `http://host.docker.internal:11434/v1` | `https://api.polza.ai/v1` | OpenAI-совместимый endpoint |
+| `LLM_MODEL` | qwen3:8b | `qwen/qwen3-30b-a3b-instruct-2507` | имя модели |
+| `LLM_API_KEY` | ollama | `pza_...` | ключ провайдера |
+| `LLM_TEMPERATURE` | 0.7 | — | для `enhance_lecture_text` |
+| `LLM_MAX_TOKENS` | 4096 | — | потолок completion (SSML-split его не использует) |
+| `LLM_PROVIDER_ORDER` | (пусто) | StreamLake | пин upstream-провайдера Polza/OpenRouter |
+| `REGEN_LLM_MODEL` | qwen3:8b | как LLM_MODEL | модель полировки при regen одного слайда |
 
 ### Vision LLM
 
+| Переменная | Дефолт (config.py) | Использование |
+|---|---|---|
+| `VISION_PROVIDER` | ollama | `ollama` (любой OpenAI-совместимый, вкл. Polza) или `yandex` |
+| `VISION_MODEL` | qwen2-vl:7b | имя модели (`.env.example`: `qwen/qwen3.6-27b`) |
+| `VISION_OLLAMA_BASE_URL` | `http://host.docker.internal:11434/v1` | endpoint (`.env.example`: Polza) |
+| `VISION_API_KEY` | ollama | API-ключ |
+| `VISION_REASONING_DISABLED` | false | глушит chain-of-thought (OpenRouter-параметр, только для Polza) |
+| `VISION_PROVIDER_ORDER` | (пусто) | пин upstream-провайдера (с fallback) |
+| `YANDEX_VISION_MODEL` / `YANDEX_FOLDER_ID` / `YANDEX_API_KEY` | yandexgpt-pro / — / — | для `VISION_PROVIDER=yandex` |
+
+### Параллелизм пайплайна (авто от CPU, env — ручной пин)
+
 | Переменная | Дефолт | Использование |
 |---|---|---|
-| `VISION_PROVIDER` | ollama | `ollama` или `yandex` |
-| `VISION_MODEL` | qwen2.5vl:7b | имя модели для ollama |
-| `VISION_OLLAMA_BASE_URL` | `http://host.docker.internal:11434/v1` | endpoint |
-| `VISION_API_KEY` | ollama | API-ключ |
-| `YANDEX_VISION_MODEL` | yandexgpt-pro | имя модели для yandex |
-| `YANDEX_FOLDER_ID` | (пусто) | folder_id для Yandex Cloud |
-| `YANDEX_API_KEY` | (пусто) | Api-Key для Yandex |
+| `CPU_BUDGET` | (авто) | cap ядер для формулы (`constants._derive_concurrency`) в cgroup-контейнерах |
+| `TTS_WORKERS` | (авто; 4 на 4 ядрах) | TTS-пул **и** `NUMBER_OF_THREADS` Silero-контейнера — инвариант «оба читают одну переменную» |
+| `ENCODE_WORKERS` | (авто) | пул FFmpeg-энкодеров |
+| `VIDEO_CONCURRENCY` | (авто) | `celery_video --concurrency` = уроков параллельно |
+| `VISION_SUMMARY_CONCURRENCY` | (авто) | параллельные vision-summary вызовы |
+| `VISION_TASK_CONCURRENCY` | 1 (compose) | `celery_vision --concurrency` (ручной рычаг) |
+
+### Email / биллинг / админ
+
+| Переменная | Дефолт | Использование |
+|---|---|---|
+| `EMAIL_PROVIDER` / `RESEND_API_KEY` / `EMAIL_FROM` | resend / (пусто) / Edllm <…> | транзакционные письма; пустой ключ в dev ок (задача ретраится и гаснет) |
+| `FRONTEND_URL` | `http://localhost:3000` | базовый URL ссылок в письмах (verify, reset, «видео готово») |
+| `ADMIN_API_TOKEN` | (пусто) | shared-secret `/billing/admin/*` (`X-Admin-Token`); пусто = выключено |
+| `ALERT_ADMIN_EMAIL` | (пусто) | получатель операционных алертов (зависшие платежи) |
+| `YOOKASSA_SHOP_ID` / `YOOKASSA_SECRET_KEY` | (пусто) | пусто → `POST /billing/payments` отвечает 503 |
+| `YOOKASSA_RETURN_URL` | (пусто) | redirect после оплаты; пусто → `FRONTEND_URL/billing` |
+| `YOOKASSA_SEND_RECEIPT` / `YOOKASSA_VAT_CODE` | false / 1 | чеки 54-ФЗ |
+| `YOOKASSA_VERIFY_WEBHOOK_IP` | true | IP-allowlist вебхука (выключать только за WAF) |
+
+### Storage / раздача файлов
+
+| Переменная | Дефолт | Использование |
+|---|---|---|
+| `STORAGE_BACKEND` | local | `local` или `s3` |
+| `STORAGE_PATH` | `/app/storage` | путь local-хранилища в контейнере |
+| `BASE_URL` | `http://localhost:8000` | публичный URL backend (подписанные ссылки) |
+| `SERVE_STATIC_VIA_NGINX` | false | true (прод): `/files/*` отдаёт nginx, FastAPI только верифицирует подпись; также включает `X-Accel-Redirect` в `/stream` |
+| `PUBLIC_FILES_BASE_URL` | (пусто) | домен nginx/CDN для подписанных ссылок; пусто → `BASE_URL` |
+| `SIGNED_URL_EXPIRES_IN` | 1800 | TTL подписанных URL (per-type тюнинг в `constants.py`) |
+| `S3_ENDPOINT_URL` … `S3_PRESIGNED_URL_EXPIRE_SECONDS` | Yandex OS / 3600 | обязательны при `STORAGE_BACKEND=s3` |
+
+### Наблюдаемость / прочее
+
+| Переменная | Дефолт | Использование |
+|---|---|---|
+| `SENTRY_DSN` | (пусто) | пусто = Sentry выключен; в проде warning при старте |
+| `ENVIRONMENT` / `APP_VERSION` | development / dev | окружение и release для Sentry/логов |
+| `SENTRY_TRACES_SAMPLE_RATE` | 0.1 | сэмплинг трейсов |
+| `METRICS_ENABLED` | true | `/metrics` + Celery-метрики |
+| `RUN_MIGRATIONS_ON_STARTUP` | true | dev: авто-`alembic upgrade head` в lifespan; в проде **false** (one-shot `migrate`) |
+| `CELERY_FLOWER_USER` / `CELERY_FLOWER_PASSWORD` | admin / change-me | basic-auth Flower |
+| `CORS_ORIGINS` | `["http://localhost:3000", …]` | JSON-массив или CSV; `*` в проде — hard error |
+| `NUXT_PUBLIC_API_BASE` | `/api/v1` | база API фронта (прод: абсолютный URL за nginx) |
+
+### Только прод (`.env.prod.example`)
+
+| Переменная | Пример | Использование |
+|---|---|---|
+| `BACKEND_IMAGE` / `FRONTEND_IMAGE` | edllm-backend:local | теги образов для prod-compose |
+| `GUNICORN_WORKERS` | 4 | число uvicorn-воркеров gunicorn |
+| `DOMAIN` | edllm.ru | подставляется envsubst'ом в [nginx/prod.conf.template](../nginx/prod.conf.template) |
+| `CERTBOT_EMAIL` | … | email для Let's Encrypt (`deploy/init-letsencrypt.sh`) |
+| `BACKUP_INTERVAL_SECONDS` / `BACKUP_RETENTION_DAYS` | 86400 / 7 | сайдкар `db_backup` |
 
 ### TTS
 
@@ -414,17 +507,18 @@ docker-compose up
 
 | Что нужно | Зачем / статус |
 |---|---|
-| **nginx / cloud LB** перед backend и frontend | TLS termination, gzip/br, `/files/*` через `X-Accel-Redirect`, rate-limiting (nginx есть в prod-compose; `X-Accel-Redirect`/CDN — post-MVP) |
+| ✅ **nginx + TLS** | в prod-compose: конфиг рендерится из [nginx/prod.conf.template](../nginx/prod.conf.template) (nginx-образ прогоняет `envsubst`, подставляется только `${DOMAIN}` — `NGINX_ENVSUBST_FILTER`); certbot — профиль `certbot` + [deploy/init-letsencrypt.sh](../deploy/init-letsencrypt.sh) + systemd-таймер в [deploy/systemd/](../deploy/systemd/). `/files/*` — напрямую с диска, видео — через `X-Accel-Redirect` (`/protected-media/`), Flower за `/flower`, Grafana за `/grafana` |
 | ✅ **production frontend** | реализовано в [frontend/Dockerfile.prod](../frontend/Dockerfile.prod): `nuxt build` → `node .output/server/index.mjs`. Dev-compose остаётся на `nuxt dev` |
 | ✅ **production uvicorn** | реализовано в `docker-compose.prod.yml`: `gunicorn app.main:app -k uvicorn.workers.UvicornWorker --workers N`, без `--reload`. Dev остаётся на `--reload` |
 | ✅ **миграции отдельным шагом деплоя** | `RUN_MIGRATIONS_ON_STARTUP=false` (prod) + one-shot сервис `migrate` (`alembic upgrade head`) в `docker-compose.prod.yml`, запускается ДО `up`. Dev: авто-`upgrade head` в lifespan |
 | ✅ **Backup БД** | сайдкар `db_backup`: периодический `pg_dump -Fc` → volume `db_backups`, ретенция `BACKUP_RETENTION_DAYS`. Off-host копия в Object Storage — post-MVP |
-| **S3 / Yandex Object Storage** | заменить локальный `storage_service.save_upload` на S3-bucket. Структура `pptx/<uuid>_*.pptx`, `videos/<uuid>.mp4` останется, ссылки — presigned URLs |
-| **Sentry** | для error-tracking. Подключается через `sentry-sdk[fastapi]` |
-| **Prometheus / Grafana** | для метрик. Хотя бы `prometheus-fastapi-instrumentator` |
-| **Secret manager** | `SECRET_KEY`, `REDIS_PASSWORD`, `YANDEX_API_KEY` — сейчас в `.env`. В проде: AWS Secrets Manager / Yandex Lockbox / Vault |
+| ✅ **healthchecks воркеров** | prod-compose: `celery inspect ping` на каждом воркере (общий anchor). В dev-compose healthcheck только у postgres |
+| ✅ **Sentry** | инициализирован в `main.py` и `celery_app.py`; включается заданием `SENTRY_DSN`. `before_send` отбрасывает sub-500 HTTPException |
+| ✅ **Prometheus / Grafana** | `prometheus-fastapi-instrumentator` (`/metrics`), Celery-метрики через сигналы, DB-backed `UsageCostCollector`; дашборды в `monitoring/` |
+| ✅ **S3-бекенд (код)** | `storage_service` умеет `STORAGE_BACKEND=s3` (Yandex OS/совместимый, presigned URLs). Остался операционный шаг: перенос существующих файлов + `PUBLIC_FILES_BASE_URL` |
+| **Secret manager** | `SECRET_KEY`, `REDIS_PASSWORD`, ключи провайдеров — сейчас в `.env.prod`. При росте: Yandex Lockbox / Vault |
 | **CI/CD** | сейчас нет. Нужен пайплайн: lint (ruff) → tests (pytest) → docker build → push → deploy |
-| **Volume для Ollama** | в проде Ollama не должна быть на хосте. Запускать в отдельном контейнере с GPU или вообще выносить на отдельный inference-сервер |
+| **Вынос локального inference** | актуально только при возврате на Ollama: отдельный inference-хост/контейнер с GPU. Облачный дефолт (Polza) снимает вопрос |
 
 ---
 

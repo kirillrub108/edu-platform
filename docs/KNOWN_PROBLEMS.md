@@ -34,19 +34,6 @@
 - **Остаточный риск:** окно эксплуатации — 30 мин для видео. Принято для MVP.
 - **Будущий путь:** per-request signed URLs (mint at API-request time) — правильное решение для платного контента. Session-binding отклонён (убивает CDN-кеш). Переход на S3 даёт presigned URLs из коробки.
 
-### 1.5 SECRET_KEY имеет дефолт
-
-- **Где:** [backend/app/config.py:25](../backend/app/config.py) — `SECRET_KEY: str = "change-me"`.
-- **Что не так:** если кто-то забыл поменять `.env`, JWT будут подписаны паролем `change-me`. Любой, кто это знает, сможет выписать себе токен с любой ролью.
-- **Фикс:** убрать дефолт — `SECRET_KEY: str` (без значения), pydantic-settings будет fail-fast если переменная не задана.
-
-### 1.8 Загрузка `.docx` через `python-docx` — потенциально XXE / XML-bomb
-
-- **Где:** [backend/app/routers/uploads.py:_extract_docx_text](../backend/app/routers/uploads.py).
-- **Что не так:** `python-docx` парсит XML внутри docx стандартным `xml.etree.ElementTree`. Хотя XXE по умолчанию выключен в lxml/etree, billion-laughs (XML-bomb) всё ещё возможен.
-- **Почему опасно:** теоретически загрузка спецально-составленного docx-файла может выжрать всю память backend.
-- **Фикс:** использовать `defusedxml` или ограничить размер уже на этапе чтения (сейчас `MAX_SCRIPT_BYTES = 10 MB` — поможет от bomb, но не от очень эффективных).
-
 ### 1.9 CORS `allow_credentials` принудительно `False` при `*`
 
 - **Где:** [backend/app/main.py:88](../backend/app/main.py).
@@ -56,19 +43,6 @@
 ---
 
 ## 2. Correctness и race conditions
-
-### 2.1 ⚠ `access_code` курса не уникален
-
-- **Где:** [backend/app/models/course.py](../backend/app/models/course.py) — `access_code = Column(String(20), nullable=True)` без `unique=True` или `UniqueConstraint`.
-- **Что не так:** два преподавателя могут случайно сгенерировать один и тот же код (если генерация наивная — например `course.id[:8]`).
-- **Почему опасно:** `enroll(access_code=...)` в [routers/students.py](../backend/app/routers/students.py) делает `select(Course).where(Course.access_code == ...)` и берёт **первого попавшегося**. Студент может попасть не на тот курс.
-- **Фикс:** мирация — `op.create_unique_constraint("uq_courses_access_code", "courses", ["access_code"])`. Дополнительно валидация при PUT — если код уже занят, вернуть 409.
-
-### 2.2 `LessonProgress` не имеет UNIQUE constraint
-
-- **Где:** [backend/app/models/enrollment.py:LessonProgress](../backend/app/models/enrollment.py).
-- **Что не так:** теоретически можно создать несколько `LessonProgress` записей на пару `(enrollment_id, lesson_id)`. Сейчас в коде защита через `_get_progress` (если уже есть — переиспользует), но это race-уязвимо: два одновременных POST могут оба пройти проверку «нет записи» и оба создать.
-- **Фикс:** добавить `UniqueConstraint("enrollment_id", "lesson_id", name="uq_progress_enrollment_lesson")` в `__table_args__`. Тогда второй insert упадёт с IntegrityError.
 
 ### 2.3 `pptx_path` vs `video_url` — разная семантика
 
@@ -90,23 +64,18 @@
 - **Почему опасно:** в логах warning, пользователь не видит. Видео формально создаётся, но текст на слайдах часто не соответствует тому, что показано.
 - **Фикс:** retry один раз с более жёстким промптом («previous response had N chunks but expected M»). Если повторно неудача — сохранить ошибку в `lesson.status = error` вместо тихого fallback.
 
-### 2.6 `task_id` пропадает при перезапуске Redis
+### 2.6 Прогресс задачи пропадает при перезапуске Redis — mitigated
 
 - **Где:** [backend/app/celery_app.py](../backend/app/celery_app.py) — `backend=settings.REDIS_URL`.
-- **Что не так:** Celery result backend = Redis. После перезапуска Redis (или `flushdb`) `AsyncResult(task_id).status` возвращает `PENDING` для всех завершённых задач (потому что Redis их не помнит). Frontend думает, что задача только что началась, и продолжает поллить.
-- **Фикс:** использовать persistent backend для результатов (postgres через `db+...`). Или хранить результат пайплайна в `lesson.status` (уже делается) и не полагаться на Celery result.
+- **Что не так (residual):** Celery result backend = Redis. После перезапуска Redis (или `flushdb`) `AsyncResult(task_id).status` возвращает `PENDING` для завершённых задач — прогресс-мета теряется.
+- **Митигации (2026-06):** источник истины для фронта — **`lesson.status` в БД** (см. `test_task_status_db_authoritative.py`); при старте backend `_reconcile_stuck_lessons` ([main.py](../backend/app/main.py)) помечает `error` уроки, зависшие в `analyzing`/`processing` дольше `STUCK_LESSON_GRACE_MINUTES` (120 мин); синтезированные слайды чекпоинтятся в Redis и переиспользуются при повторном запуске.
+- **Остаточный риск:** между рестартом Redis и реконсиляцией (до 2 ч) фронт видит «PENDING» у живого на вид таска. Принято.
 
-### 2.7 `finally rmtree(work_dir)` стирает post-mortem
+### 2.7 `rmtree(work_dir)` при падении — остался только в vision_pipeline
 
-- **Где:** [backend/app/tasks/video_pipeline.py](../backend/app/tasks/video_pipeline.py), [vision_pipeline.py](../backend/app/tasks/vision_pipeline.py).
-- **Что не так:** при падении задачи `finally` удаляет всю временную директорию `storage/video_jobs/<lesson_id>/`. Промежуточные PNG, WAV, log нельзя посмотреть.
-- **Фикс:** при `error` сохранять директорию (пометить `lesson.status = error`, не удалять); удалять только при `published`. Можно ограничить TTL — крон-задача удаляет старше 7 дней.
-
-### 2.8 Кеш слайдов растёт бесконечно
-
-- **Где:** [backend/app/services/video_service.py:_pptx_cache_key](../backend/app/services/video_service.py), `summaries_cache` в `vision_analysis.py`.
-- **Что не так:** у обоих кешей нет TTL и нет evict-стратегии. Каждый уникальный PPTX → ~5MB PNG в `slides_cache/`. Каждый PNG → ~2KB summary в `summaries_cache/`. За месяц активной работы — гигабайты.
-- **Фикс:** простой LRU по mtime, удалять файлы старше 30 дней крон-задачей. Или периодически `find -atime +30 -delete` в cron.
+- **Где:** [tasks/vision_pipeline.py:254-255](../backend/app/tasks/vision_pipeline.py) — безусловный `rmtree` в `finally`.
+- **Что не так:** `video_pipeline` уже чинён (при ошибке `work_dir` сохраняется, `work_dir_retained` в логах), а vision-анализ по-прежнему стирает артефакты падения.
+- **Фикс:** зеркалить video: `rmtree` только при `_success`, иначе warning. `_success` уже в scope этого `finally`.
 
 ### 2.9 Журнал оценок: pre-grade не поддерживается
 
@@ -143,12 +112,6 @@
 - **Что не так:** при горизонтальном масштабировании backend (две реплики за load balancer) реплики не видят файлов друг друга.
 - **Фикс:** добавить S3-бекенд в `storage_service`. Интерфейс уже абстрактный (`save_upload`, `get_url`, `get_full_path`, `delete_file`), нужно реализовать второй вариант через `aiobotocore` или `aioboto3`. Селектор провайдера через env-переменную `STORAGE_PROVIDER=local|s3`.
 
-### 3.4 `StaticFiles` через FastAPI отдаёт большие MP4
-
-- **Где:** [backend/app/main.py:161](../backend/app/main.py).
-- **Что не так:** видео раздаются ASGI-сервером uvicorn, который не оптимизирован для крупных файлов. Каждый просмотр студента нагружает Python-процесс.
-- **Фикс:** в проде — nginx с `try_files` и `X-Accel-Redirect`, либо CDN перед S3.
-
 ### 3.5 LibreOffice тяжёлый и единственный
 
 - **Где:** [backend/app/services/video_service.py:convert_pptx_to_images](../backend/app/services/video_service.py).
@@ -167,10 +130,10 @@
 
 ## 4. Maintainability и developer experience
 
-### 4.2 ⚠ `pages/lessons/[id].vue` — 640 строк
+### 4.2 ⚠ `pages/lessons/[id]/index.vue` — ~820 строк
 
-- **Где:** [frontend/src/pages/lessons/[id].vue](../frontend/src/pages/lessons/[id].vue).
-- **Что не так:** одна страница содержит:
+- **Где:** [frontend/src/pages/lessons/[id]/index.vue](../frontend/src/pages/lessons/[id]/index.vue).
+- **Что не так:** часть секций уже вынесена в `components/lesson/*` (PptxUploader, ScriptPanel, VideoGenerationPanel, VisionPanel, WorkflowNav), но сама страница продолжает расти и держит всю оркестрацию:
   - выбор режима;
   - загрузку PPTX;
   - manual: редактор скрипта + загрузку файла со скриптом;
@@ -200,15 +163,6 @@
       ...
   ```
 
-### 4.4 Магические числа разбросаны
-
-- **Где:**
-  - `_SILERO_MAX_CHARS = 800` в [tts_service.py](../backend/app/services/tts_service.py).
-  - `_SLIDE_DPI = 150` в [video_service.py](../backend/app/services/video_service.py).
-  - `MAX_SCRIPT_BYTES = 10 * 1024 * 1024` в [uploads.py](../backend/app/routers/uploads.py).
-- **Что не так:** значения-константы разбросаны по сервисам вместо единого места. Часть уже переехала в `app/constants.py` (в т.ч. concurrency-бюджет video/vision), но не всё.
-- **Фикс:** дособрать оставшиеся в `app/constants.py` / `config.py` как `Settings` поля; связанные — задокументировать в комментарии.
-
 ### 4.5 Нет eslint/prettier для frontend
 
 - **Где:** репозиторий (frontend).
@@ -227,12 +181,6 @@
 - **Что не так:** компонент знает только перечисленные значения. Добавишь новый статус в `LessonStatus` enum в Python — компонент покажет «unknown».
 - **Фикс:** вместо хардкода — мапа статусов в `composables/useStatuses.ts`, единый источник истины. Обновлять при изменении enum.
 
-### 4.8 Логирование зашумлённое и без структуры
-
-- **Где:** [backend/app/main.py:18-22](../backend/app/main.py).
-- **Что не так:** `logging.basicConfig(level=INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")` — текстовый формат. Невозможно фильтровать в стеке вроде Loki/ELK.
-- **Фикс:** structlog с JSON-выводом. Также добавить request_id в каждый лог (через middleware).
-
 ---
 
 ## 5. Operational риски
@@ -243,19 +191,11 @@
 - **Что не так:** авто-`upgrade head` спрятан за `RUN_MIGRATIONS_ON_STARTUP` (dev), а прод гоняет миграцию one-shot сервисом `migrate` до роллаута — базовый кейс закрыт. Открытым остаётся горизонтальное масштабирование: несколько реплик backend, стартующих параллельно, могут одновременно инициировать миграцию (Alembic берёт advisory lock, но это снижает риск, а не устраняет его).
 - **Фикс:** держать миграцию строго отдельным pre-deploy шагом (в проде уже так); при multi-replica не полагаться на lifespan.
 
-### 5.2 Нет healthcheck для celery_worker
+### 5.2 Нет healthcheck воркеров в dev-compose (в prod — есть)
 
-- **Где:** [docker-compose.yml](../docker-compose.yml).
-- **Что не так:** у `postgres` есть healthcheck, у остальных — нет. `celery_worker` может тихо упасть, и compose покажет его «running».
-- **Фикс:**
-  ```yaml
-  celery_worker:
-    healthcheck:
-      test: ["CMD", "celery", "-A", "app.celery_app", "inspect", "ping", "-d", "celery@%h"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-  ```
+- **Где:** [docker-compose.yml](../docker-compose.yml) vs [docker-compose.prod.yml](../docker-compose.prod.yml).
+- **Что не так:** prod-compose проверяет каждый воркер общим anchor'ом (`celery inspect ping`), но в dev-compose healthcheck только у `postgres` — упавший воркер выглядит «running».
+- **Фикс:** скопировать anchor из prod-compose в dev, если тихие падения воркеров начнут мешать разработке. Низкий приоритет.
 
 ### 5.3 Бэкап БД только на том же хосте
 
@@ -263,51 +203,28 @@
 - **Что не так:** `db_backup` делает `pg_dump -Fc` в volume `db_backups` (ретенция `BACKUP_RETENTION_DAYS`) — это спасает от `docker volume rm`/повреждения данных, но не от потери самого хоста: off-site копии нет.
 - **Фикс:** выгружать дампы в Object Storage / внешнее хранилище (post-MVP).
 
-### 5.4 `host.docker.internal` не работает на Linux по умолчанию
+### 5.4 `host.docker.internal` на Linux: закрыто для backend, не для воркеров
 
-- **Где:** все `LLM_BASE_URL`, `VISION_OLLAMA_BASE_URL` в `.env.example`.
-- **Что не так:** Linux Docker не знает `host.docker.internal`. Запуск на Linux-хосте без правок compose даст ConnectionRefused.
-- **Фикс:** в `docker-compose.yml` добавить:
-  ```yaml
-  backend:
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-  ```
-  (доступно с Docker 20.10+).
+- **Где:** [docker-compose.yml](../docker-compose.yml).
+- **Что не так (residual):** `extra_hosts: host.docker.internal:host-gateway` прописан **только сервису `backend`**. Celery-воркеры (`celery_vision` ходит в vision-LLM, `celery_video`/`celery_quiz` — в текстовый) на Linux-хосте с **локальным Ollama** получат ConnectionRefused.
+- **Почему не критично:** дефолт `.env.example` — облачная Polza (обычный DNS), там проблема не проявляется.
+- **Фикс:** при работе с локальным Ollama на Linux добавить тот же `extra_hosts`-блок всем четырём воркерам.
 
-### 5.5 Ollama должна быть на хосте — нет автоматизации
+### 5.5 Модели Ollama качаются вручную (только для локального варианта)
 
-- **Где:** dev-флоу.
-- **Что не так:** новый разработчик может пропустить шаги `ollama pull qwen3:14b` и `ollama pull qwen2.5vl:7b`. Backend стартует, но при первом запросе vision-анализ упадёт.
-- **Фикс:**
-  - Добавить health-check скрипт `make doctor`, который проверяет, что обе модели доступны.
-  - Или вынести Ollama в compose (для CI/CD).
+- **Где:** dev-флоу, вариант Б из [DEPLOYMENT.md](DEPLOYMENT.md) §2.
+- **Что не так:** при переходе с облачного дефолта на локальный Ollama легко забыть `ollama pull` обеих моделей — backend стартует, а генерация упадёт на первом LLM/vision-запросе.
+- **Фикс:** health-check скрипт (`make doctor`), проверяющий доступность моделей; неактуально, пока живём на облачном дефолте.
 
 ---
 
 ## 6. Мёртвый код и дубли
 
-### 6.1 `utils/slide_renderer.py` — параллельный пайплайн PPTX→PNG
+### 6.0 `nginx/default.conf;C` — мусорный файл
 
-- **Где:** [backend/app/utils/slide_renderer.py](../backend/app/utils/slide_renderer.py).
-- **Что не так:** функция `render_slides()` делает то же, что `services/video_service.py:convert_pptx_to_images` — конвертирует PPTX/PDF в PNG через LibreOffice + pdf2image. Реально нигде не вызывается (`grep -r "render_slides\|slide_renderer" backend/app` показывает только сам файл).
-- **Почему есть:** видимо — раннее экспериментальное решение, потом заменено на `convert_pptx_to_images`. Не удалили.
-- **Фикс:** удалить файл целиком, удалить `pdf2image` из requirements (он используется только тут).
-
-### 6.2 `pages/courses/index.vue` пустой
-
-- **Где:** [frontend/src/pages/courses/index.vue](../frontend/src/pages/courses/index.vue) — 8 строк.
-- **Что не так:** в роутере есть `/courses`, но реальная teacher dashboard — на `/dashboard`. Эта страница либо плейсхолдер, либо забыта.
-- **Фикс:** удалить файл и убедиться, что нет ссылок (`grep -r "/courses\"" frontend`). Альтернатива — редирект на `/dashboard`.
-
-### 6.3 `LessonPlayer.vue` упрощён, нет квизов
-
-- **Где:** [frontend/src/components/LessonPlayer.vue](../frontend/src/components/LessonPlayer.vue).
-- **Что не так:** `content_type === 'quiz'` показывает «Quiz content not implemented in player yet.» Backend уже умеет генерировать квиз через `llm_service.generate_quiz`, эндпоинт `/students/lessons/{id}/quiz-result` существует, но фронта для прохождения квиза нет.
-- **Фикс:** реализовать `<QuizPlayer>` компонент. Хотя бы:
-  - вопросы → варианты ответа → кнопка «Ответить»;
-  - подсчёт `score = correct / total`;
-  - `POST /quiz-result` с этим score.
+- **Где:** [nginx/](../nginx/) — рядом с рабочими `default.conf` и `prod.conf.template` лежит файл с именем `default.conf;C`.
+- **Что не так:** похоже на артефакт неудачного редактирования/копирования (имя с `;C`). nginx его не читает, но файл засоряет каталог и попадает в образ через bind-mount контекст.
+- **Фикс:** удалить файл (`git rm "nginx/default.conf;C"`), убедившись, что он не упомянут в compose.
 
 ### 6.4 Дублирование логики доступа к уроку
 
@@ -399,15 +316,34 @@
 
 ---
 
+## Расхождения код ↔ доки (текущие)
+
+Сверка 2026-07-30: доки в `docs/` и `CLAUDE.md` приведены к коду (beat-задачи, `payment_pipeline`,
+GC кешей, nginx-шаблон — исправлены на месте). Остались только исторические записи:
+
+| Где | Что устарело | Как на самом деле |
+|---|---|---|
+| [DECISIONS.md](DECISIONS.md) §26 | «Polling вместо SSE» | прогресс стримится по SSE, поллинг — fallback (отмечено в ARCHITECTURE §7); запись сохранена как история решения |
+
+---
+
 ## Карта приоритетов
 
 Если есть один спринт на починку, разумный порядок среди открытых пунктов:
 
-1. **1.4** — авторизованная раздача `/files/*` (per-request signed URLs). Серьёзная утечка контента.
-2. **2.1** — UNIQUE на `access_code`. Простой фикс, легко стрельнуть.
-3. **1.8** — XXE / XML-bomb при загрузке `.docx`.
-4. **2.2** — UNIQUE на `LessonProgress` (гонка двойного insert).
-5. **5.1** — миграции при горизонтальном масштабировании.
+1. **1.4** — авторизованная раздача `/files/*` (per-request signed URLs). Окно в 30 мин принято для MVP, но это всё ещё главный residual-риск платного контента.
+2. **5.1** — миграции при горизонтальном масштабировании (не полагаться на lifespan при multi-replica).
+3. **2.5** — тихий fallback при неверном числе LLM-чанков (портит качество без сигнала пользователю).
+4. **2.4** — гонка re-analyze при двух вкладках.
+5. **5.4** — `extra_hosts` для воркеров (актуально только при возврате на локальный Ollama).
+
+> Закрыто с прошлой ревизии и удалено из документа: 1.5 (SECRET_KEY без дефолта + prod-guard),
+> 1.8 (лимит на распакованный .docx + lxml без entity-resolve), 2.1 (`access_code` unique),
+> 2.2 (UNIQUE на `LessonProgress`), 2.8 (дисковый GC кешей),
+> 3.4 (авторизованный `/stream` + X-Accel/presigned), 4.4 (константы собраны в `constants.py`),
+> 4.8 (structlog + request_id), 6.1 (`utils/slide_renderer.py` удалён),
+> 6.2 (`/courses` — реальная страница), 6.3 (квизы в студенческом плеере — `QuizTaker`).
+> 2.7 закрыт для `video_pipeline`, но сужен и оставлен для `vision_pipeline` (см. выше).
 
 ---
 
