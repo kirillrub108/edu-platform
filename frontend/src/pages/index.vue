@@ -42,19 +42,37 @@ onMounted(restoreScroll)
 
 <template>
   <div ref="ldg" class="ldg">
-    <LandingBackdrop />
     <LandingNav />
 
+    <!-- Tone map. Alternates accent/plain, with two pinned exceptions: the FAQ is
+         always plain and the footer always accent. CTA is therefore plain so the
+         two accent panels never end up adjacent. -->
     <main id="top">
-      <LandingHero />
-      <LandingSteps />
-      <LandingFeatures />
-      <LandingMetrics />
-      <LandingPricing />
-      <LandingFaq />
-      <LandingCta />
+      <LandingSection tone="accent">
+        <LandingHero />
+      </LandingSection>
+      <LandingSection id="how" tone="plain">
+        <LandingSteps />
+      </LandingSection>
+      <LandingSection id="why" tone="accent">
+        <LandingFeatures />
+      </LandingSection>
+      <LandingSection tone="plain">
+        <LandingMetrics />
+      </LandingSection>
+      <LandingSection id="pricing" tone="accent">
+        <LandingPricing />
+      </LandingSection>
+      <LandingSection id="faq" tone="plain">
+        <LandingFaq />
+      </LandingSection>
+      <LandingSection tone="plain">
+        <LandingCta />
+      </LandingSection>
     </main>
 
-    <LandingFooter />
+    <LandingSection tag="footer" tone="accent">
+      <LandingFooter />
+    </LandingSection>
   </div>
 </template>

@@ -55,41 +55,37 @@ function toggle(i: number) {
 </script>
 
 <template>
-  <section class="section-pad" id="faq">
-    <div class="wrap">
-      <div class="section-head center reveal">
-        <span class="eyebrow">Вопросы и ответы</span>
-        <h2 class="h2">Частые вопросы</h2>
-        <p class="sub">Не нашли ответ? Зарегистрируйтесь и попробуйте — первые уроки и тесты бесплатны.</p>
-      </div>
+  <div class="section-head center reveal">
+    <span class="eyebrow">Вопросы и ответы</span>
+    <h2 class="h2">Частые вопросы</h2>
+    <p class="sub">Не нашли ответ? Зарегистрируйтесь и попробуйте — первые уроки и тесты бесплатны.</p>
+  </div>
 
-      <div class="faq reveal">
-        <div v-for="(item, i) in items" :key="item.question" class="faq-item">
-          <h3 class="faq-heading">
-            <button
-              :id="`${baseId}-btn-${i}`"
-              type="button"
-              class="faq-q"
-              :aria-expanded="openIndex === i"
-              :aria-controls="`${baseId}-panel-${i}`"
-              @click="toggle(i)"
-            >
-              <span>{{ item.question }}</span>
-              <span class="faq-icon" :class="{ open: openIndex === i }" aria-hidden="true">—</span>
-            </button>
-          </h3>
-          <div
-            :id="`${baseId}-panel-${i}`"
-            class="faq-panel"
-            :class="{ open: openIndex === i }"
-            :inert="openIndex !== i"
-          >
-            <div class="faq-panel-inner">
-              <p class="faq-a">{{ item.answer }}</p>
-            </div>
-          </div>
+  <div class="faq reveal">
+    <div v-for="(item, i) in items" :key="item.question" class="faq-item">
+      <h3 class="faq-heading">
+        <button
+          :id="`${baseId}-btn-${i}`"
+          type="button"
+          class="faq-q"
+          :aria-expanded="openIndex === i"
+          :aria-controls="`${baseId}-panel-${i}`"
+          @click="toggle(i)"
+        >
+          <span>{{ item.question }}</span>
+          <span class="faq-icon" :class="{ open: openIndex === i }" aria-hidden="true">—</span>
+        </button>
+      </h3>
+      <div
+        :id="`${baseId}-panel-${i}`"
+        class="faq-panel"
+        :class="{ open: openIndex === i }"
+        :inert="openIndex !== i"
+      >
+        <div class="faq-panel-inner">
+          <p class="faq-a">{{ item.answer }}</p>
         </div>
       </div>
     </div>
-  </section>
+  </div>
 </template>

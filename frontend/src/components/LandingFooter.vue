@@ -1,59 +1,58 @@
 <!-- Footer (design_handoff_edllm). Brand + Продукт (in-page anchors) +
-     Аккаунт (auth routes) + bottom bar. -->
+     Аккаунт (auth routes) + bottom bar. Always rendered inside the accent
+     LandingSection — see the tone map in pages/index.vue. -->
 <template>
-  <footer>
-    <div class="wrap">
-      <div class="foot">
-        <div class="brandcol">
-          <NuxtLink class="brand" to="/">
-            <AppLogo />
-          </NuxtLink>
-          <p class="desc">
-            Превращаем презентации в озвученные видеолекции автоматически — ИИ-анализ слайдов и нейросетевая озвучка.
-          </p>
-        </div>
-        <div>
-          <h5>Продукт</h5>
-          <ul>
-            <li><a href="#how">Как это работает</a></li>
-            <li><a href="#why">Зачем нужно</a></li>
-            <li><a href="#pricing">Тарифы</a></li>
-          </ul>
-        </div>
-        <div>
-          <h5>Аккаунт</h5>
-          <ul>
-            <li><NuxtLink to="/register">Создать аккаунт</NuxtLink></li>
-            <li><NuxtLink to="/login">Войти</NuxtLink></li>
-          </ul>
-        </div>
-        <div>
-          <h5>Поддержка</h5>
-          <ul>
-            <li>
-              <SupportContactLink class="contact-link">
-                <Bug class="icon" :size="16" />
-                Написать нам
-              </SupportContactLink>
-            </li>
-            <li><a :href="`mailto:${SUPPORT_EMAIL}`">{{ SUPPORT_EMAIL }}</a></li>
-          </ul>
-        </div>
-        <div>
-          <h5>Правовая информация</h5>
-          <ul>
-            <li v-for="d in LEGAL_DOCUMENTS" :key="d.key">
-              <NuxtLink :to="d.route">{{ d.shortTitle }}</NuxtLink>
-            </li>
-          </ul>
-        </div>
+  <div>
+    <div class="foot">
+      <div class="brandcol">
+        <NuxtLink class="brand" to="/">
+          <AppLogo />
+        </NuxtLink>
+        <p class="desc">
+          Превращаем презентации в озвученные видеолекции автоматически — ИИ-анализ слайдов и нейросетевая озвучка.
+        </p>
       </div>
-      <div class="foot-bottom">
-        <span>© {{ year }} Edllm. Все права защищены.</span>
-        <span>PPTX → MP4 · нейросетевая озвучка</span>
+      <div>
+        <h5>Продукт</h5>
+        <ul>
+          <li><a href="#how">Как это работает</a></li>
+          <li><a href="#why">Зачем нужно</a></li>
+          <li><a href="#pricing">Тарифы</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Аккаунт</h5>
+        <ul>
+          <li><NuxtLink to="/register">Создать аккаунт</NuxtLink></li>
+          <li><NuxtLink to="/login">Войти</NuxtLink></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Поддержка</h5>
+        <ul>
+          <li>
+            <SupportContactLink class="contact-link">
+              <Bug class="icon" :size="16" />
+              Написать нам
+            </SupportContactLink>
+          </li>
+          <li><a :href="`mailto:${SUPPORT_EMAIL}`">{{ SUPPORT_EMAIL }}</a></li>
+        </ul>
+      </div>
+      <div>
+        <h5>Правовая информация</h5>
+        <ul>
+          <li v-for="d in LEGAL_DOCUMENTS" :key="d.key">
+            <NuxtLink :to="d.route">{{ d.shortTitle }}</NuxtLink>
+          </li>
+        </ul>
       </div>
     </div>
-  </footer>
+    <div class="foot-bottom">
+      <span>© {{ year }} Edllm. Все права защищены.</span>
+      <span>PPTX → MP4 · нейросетевая озвучка</span>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
