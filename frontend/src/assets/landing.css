@@ -409,6 +409,30 @@ html:has(.ldg) {
   margin-top: 30px;
   flex-wrap: wrap;
 }
+.ldg .hero .free-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--card-glass);
+  backdrop-filter: blur(10px);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-card);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.ldg .hero .free-badge .icon {
+  width: 18px;
+  height: 18px;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent-deep), var(--accent-bright));
+  border-radius: 50%;
+  padding: 3px;
+  box-sizing: content-box;
+}
 .ldg .hero .micro {
   margin-top: 18px;
   font-size: 13px;
