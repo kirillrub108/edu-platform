@@ -557,6 +557,45 @@ def sync_apply_purchase(db: Session, payment: Payment, *, yookassa_payment_id: s
     return True
 
 
+def sync_grant_credits(
+    db: Session, user_id: UUID, amount: int, description: str
+) -> tuple[CreditTransaction, int, int]:
+    """Sync mirror of grant_credits — used by the manual admin-grant CLI script.
+
+    Creates the account if missing (same on-conflict-do-nothing insert as
+    sync_apply_purchase) before locking it, so the FOR UPDATE below always
+    finds a row. Returns (transaction, balance_before, balance_after).
+    """
+    free = PLAN_CONFIGS["free"]
+    db.execute(
+        pg_insert(CreditAccount)
+        .values(
+            owner_id=user_id,
+            plan=CreditPlan.free,
+            balance=free["onetime_credits"],
+            reserved=0,
+            monthly_allowance=free["monthly_allowance"],
+        )
+        .on_conflict_do_nothing(index_elements=["owner_id"])
+    )
+    db.flush()
+    account = db.scalar(
+        select(CreditAccount).where(CreditAccount.owner_id == user_id).with_for_update()
+    )
+    balance_before = account.balance
+    account.balance += amount
+    tx = CreditTransaction(
+        account_id=account.id,
+        delta=amount,
+        operation=CreditOperation.GRANT,
+        description=description,
+    )
+    db.add(tx)
+    db.commit()
+    db.refresh(tx)
+    return tx, balance_before, account.balance
+
+
 def sync_mark_payment_canceled(db: Session, payment: Payment) -> bool:
     """Sync mirror of mark_payment_canceled (used by the webhook task)."""
     if payment.status != PaymentStatus.pending:
