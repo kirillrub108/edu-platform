@@ -12,6 +12,7 @@ export function useVideoGeneration(
 ) {
   const { apiFetch } = useApi()
   const billing = useBillingStore()
+  const { reachGoalOnce } = useMetrika()
 
   // Голоса openai/tts-1 (значения уходят на бэкенд как есть).
   const voices: Array<{ value: string; label: string }> = [
@@ -281,6 +282,13 @@ export function useVideoGeneration(
       }
     }
   }, { immediate: true })
+
+  // Single spot covering both delivery paths (SSE + poll fallback), since all
+  // three success branches above converge on setting pipelineDone. reachGoalOnce
+  // also protects against a duplicate terminal event or an F5 in the same tab.
+  watch(pipelineDone, (done) => {
+    if (done) reachGoalOnce(METRIKA_GOALS.videoReady, lessonId.value)
+  })
 
   onUnmounted(() => {
     stopPolling()

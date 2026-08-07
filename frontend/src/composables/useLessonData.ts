@@ -2,6 +2,7 @@ import { CreationMode, type CreationModeValue } from '~/composables/useCreationM
 
 export function useLessonData(lessonId: Readonly<Ref<string>>) {
   const { apiFetch } = useApi()
+  const { reachGoal } = useMetrika()
 
   const lesson = ref<any>(null)
   const loading = ref(true)
@@ -89,6 +90,7 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
     if (!pptxFile.value) return
     uploading.value = true
     uploadError.value = ''
+    const fileSizeMb = pptxFile.value.size / (1024 * 1024)
     try {
       const form = new FormData()
       form.append('file', pptxFile.value)
@@ -98,6 +100,10 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
         body: form,
       })
       lesson.value = { ...lesson.value, pptx_path: result.file_path }
+      reachGoal(METRIKA_GOALS.pptxUpload, {
+        lesson_id: lessonId.value,
+        size_mb: Math.round(fileSizeMb * 100) / 100,
+      })
       pptxFile.value = null
     } catch (e: any) {
       uploadError.value = e?.data?.detail ?? 'Ошибка загрузки'

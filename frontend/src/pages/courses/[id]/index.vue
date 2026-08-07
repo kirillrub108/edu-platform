@@ -6,6 +6,7 @@ definePageMeta({ middleware: ['auth', 'teacher'] })
 const route = useRoute()
 const { apiFetch } = useApi()
 const courseEditor = useCourseEditorStore()
+const { reachGoalOnce } = useMetrika()
 
 const course = ref<any>(null)
 const loading = ref(true)
@@ -344,6 +345,7 @@ const toggleLessonPublish = async (l: any) => {
     const action = l.is_published ? 'unpublish' : 'publish'
     const updated = await apiFetch<any>(`/lessons/${l.id}/${action}`, { method: 'POST' })
     l.is_published = updated.is_published
+    if (updated.is_published) reachGoalOnce(METRIKA_GOALS.lessonPublish, l.id)
   } catch (e: any) {
     actionError.value = e?.data?.detail ?? 'Ошибка при изменении публикации урока'
   } finally {

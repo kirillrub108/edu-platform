@@ -7,7 +7,7 @@
 
 const TAG_SRC = 'https://mc.yandex.ru/metrika/tag.js'
 
-export default defineNuxtPlugin(() => {
+export default defineNuxtPlugin((nuxtApp) => {
   const { counterId, shouldTrack } = useMetrika()
   // Empty NUXT_PUBLIC_METRIKA_ID (dev/test) → nothing is wired up at all.
   if (!counterId) return
@@ -50,32 +50,43 @@ export default defineNuxtPlugin(() => {
       clickmap: true,
       trackLinks: true,
       accurateTrackBounce: true,
-      webvisor: false,
-      ecommerce: 'dataLayer',
+      webvisor: true,
     })
   }
+
+  // Guards a hit being sent twice for the same route — the initial navigation
+  // can trigger both the app:mounted hit and a router.afterEach hit.
+  let lastHitPath: string | null = null
 
   const sendHit = (toPath: string, fromPath?: string): void => {
     // Re-checked per navigation: a SPA login as a student stops hits, a logout
     // back to anonymous resumes them.
     if (!shouldTrack()) return
+    if (toPath === lastHitPath) return
+    lastHitPath = toPath
     ensureCounter()
     const origin = window.location.origin
-    window.ym?.(
-      counterId,
-      'hit',
-      origin + toPath,
-      fromPath ? { referer: origin + fromPath } : undefined,
-    )
+    window.ym?.(counterId, 'hit', origin + toPath, {
+      title: document.title,
+      ...(fromPath ? { referer: origin + fromPath } : {}),
+    })
   }
 
-  // The role is only known after the session is restored. Probe once (never
-  // rejects); hold the very first hit until it resolves so a hard refresh inside
-  // a student cabinet can't leak a hit before we know the role.
+  // The role is only known after the session is restored. Hold every hit that
+  // arrives before that resolves (only the latest survives) so a hard refresh
+  // inside a student cabinet can't leak a hit before we know the role.
   let ready = false
   let pending: { to: string; from?: string } | null = null
 
-  void auth.fetchMe().then(() => {
+  const dispatchHit = (toPath: string, fromPath?: string): void => {
+    if (!ready) {
+      pending = { to: toPath, from: fromPath }
+      return
+    }
+    sendHit(toPath, fromPath)
+  }
+
+  void auth.fetchMe().finally(() => {
     ready = true
     if (pending) {
       sendHit(pending.to, pending.from)
@@ -83,13 +94,19 @@ export default defineNuxtPlugin(() => {
     }
   })
 
+  // First hit waits for app:mounted so useHead has flushed document.title for
+  // the initial route before we read it.
+  nuxtApp.hook('app:mounted', () => {
+    nextTick(() => {
+      dispatchHit(router.currentRoute.value.fullPath)
+    })
+  })
+
   router.afterEach((to, from) => {
-    const toPath = to.fullPath
-    const fromPath = from.fullPath !== toPath ? from.fullPath : undefined
-    if (!ready) {
-      pending = { to: toPath, from: fromPath }
-      return
-    }
-    sendHit(toPath, fromPath)
+    nextTick(() => {
+      const toPath = to.fullPath
+      const fromPath = from.fullPath !== toPath ? from.fullPath : undefined
+      dispatchHit(toPath, fromPath)
+    })
   })
 })

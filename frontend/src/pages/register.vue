@@ -3,6 +3,7 @@ import { AlertCircle } from 'lucide-vue-next'
 import { parseApiError } from '~/composables/useApi'
 
 const auth = useAuthStore()
+const { reachGoal } = useMetrika()
 const email = ref('')
 const password = ref('')
 const fullName = ref('')
@@ -29,6 +30,7 @@ const submit = async () => {
       accepted_terms: acceptedTerms.value,
       accepted_marketing: acceptedMarketing.value,
     })
+    reachGoal(METRIKA_GOALS.signup, { role: role.value })
     await navigateTo(role.value === 'teacher' ? '/dashboard' : '/student/dashboard')
   } catch (e: unknown) {
     const parsed = parseApiError(e)
