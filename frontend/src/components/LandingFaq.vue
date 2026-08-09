@@ -1,5 +1,5 @@
 <!-- FAQ accordion. Presentational only, content hardcoded — no API/Pinia.
-     Single item open at a time; CSS grid-rows drives the expand animation so
+     Items open independently; CSS grid-rows drives the expand animation so
      no height measurement is needed (see .faq-panel in assets/landing.css). -->
 <script setup lang="ts">
 interface FaqItem {
@@ -47,10 +47,16 @@ const items: FaqItem[] = [
 ]
 
 const baseId = useId()
-const openIndex = ref<number | null>(null)
+const openIndexes = ref<Set<number>>(new Set())
 
 function toggle(i: number) {
-  openIndex.value = openIndex.value === i ? null : i
+  const next = new Set(openIndexes.value)
+  if (next.has(i)) {
+    next.delete(i)
+  } else {
+    next.add(i)
+  }
+  openIndexes.value = next
 }
 </script>
 
@@ -68,19 +74,19 @@ function toggle(i: number) {
           :id="`${baseId}-btn-${i}`"
           type="button"
           class="faq-q"
-          :aria-expanded="openIndex === i"
+          :aria-expanded="openIndexes.has(i)"
           :aria-controls="`${baseId}-panel-${i}`"
           @click="toggle(i)"
         >
           <span>{{ item.question }}</span>
-          <span class="faq-icon" :class="{ open: openIndex === i }" aria-hidden="true">—</span>
+          <span class="faq-icon" :class="{ open: openIndexes.has(i) }" aria-hidden="true">—</span>
         </button>
       </h3>
       <div
         :id="`${baseId}-panel-${i}`"
         class="faq-panel"
-        :class="{ open: openIndex === i }"
-        :inert="openIndex !== i"
+        :class="{ open: openIndexes.has(i) }"
+        :inert="!openIndexes.has(i)"
       >
         <div class="faq-panel-inner">
           <p class="faq-a">{{ item.answer }}</p>
