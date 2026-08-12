@@ -39,6 +39,9 @@ backend/.stubs/
 # Alembic
 backend/alembic/versions/*
 !backend/alembic/versions/.gitkeep
+# Exception: the init migration IS committed on purpose so that a clean
+# deploy reproduces the DB schema without a manual autogenerate step.
+!backend/alembic/versions/c2f900c2bf7a_init_schema.py
 
 # Node
 node_modules/
