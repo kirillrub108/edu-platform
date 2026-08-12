@@ -239,7 +239,10 @@ class StorageService:
         parsed = urlparse(url)
         prefix = f"/{settings.S3_BUCKET_NAME}/"
         if parsed.path.startswith(prefix):
-            return parsed.path[len(prefix):]
+            # URL-decode: the S3 key is stored raw (may contain spaces/Cyrillic),
+            # while the presigned URL percent-encodes it. Without unquote the key
+            # gets double-encoded on re-signing (%20 -> %2520) and 404s.
+            return unquote(parsed.path[len(prefix):])
         return None
 
     def get_full_path(self, relative_path: str) -> str:
