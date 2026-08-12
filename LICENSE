@@ -1,29 +1,24 @@
-MIT License
+# Proprietary License
 
-Copyright (c) 2026 Kirill
+Copyright (c) 2026 Kirill. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This source code is made publicly available for viewing, reference, and educational purposes only.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Except as expressly permitted below, no permission is granted to any person to:
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+* use this source code or any substantial part of it in another project;
+* copy, reproduce, or redistribute the source code;
+* modify, adapt, or create derivative works based on the source code;
+* sublicense, sell, lease, or otherwise commercialize the source code;
+* incorporate the source code into any software, product, service, or other work;
+* publish or distribute modified or unmodified copies of the source code.
 
----
+You may view and study the source code for personal, non-commercial learning and evaluation purposes.
 
-NOTE: The MIT licence above covers the source code in THIS repository only.
-It does NOT relicense the third-party dependencies, models, or binaries the
-project builds on. In particular, the default TTS engine (Silero, Russian
-models) is CC-BY-NC 4.0 — free for non-commercial use only. Review
-THIRD_PARTY_LICENSES.md before any commercial deployment.
+Any use, reproduction, modification, distribution, or commercialization of this software beyond the permissions expressly granted above requires prior written permission from the copyright holder.
+
+This software is provided "AS IS", without warranty of any kind, express or implied. The copyright holder shall not be liable for any claim, damages, or other liability arising from the use of the software.
+
+This license applies only to the original source code authored by the copyright holder. Third-party dependencies, libraries, models, assets, and other components included in or used by the project remain subject to their respective licenses and terms.
+
+By accessing this repository, you acknowledge and agree to the terms of this license.
