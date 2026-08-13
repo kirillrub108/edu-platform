@@ -119,6 +119,19 @@ def _cp_delete(r: "_sync_redis.Redis", lesson_id: str) -> None:
 # Cache path: storage/tts_cache/{sha256[:2]}/{sha256}.{voice}.wav
 # Two-level directory keeps individual dirs from accumulating thousands of files.
 
+def _split_voice_role(voice_field: str) -> tuple[str, str | None]:
+    """"alena:neutral" -> ("alena", "neutral"); "alena" -> ("alena", None).
+
+    Only the synthesis call needs the split form — _tts_cache_path and the
+    LessonVideo.voice column keep the raw "voice:role" string so a cache key
+    or history entry never collapses two different role choices together.
+    """
+    if ":" in voice_field:
+        v, r = voice_field.split(":", 1)
+        return v, (r or None)
+    return voice_field, None
+
+
 def _tts_cache_path(ssml: str, voice: str) -> str | None:
     try:
         h = hashlib.sha256(ssml.encode()).hexdigest()
@@ -355,13 +368,14 @@ def generate_video_lesson(
             usage_service.set_usage_context("video", lesson_id=lesson_id)
             _progress("slides", 0, 1)
 
-            pptx_full = storage_service.get_full_path(pptx_relative_path)
-
             # ── 1. PPTX → PNG slides ─────────────────────────────────────────
+            # local_copy: LibreOffice needs a real file; on S3 this streams the
+            # object to a temp path that is removed when the block exits.
             slides_dir = os.path.join(work_dir, "slides")
-            image_paths = video_service.convert_pptx_to_images(
-                pptx_full, slides_dir, cache_dir=slides_cache_dir
-            )
+            with storage_service.local_copy(pptx_relative_path) as pptx_full:
+                image_paths = video_service.convert_pptx_to_images(
+                    pptx_full, slides_dir, cache_dir=slides_cache_dir
+                )
             total_slides = len(image_paths)
             _progress("slides", total_slides, total_slides)
 
@@ -534,7 +548,10 @@ def generate_video_lesson(
                         # Zero-byte or otherwise empty cache file — treat as miss.
                         logger.warning("tts_cache_corrupted", slide=idx, path=cache_path)
                     logger.info("tts_cache_miss", slide=idx)
-                    tts_service.synthesize(ssml, audio_path, voice=effective_voice)
+                    _ya_voice, _ya_role = _split_voice_role(effective_voice)
+                    tts_service.synthesize(
+                        ssml, audio_path, voice=_ya_voice, role=_ya_role
+                    )
                     if cache_path:
                         try:
                             shutil.copy2(audio_path, cache_path)
@@ -599,13 +616,15 @@ def generate_video_lesson(
             # Each generation gets its own file so history entries stay independent.
             video_uuid = uuid4()
             video_relative = f"videos/{lesson_id}/{video_uuid}.mp4"
-            video_full = storage_service.get_full_path(video_relative)
-            os.makedirs(os.path.dirname(video_full), exist_ok=True)
+            # FFmpeg writes into the run's work_dir, then the finished file is
+            # handed to storage — the only path that works on both backends.
+            video_local = os.path.join(work_dir, f"{video_uuid}.mp4")
 
             video_service.concatenate_segments(
                 segment_paths,
-                video_full,  # type: ignore[arg-type]
+                video_local,  # type: ignore[arg-type]
             )
+            storage_service.save_file(video_relative, video_local)
 
             # Sign with the course owner (teacher); read endpoints re-sign for
             # the current viewer so non-owner readers and post-expiry owner

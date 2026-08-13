@@ -1,15 +1,22 @@
 import asyncio
 import io
 import os
+import shutil
+import tempfile
 import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import unquote, urlparse
 
 from fastapi import UploadFile
 
+import structlog
+
 from app.config import settings
 from app.services.signed_url_service import generate_signed_url
+
+logger = structlog.get_logger()
 
 
 # Streaming granularity for bounded uploads (1 MiB).
@@ -32,6 +39,9 @@ class StorageBackend(Protocol):
     def get_full_path(self, relative_path: str) -> str: ...
     def delete(self, relative_path: str) -> None: ...
     def exists(self, relative_path: str) -> bool: ...
+    def download_to(self, relative_path: str, dest_path: str) -> None: ...
+    def upload_from(self, relative_path: str, src_path: str) -> str: ...
+    def list_prefix(self, prefix: str) -> list[str]: ...
 
 
 class LocalBackend:
@@ -59,6 +69,28 @@ class LocalBackend:
 
     def exists(self, relative_path: str) -> bool:
         return (self.base_path / relative_path).exists()
+
+    def download_to(self, relative_path: str, dest_path: str) -> None:
+        shutil.copy2(self.base_path / relative_path, dest_path)
+
+    def upload_from(self, relative_path: str, src_path: str) -> str:
+        full = self.base_path / relative_path
+        full.parent.mkdir(parents=True, exist_ok=True)
+        if Path(src_path).resolve() != full.resolve():
+            shutil.copy2(src_path, full)
+        return relative_path
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        root = self.base_path / prefix
+        if not root.exists():
+            return []
+        if root.is_file():
+            return [prefix]
+        return [
+            str(p.relative_to(self.base_path)).replace("\\", "/")
+            for p in root.rglob("*")
+            if p.is_file()
+        ]
 
 
 class S3Backend:
@@ -107,6 +139,24 @@ class S3Backend:
             if exc.response["Error"]["Code"] in ("404", "NoSuchKey"):
                 return False
             raise
+
+    def download_to(self, relative_path: str, dest_path: str) -> None:
+        """Stream an object to a local file — never buffers the whole body."""
+        self._client.download_file(self._bucket, relative_path, dest_path)
+
+    def upload_from(self, relative_path: str, src_path: str) -> str:
+        """Stream a local file into the bucket (multipart handled by boto3)."""
+        self._client.upload_file(src_path, self._bucket, relative_path)
+        return relative_path
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        """All keys under a prefix. Paginated: a page caps at 1000 keys, and
+        without this loop a purge would silently skip everything past it."""
+        keys: list[str] = []
+        paginator = self._client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self._bucket, Prefix=prefix):
+            keys.extend(obj["Key"] for obj in page.get("Contents", []))
+        return keys
 
 
 _backend_instance: StorageBackend | None = None
@@ -261,6 +311,48 @@ class StorageService:
 
     def delete_file(self, relative_path: str) -> None:
         self._backend.delete(relative_path)
+
+    @contextmanager
+    def local_copy(self, relative_path: str):
+        """Yield a valid local path for a stored file.
+
+        LocalBackend hands back the real path and touches nothing. S3 streams
+        the object into a temp file and removes it on exit — so callers that
+        need a real file on disk (LibreOffice, FFmpeg, python-pptx) work the
+        same on both backends.
+        """
+        if isinstance(self._backend, LocalBackend):
+            yield self._backend.get_full_path(relative_path)
+            return
+        suffix = os.path.splitext(relative_path)[1]
+        tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
+        tmp.close()
+        try:
+            self._backend.download_to(relative_path, tmp.name)
+            yield tmp.name
+        finally:
+            if os.path.exists(tmp.name):
+                os.unlink(tmp.name)
+
+    def save_file(self, relative_path: str, src_path: str) -> str:
+        """Put a finished local file into storage under relative_path."""
+        return self._backend.upload_from(relative_path, src_path)
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        return self._backend.list_prefix(prefix)
+
+    def delete_prefix(self, prefix: str) -> None:
+        """Delete everything under a prefix (per-lesson and per-submission
+        folders). Guarded: a blank or root-ish prefix would wipe the bucket.
+        """
+        clean = (prefix or "").strip().strip("/")
+        if len(clean) < 3 or "/" not in clean:
+            raise ValueError(f"refusing to delete an unsafe prefix: {prefix!r}")
+        for key in self._backend.list_prefix(clean + "/"):
+            try:
+                self._backend.delete(key)
+            except Exception:
+                logger.warning("storage_prefix_delete_failed", key=key, exc_info=True)
 
 
 storage_service = StorageService()

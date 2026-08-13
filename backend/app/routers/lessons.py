@@ -313,10 +313,7 @@ async def _video_estimate(
             or None
         )
     if slides is None and pptx_path:
-        try:
-            slides = count_source_slides(storage_service.get_full_path(pptx_path))
-        except Exception:
-            slides = None
+        slides = await _count_slides_offloop(pptx_path)
     script_chars = 0 if is_auto else len((lesson.script or lesson.text_content or "").strip())
     credits: int | None = None
     if slides:
@@ -326,6 +323,25 @@ async def _video_estimate(
             else billing_service.estimate_video_text(slides, script_chars)
         )
     return ("auto" if is_auto else "text"), slides, script_chars, credits
+
+
+async def _count_slides_offloop(pptx_path: str) -> int | None:
+    """Slide count for the credit estimate, off the event loop.
+
+    On S3 this downloads the PPTX, so running it inline would stall every other
+    request on this worker. Returns None when the file can't be read — callers
+    treat that as "unknown", which disqualifies the trial, so the failure is
+    logged rather than swallowed silently.
+    """
+    def _count() -> int | None:
+        with storage_service.local_copy(pptx_path) as local:
+            return count_source_slides(local)
+
+    try:
+        return await asyncio.to_thread(_count)
+    except Exception:
+        logger.warning("slide_count_failed", pptx_path=pptx_path, exc_info=True)
+        return None
 
 
 async def _trial_video_available(

@@ -78,6 +78,7 @@ coverage.xml
 *.sql
 *.dump
 *.bak
+*.bak[0-9]
 db_backups/
 backups/
 

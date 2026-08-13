@@ -14,20 +14,32 @@ export function useVideoGeneration(
   const billing = useBillingStore()
   const { reachGoalOnce } = useMetrika()
 
-  // Голоса openai/tts-1 (значения уходят на бэкенд как есть).
+  // Голоса Yandex SpeechKit v3. value = "голос:амплуа" (или просто "голос"
+  // для filipp, у которого амплуа не поддерживается) — бэкенд разбирает эту
+  // строку сам (см. _split_voice_role в video_pipeline.py).
+  //
+  // ВНИМАНИЕ: SpeechKit v3 не предлагает одинаковый набор амплуа для всех
+  // голосов — "дружелюбный" существует только у marina, "радостный" — у
+  // alena/anton/zahar, у omazh только нейтральный, у filipp амплуа нет
+  // вовсе. Каждая строка ниже — пара, лично проверенная на живом API
+  // (2026-08-12): недокументированные сочетания возвращают 400, поэтому
+  // список не "все голоса × все амплуа", а ровно то, что реально работает.
+  // Список и допустимые амплуа сверены с YANDEX_TTS_ROLES_BY_VOICE
+  // (backend/app/constants.py) — не расширять без проверки на живом API.
   const voices: Array<{ value: string; label: string }> = [
-    { value: 'nova',    label: 'Nova (жен.)' },
-    { value: 'shimmer', label: 'Shimmer (жен., мягкий)' },
-    { value: 'coral',   label: 'Coral (жен.)' },
-    { value: 'sage',    label: 'Sage (жен., спокойный)' },
-    { value: 'alloy',   label: 'Alloy (нейтральный)' },
-    { value: 'onyx',    label: 'Onyx (муж., низкий)' },
-    { value: 'echo',    label: 'Echo (муж.)' },
-    { value: 'fable',   label: 'Fable (муж., выразительный)' },
-    { value: 'ash',     label: 'Ash (муж.)' },
+    { value: 'alena:neutral',   label: 'Алёна — нейтральный' },
+    { value: 'alena:good',      label: 'Алёна — радостный' },
+    { value: 'anton:neutral',   label: 'Антон — нейтральный' },
+    { value: 'anton:good',      label: 'Антон — радостный' },
+    { value: 'zahar:neutral',   label: 'Захар — нейтральный' },
+    { value: 'zahar:good',      label: 'Захар — радостный' },
+    { value: 'marina:neutral',  label: 'Марина — нейтральный' },
+    { value: 'marina:friendly', label: 'Марина — дружелюбный' },
+    { value: 'omazh:neutral',   label: 'Омаж — нейтральный' },
+    { value: 'filipp',          label: 'Филипп' },
   ]
 
-  const selectedVoice = ref<string>('nova')
+  const selectedVoice = ref<string>('alena:neutral')
   const taskId = ref<string | null>(null)
   const taskStatus = ref('')
   const taskMeta = ref<{ step: string; done: number; total: number } | null>(null)

@@ -31,7 +31,7 @@ read_env_var() {
 DOMAIN="${DOMAIN:-$(read_env_var DOMAIN)}"
 DOMAIN="${DOMAIN:?Set DOMAIN in .env.prod (or inline) — e.g. DOMAIN=edllm.ru}"
 EMAIL="${CERTBOT_EMAIL:-$(read_env_var CERTBOT_EMAIL)}"
-EMAIL="${EMAIL:?Set CERTBOT_EMAIL in .env.prod (or inline) for Let's Encrypt expiry notices}"
+EMAIL="${EMAIL:?Set CERTBOT_EMAIL in .env.prod (or inline) for Lets Encrypt expiry notices}"
 COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
 # Path INSIDE the certbot/nginx containers (the letsencrypt volume).
 LIVE="/etc/letsencrypt/live/${DOMAIN}"

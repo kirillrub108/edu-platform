@@ -47,11 +47,10 @@ def _set_status(session: Session, lesson_id: UUID, status: LessonStatus) -> None
 def _store_slide_image(lesson_id: str, slide_idx: int, src_png: str) -> str:
     """Copy a rendered PNG into storage and return its relative path."""
     rel_dir = os.path.join("lessons", lesson_id, "slides").replace("\\", "/")
-    full_dir = storage_service.get_full_path(rel_dir)
-    os.makedirs(full_dir, exist_ok=True)
     rel_path = f"{rel_dir}/slide_{slide_idx + 1:04d}.png"
-    full_path = storage_service.get_full_path(rel_path)
-    shutil.copy2(src_png, full_path)
+    # No mkdir: object stores have no directories, and save_file creates the
+    # parent locally when the local backend is active.
+    storage_service.save_file(rel_path, src_png)
     return rel_path
 
 
@@ -127,13 +126,12 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             usage_service.set_usage_context("vision_analyze", lesson_id=lesson_id)
             _progress("slides", 0, 1)
 
-            pptx_full = storage_service.get_full_path(pptx_relative_path)
-
             # 1. PPTX → PNG slides
             slides_dir = os.path.join(work_dir, "slides")
-            image_paths = video_service.convert_pptx_to_images(
-                pptx_full, slides_dir, cache_dir=slides_cache_dir
-            )
+            with storage_service.local_copy(pptx_relative_path) as pptx_full:
+                image_paths = video_service.convert_pptx_to_images(
+                    pptx_full, slides_dir, cache_dir=slides_cache_dir
+                )
             total = len(image_paths)
             _progress("slides", total, total)
 

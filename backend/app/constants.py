@@ -35,6 +35,27 @@ SILERO_MAX_CHARS: int = 800  # conservative limit: Silero returns 500 on very lo
 # polza.ai caps the openai/tts-1 `input` at 4096 chars (probed 2026-06-10: longer
 # → 400). Stay under with margin; still far above Silero's 800 → fewer audible seams.
 POLZA_MAX_CHARS: int = 4000
+# SpeechKit API v1 caps the POST body at 15 KB; URL-encoded Cyrillic is ~3x its
+# character count, so chunks stay far below the documented 5000-char limit.
+YANDEX_TTS_MAX_CHARS: int = 200  # v3 hard-caps ~250 chars/request; kept under with margin
+YANDEX_TTS_MAX_RETRIES: int = 3
+YANDEX_TTS_VOICES: frozenset[str] = frozenset(
+    {
+        "alena", "filipp", "ermil", "jane", "madirus", "omazh", "zahar",
+        "dasha", "julia", "lera", "masha", "marina", "alexander", "kirill",
+        "anton",
+    }
+)
+# Empty tuple = voice takes no role hint (v3 rejects an unknown role with 400).
+# Verified against the live API on 2026-08-12 — do not extend without testing.
+YANDEX_TTS_ROLES_BY_VOICE: dict[str, tuple[str, ...]] = {
+    "alena": ("neutral", "good"),
+    "anton": ("good",),
+    "zahar": ("neutral", "good"),
+    "marina": ("neutral", "friendly", "whisper"),
+    "filipp": (),
+    "omazh": ("neutral",),
+}
 # Transient polza failures (429/5xx/timeout) are retried with exponential backoff;
 # other 4xx (bad key, bad voice) fail fast. Mirrors LLM_MAX_RETRIES below.
 POLZA_TTS_MAX_RETRIES: int = 3
@@ -322,6 +343,9 @@ AUTO_CHARS_PER_SLIDE: int = 600  # нормативная длина озвуч�
 
 # Provider cost rates (rubles) for the generation_usage margin journal.
 TTS_RUB_PER_MCHAR: float = 1380.48
+# SpeechKit is billed separately from the Polza rate above — verify against the
+# AI Studio pricing page before trusting the margin journal.
+YANDEX_TTS_RUB_PER_MCHAR: float = 1342.0  # SpeechKit API v1, с НДС
 LLM_RUB_PER_MTOK_PROMPT: float = 17.49
 LLM_RUB_PER_MTOK_COMPLETION: float = 63.5
 

@@ -391,6 +391,11 @@ class VisionAnalysisService:
             # completion and ~halving per-slide latency). Sent only when the
             # flag is on — plain Ollama/Yandex must not receive unknown fields.
             extra_body["reasoning"] = {"enabled": False}
+        if settings.VISION_REASONING_EFFORT:
+            # Yandex-hosted reasoning models burn the completion budget on hidden
+            # thinking and answer with content=None; "none" turns that off. This
+            # is a first-class OpenAI field, not extra_body.
+            kwargs["reasoning_effort"] = settings.VISION_REASONING_EFFORT
         extra_body.update(self._provider_extra)  # Polza upstream-provider pin, if set
         if extra_body:
             kwargs["extra_body"] = extra_body
@@ -405,7 +410,15 @@ class VisionAnalysisService:
             **kwargs,
         )
         await usage_service.arecord_llm_usage(self._model, getattr(resp, "usage", None))
-        return (resp.choices[0].message.content or "").strip()
+        content = (resp.choices[0].message.content or "").strip()
+        if not content:
+            # Silent "" here becomes a slide with no narration downstream.
+            logger.error("vision_empty_content", model=self._model)
+            raise RuntimeError(
+                "Vision model returned an empty message. If the model reasons by "
+                "default, set VISION_REASONING_EFFORT=none or raise LLM_MAX_TOKENS."
+            )
+        return content
 
     async def _call_yandex(
         self,

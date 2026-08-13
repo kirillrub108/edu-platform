@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.constants import POLZA_TTS_VOICES
+from app.constants import POLZA_TTS_VOICES, YANDEX_TTS_VOICES
 from app.models.lesson import ContentType, CreationMode, LessonStatus
 
 
@@ -90,8 +90,12 @@ class ScriptUpdateRequest(BaseModel):
     script: str
 
 
-# Accept only openai/tts-1 voice names (single source of truth in constants.py).
-_VOICE_PATTERN = "^(" + "|".join(POLZA_TTS_VOICES) + ")$"
+# _VOICE_PATTERN combines Polza (openai/tts-1) and Yandex SpeechKit names.
+# Yandex entries optionally carry ":<role>" (e.g. "alena:neutral") — the role
+# itself isn't validated here (tts_service checks it against the known-good
+# table and falls back silently), this pattern only gates the voice name.
+_ALL_VOICES = sorted(set(POLZA_TTS_VOICES) | YANDEX_TTS_VOICES)
+_VOICE_PATTERN = "^(" + "|".join(_ALL_VOICES) + ")(:[a-z]+)?$"
 
 
 class VideoGenerateRequest(BaseModel):

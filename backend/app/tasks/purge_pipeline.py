@@ -76,25 +76,24 @@ def _remove_file(rel_path: str | None) -> None:
     an exception (purge must be resilient to already-cleaned-up artifacts)."""
     if not rel_path:
         return
-    full = storage_service.get_full_path(rel_path)
-    if not os.path.exists(full):
-        logger.warning("purge_file_missing", path=full)
-        return
     try:
-        os.remove(full)
-        logger.info("purge_file_removed", path=full)
-    except OSError:
-        logger.warning("purge_file_remove_failed", path=full, exc_info=True)
+        if not storage_service.exists(rel_path):
+            logger.warning("purge_file_missing", path=rel_path)
+            return
+        storage_service.delete_file(rel_path)
+        logger.info("purge_file_removed", path=rel_path)
+    except Exception:
+        logger.warning("purge_file_remove_failed", path=rel_path, exc_info=True)
 
 
 def _remove_lesson_dirs(lesson_id) -> None:
     """Remove now-empty per-lesson directories left after file deletion."""
-    import shutil
 
     for sub in (f"videos/{lesson_id}", f"lessons/{lesson_id}"):
-        full = storage_service.get_full_path(sub)
-        if os.path.isdir(full):
-            shutil.rmtree(full, ignore_errors=True)
+        try:
+            storage_service.delete_prefix(sub)
+        except Exception:
+            logger.warning("purge_prefix_failed", prefix=sub, exc_info=True)
 
 
 def _purge_assignment_files(session: Session, lesson: Lesson) -> None:
@@ -126,9 +125,10 @@ def _purge_assignment_files(session: Session, lesson: Lesson) -> None:
     for path in paths:
         _remove_file(path)
     for sid in submission_ids:
-        full = storage_service.get_full_path(f"assignments/{sid}")
-        if os.path.isdir(full):
-            shutil.rmtree(full, ignore_errors=True)
+        try:
+            storage_service.delete_prefix(f"assignments/{sid}")
+        except Exception:
+            logger.warning("purge_prefix_failed", prefix=f"assignments/{sid}", exc_info=True)
 
 
 def _purge_lesson_files(session: Session, lesson: Lesson) -> None:
