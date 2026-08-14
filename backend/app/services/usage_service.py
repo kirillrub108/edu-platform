@@ -133,13 +133,15 @@ async def arecord_llm_usage(model: str, usage: Any) -> None:
     await asyncio.to_thread(record_llm_usage, model, usage)
 
 
-def record_tts_usage(model: str, chars: int, billable: bool = True) -> None:
+def record_tts_usage(
+    model: str, chars: int, billable: bool = True, rub_per_mchar: float | None = None
+) -> None:
     """Journal one TTS synthesis (chars actually sent to the provider).
     billable=False for self-hosted providers (Silero) — chars logged, cost 0."""
     if chars <= 0:
         return
     cost = (
-        Decimal(str(round(chars * TTS_RUB_PER_MCHAR / 1_000_000, 4)))
+        Decimal(str(round(chars * (rub_per_mchar or TTS_RUB_PER_MCHAR) / 1_000_000, 4)))
         if billable
         else Decimal("0")
     )

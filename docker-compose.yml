@@ -37,29 +37,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  silero-tts:
-    image: navatusein/silero-tts-service
-    ports:
-      - "9898:9898"
-    environment:
-      # Single source of truth with the TTS pool in constants.py — MUST stay
-      # equal (both read ${TTS_WORKERS}). Fallback 4 matches the 4-core auto value.
-      NUMBER_OF_THREADS: ${TTS_WORKERS:-4}
-      LANGUAGE: ru
-      SAMPLE_RATE: 48000
-    volumes:
-      - ./silero/config.py:/usr/app/app/config.py:ro
-      - silero_models:/usr/app/models
-      - silero_audios:/usr/app/audios
-    restart: unless-stopped
-    networks:
-      - edu-network
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
   backend:
     build:
       context: ./backend
@@ -102,8 +79,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      silero-tts:
-        condition: service_started
     networks:
       - edu-network
     logging:
@@ -137,7 +112,6 @@ services:
     depends_on:
       - backend
       - redis
-      - silero-tts
     networks:
       - edu-network
     logging:
@@ -171,7 +145,6 @@ services:
     depends_on:
       - backend
       - redis
-      - silero-tts
     networks:
       - edu-network
     logging:
@@ -369,8 +342,6 @@ services:
 
 volumes:
   postgres_data:
-  silero_models:
-  silero_audios:
   prometheus_data:
   grafana_data:
 

@@ -1005,3 +1005,33 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 - [ARCHITECTURE.md](ARCHITECTURE.md) — где эти решения видны в общей картине.
 - [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md) — последствия некоторых решений (особенно 4, 5, 8, 9).
 - [DATA_FLOW.md](DATA_FLOW.md) — как эти решения работают вместе в конкретных сценариях.
+
+## §N. Переход LLM/Vision/TTS на Yandex AI Studio + SpeechKit v3 (2026-08-12)
+
+Контекст: грант Yandex Cloud 10 000 ₽ на запуск. Текст и vision переключены на
+`https://ai.api.cloud.yandex.net/v1` (OpenAI-совместимый режим, VISION_PROVIDER
+остаётся `ollama` — это имя означает «любой OpenAI-совместимый эндпоинт» в
+данном проекте, не буквально Ollama). TTS — на Yandex SpeechKit API v3
+(`tts_service._synthesize_yandex`), а не v1: v3 вдвое дешевле (тарификация по
+250-символьным юнитам вместо посимвольной) и по умолчанию отдаёт полное
+качество (v1 отдаёт 22050 Гц без явного `outputAudioSpec`, звучит приглушённо).
+
+Важные ограничения v3, подтверждённые вживую 2026-08-12:
+- Жёсткий лимит длины текста в одном запросе — между 400 и 500 символами
+  (не 250, как можно понять из тарификации). YANDEX_TTS_MAX_CHARS = 200 —
+  с запасом.
+- Не у каждого голоса есть все амплуа. Проверено: alena/anton/zahar —
+  neutral+good; marina — neutral+friendly; omazh — только neutral; filipp —
+  без амплуа вовсе. "friendly" существует только у marina. Полный набор
+  neutral+friendly+good не поддерживается ни одним голосом. Список пар
+  голос:амплуа зафиксирован в YANDEX_TTS_ROLES_BY_VOICE (constants.py) и
+  дублируется во frontend/src/composables/useVideoGeneration.ts — расширять
+  только после проверки на живом API.
+- Премиум-голоса (uliana и т.п.) и голоса :rc (zahar:rc и т.п.) недоступны
+  на текущем ключе (403 Feature permission denied) — не включать в списки
+  без отдельного разрешения от Яндекса.
+- SpeechKit v1 оставлен в коде как исторический путь (TTS_PROVIDER=yandex
+  раньше указывал на v1); текущий провайдер вызывает только v3.
+
+Не переносить на Yandex: TTS до v3 требовал бы `raise NotImplementedError`
+(закрыто), полноценный SpeechKit v1 не удалён из кода, но не используется.

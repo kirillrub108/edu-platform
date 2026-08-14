@@ -6,7 +6,7 @@
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
+  <a href="LICENSE"><img alt="License: Proprietary" src="https://img.shields.io/badge/License-Proprietary-red.svg"></a>
   <img alt="Python" src="https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white">
   <img alt="FastAPI" src="https://img.shields.io/badge/FastAPI-async-009688?logo=fastapi&logoColor=white">
   <img alt="Nuxt" src="https://img.shields.io/badge/Nuxt-3-00DC82?logo=nuxtdotjs&logoColor=white">
@@ -245,10 +245,20 @@ docker-compose exec backend alembic revision --autogenerate -m "describe change"
 
 ## Лицензия
 
-Исходный код — **[MIT](LICENSE)**.
+Исходный код проекта является **проприетарным** и распространяется на условиях [Proprietary License](LICENSE).
+
+Репозиторий опубликован в открытом доступе для ознакомления с исходным кодом, архитектурой и инженерными решениями проекта.
+
+Просмотр и изучение исходного кода разрешены. Использование, копирование, изменение, распространение, включение кода в другие проекты или его коммерческая эксплуатация без предварительного письменного разрешения правообладателя не разрешены.
 
 > [!IMPORTANT]
-> ⚠️ **Про лицензию TTS.** MIT покрывает только код этого репозитория и **не** перелицензирует зависимости. Дефолтный движок TTS — **Silero (русские модели `v5_ru`/`v5_5_ru`) — CC-BY-NC 4.0, только некоммерческое использование.** Для коммерции: `TTS_PROVIDER=polza` / Yandex SpeechKit, либо Silero Enterprise (hello@silero.ai). Также обратите внимание на FFmpeg/poppler (GPL/LGPL) и лицензионную историю Redis.
+> ⚠️ **Сторонние компоненты имеют собственные лицензии.** Лицензия этого проекта распространяется только на оригинальный исходный код, на который у правообладателя есть соответствующие права. Зависимости, модели, библиотеки, медиакомпоненты и другие сторонние материалы не перелицензируются и остаются под своими исходными лицензиями.
+>
+> В частности, дефолтный движок TTS — **Silero (русские модели `v5_ru`/`v5_5_ru`) — CC-BY-NC 4.0, только некоммерческое использование.** Для коммерции: `TTS_PROVIDER=polza` / Yandex SpeechKit, либо Silero Enterprise ([hello@silero.ai](mailto:hello@silero.ai)).
+>
+> Также обратите внимание на лицензии FFmpeg, Poppler и других сторонних компонентов.
 
 Полная инвентаризация сторонних лицензий — [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
+
 Как сообщить об уязвимости — [SECURITY.md](SECURITY.md).
+

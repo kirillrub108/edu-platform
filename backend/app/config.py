@@ -86,6 +86,15 @@ class Settings(BaseSettings):
     YANDEX_VISION_MODEL: str = "yandexgpt-pro"
     YANDEX_FOLDER_ID: str = ""
     YANDEX_API_KEY: str = ""
+    # SpeechKit v1 synthesis (TTS_PROVIDER=yandex)
+    YANDEX_TTS_VOICE: str = "alena"
+    YANDEX_TTS_ROLE: str = ""
+    YANDEX_TTS_SPEED: float | None = None
+    YANDEX_TTS_TIMEOUT: float = 60.0
+    # Yandex-hosted Qwen reasons by default, spends the completion budget on
+    # hidden thinking and returns content=null. "none" is the documented off
+    # switch; blank keeps the parameter out of the request entirely.
+    VISION_REASONING_EFFORT: str = ""
 
     # Email — transactional mail (verification, video-ready). Sent only from the
     # send_email Celery task. Provider is pluggable; Resend is implemented today.

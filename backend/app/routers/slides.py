@@ -1,3 +1,6 @@
+import asyncio
+
+import structlog
 from uuid import UUID, uuid4
 
 import structlog
@@ -38,6 +41,19 @@ from app.services.vision_analysis import vision_analysis_service
 from app.tasks.vision_pipeline import analyze_presentation_task
 
 logger = structlog.get_logger()
+
+async def _count_slides_offloop(pptx_path: str) -> int | None:
+    """Slide count for the trial check, off the event loop (see lessons.py)."""
+    def _count() -> int | None:
+        with storage_service.local_copy(pptx_path) as local:
+            return count_source_slides(local)
+
+    try:
+        return await asyncio.to_thread(_count)
+    except Exception:
+        logger.warning("slide_count_failed", pptx_path=pptx_path, exc_info=True)
+        return None
+
 
 router = APIRouter(prefix="/api/v1/lessons", tags=["slides"])
 
@@ -103,11 +119,7 @@ async def analyze_lesson_slides(
     # generate-video, not here (see docs/DECISIONS.md).
     billed_via = "credits"
     trial = await quota_service.get_trial_state(db, user.id)
-    slides = None
-    try:
-        slides = count_source_slides(storage_service.get_full_path(lesson.pptx_path))
-    except Exception:
-        slides = None
+    slides = await _count_slides_offloop(lesson.pptx_path)
     trial_covers = (
         balance["plan"] == "free"
         and trial["lectures_used"] < trial["lectures_limit"]
@@ -315,8 +327,9 @@ async def regenerate_slide_text(
             },
         )
 
-    image_full_path = storage_service.get_full_path(row.image_path)
     usage_service.set_usage_context("slide_regen", lesson_id=lesson_id)
+    image_ctx = storage_service.local_copy(row.image_path)
+    image_full_path = image_ctx.__enter__()
     try:
         # Phase 1: vision model (VISION_MODEL) extracts narration from the slide image.
         # Phase 2: text LLM (REGEN_LLM_MODEL = qwen3:8b) polishes the raw vision output.

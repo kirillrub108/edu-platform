@@ -1,3 +1,5 @@
+import json
+import structlog
 import base64
 import hashlib
 import os
@@ -19,6 +21,11 @@ from app.constants import (
     SILERO_MAX_CHARS,
     TTS_CHUNK_CACHE_DIR_NAME,
     TTS_CHUNK_CACHE_ENABLED,
+    YANDEX_TTS_MAX_CHARS,
+    YANDEX_TTS_MAX_RETRIES,
+    YANDEX_TTS_RUB_PER_MCHAR,
+    YANDEX_TTS_ROLES_BY_VOICE,
+    YANDEX_TTS_VOICES,
 )
 from app.services import usage_service
 
@@ -236,7 +243,10 @@ def _write_chunk_cache(cache_path: str, data: bytes) -> None:
 
 
 class TTSService:
-    def synthesize(self, text: str, output_path: str, voice: str | None = None) -> str:
+    def synthesize(
+        self, text: str, output_path: str, voice: str | None = None,
+        role: str | None = None,
+    ) -> str:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
         provider = settings.TTS_PROVIDER
@@ -253,7 +263,7 @@ class TTSService:
         elif provider == "polza":
             return self._synthesize_polza(text, output_path, effective_voice)
         elif provider == "yandex":
-            raise NotImplementedError("Yandex SpeechKit TTS is not configured yet")
+            return self._synthesize_yandex(text, output_path, effective_voice, role)
         else:
             return self._synthesize_stub(text, output_path)
 
@@ -471,6 +481,143 @@ class TTSService:
         if not data:
             raise RuntimeError("Polza TTS returned empty audio payload")
         return data
+
+    def _synthesize_yandex(self, text: str, output_path: str, voice: str, role: str | None = None) -> str:
+        """Send text to Yandex SpeechKit API v3, chunking if long.
+
+        v3 is priced per 250-char request unit (~half the cost of v1's
+        per-character billing) and returns full-quality audio by request
+        (v1's default is a muffled, telephony-grade encode). The request body
+        caps at 250 chars per unit too, so chunks stay well under that.
+        Response is streamed as newline-delimited JSON objects, each holding
+        one base64 audio fragment — not a single JSON document.
+        """
+        if not settings.YANDEX_API_KEY:
+            raise RuntimeError(
+                "Yandex TTS is selected (TTS_PROVIDER=yandex) but YANDEX_API_KEY is not set"
+            )
+        plain = strip_tts_artifacts(_strip_ssml_tags(text))
+        if not plain:
+            logger.warning(
+                "tts_empty_ssml_chunk", raw=repr(text[:80]), output=output_path
+            )
+            return self._synthesize_stub(text, output_path)
+        chunks = _split_for_tts(plain, max_chars=YANDEX_TTS_MAX_CHARS)
+        if len(chunks) > 1:
+            logger.info("tts_splitting", chars=len(plain), chunks=len(chunks))
+        usage_service.record_tts_usage(
+            "yandex-speechkit-v3", len(plain), rub_per_mchar=YANDEX_TTS_RUB_PER_MCHAR
+        )
+        if voice in YANDEX_TTS_VOICES:
+            ya_voice = voice
+        else:
+            ya_voice = settings.YANDEX_TTS_VOICE
+            logger.info("tts_yandex_voice_fallback", requested=voice, used=ya_voice)
+        # A role the chosen voice doesn't support is a 400 from the API, not a
+        # silent ignore — validate against the known-good table before it
+        # reaches the request, and fall back to "no role" rather than fail
+        # the whole synthesis over a cosmetic mismatch.
+        allowed_roles = YANDEX_TTS_ROLES_BY_VOICE.get(ya_voice, ())
+        ya_role = role if role in allowed_roles else None
+        if role and ya_role is None:
+            logger.info("tts_yandex_role_unsupported", voice=ya_voice, requested=role)
+        tmp_paths: list[str] = []
+        try:
+            for chunk in chunks:
+                tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                tmp.close()
+                tmp_paths.append(tmp.name)
+                cache_key = _chunk_cache_key(
+                    chunk, "yandex", f"{ya_voice}:{ya_role or '-'}", "speechkit-v3",
+                    settings.YANDEX_TTS_SPEED,
+                )
+                cache_path = _chunk_cache_path(cache_key) if TTS_CHUNK_CACHE_ENABLED else None
+                cached = _read_chunk_cache(cache_path) if cache_path else None
+                if cached is not None:
+                    logger.info("tts_chunk_cache_hit", provider="yandex")
+                    with open(tmp.name, "wb") as f:
+                        f.write(cached)
+                else:
+                    audio = self._yandex_speech_request_v3(chunk, ya_voice, ya_role)
+                    with open(tmp.name, "wb") as f:
+                        f.write(audio)
+                    if cache_path:
+                        _write_chunk_cache(cache_path, audio)
+            _concat_wav(tmp_paths, output_path)
+        finally:
+            for p in tmp_paths:
+                if os.path.exists(p) and p != output_path:
+                    os.unlink(p)
+        return output_path
+
+    def _yandex_speech_request_v3(self, chunk: str, ya_voice: str, ya_role: str | None) -> bytes:
+        """POST one chunk to SpeechKit v3, return WAV bytes at 48 kHz.
+
+        v3's response is server-streamed: one JSON object per line, each
+        carrying a base64 audio fragment in result.audioChunk.data. All
+        fragments concatenate (post-decode) into one valid WAV — the WAV
+        header only appears in the first chunk, exactly like a normal
+        streamed WAV write.
+        """
+        url = "https://tts.api.cloud.yandex.net:443/tts/v3/utteranceSynthesis"
+        headers = {
+            "Authorization": f"Api-Key {settings.YANDEX_API_KEY}",
+            "Content-Type": "application/json",
+        }
+        hints: list[dict[str, str | float]] = [{"voice": ya_voice}]
+        if ya_role:
+            hints.append({"role": ya_role})
+        if settings.YANDEX_TTS_SPEED is not None:
+            hints.append({"speed": settings.YANDEX_TTS_SPEED})
+        body = {
+            "text": chunk,
+            "hints": hints,
+            "outputAudioSpec": {"containerAudio": {"containerAudioType": "WAV"}},
+        }
+
+        last_error = ""
+        for attempt in range(YANDEX_TTS_MAX_RETRIES + 1):
+            if attempt:
+                time.sleep(2 ** (attempt - 1))
+            try:
+                response = httpx.post(
+                    url, json=body, headers=headers, timeout=settings.YANDEX_TTS_TIMEOUT
+                )
+            except httpx.HTTPError as exc:
+                last_error = str(exc)
+                continue
+
+            if response.status_code == 429 or response.status_code >= 500:
+                last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+                continue
+            if response.status_code >= 400:
+                raise RuntimeError(
+                    f"Yandex SpeechKit v3 request failed ({url}): "
+                    f"HTTP {response.status_code}: {response.text[:200]}"
+                )
+            audio = bytearray()
+            for line in response.text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except ValueError:
+                    continue
+                data = obj.get("result", {}).get("audioChunk", {}).get("data")
+                if data:
+                    audio.extend(base64.b64decode(data))
+            if not audio:
+                raise RuntimeError(
+                    f"Yandex SpeechKit v3 returned no audio chunks: {response.text[:200]}"
+                )
+            return bytes(audio)
+
+        raise RuntimeError(
+            f"Yandex SpeechKit v3 request failed ({url}) after "
+            f"{YANDEX_TTS_MAX_RETRIES + 1} attempts: {last_error}"
+        )
+
 
     def _synthesize_stub(self, text: str, output_path: str) -> str:
         sample_rate = 48000  # match Silero output rate → no resampling in FFmpeg

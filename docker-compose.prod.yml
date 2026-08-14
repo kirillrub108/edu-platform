@@ -140,35 +140,6 @@ services:
       - edu-network
     logging: *default-logging
 
-  silero-tts:
-    image: navatusein/silero-tts-service
-    environment:
-      # Single source of truth with the TTS pool in constants.py — MUST stay
-      # equal (both read ${TTS_WORKERS}). Pin TTS_WORKERS in .env.prod per host.
-      NUMBER_OF_THREADS: ${TTS_WORKERS:-4}
-      LANGUAGE: ru
-      SAMPLE_RATE: 48000
-    volumes:
-      - ./silero/config.py:/usr/app/app/config.py:ro
-      - silero_models:/usr/app/models
-      - silero_audios:/usr/app/audios
-    healthcheck:
-      # TCP liveness on the TTS port — image-tool-agnostic (silero is a Python
-      # service, so python3 is on PATH).
-      test: ["CMD-SHELL", "python3 -c \"import socket; socket.create_connection(('127.0.0.1',9898),3).close()\" || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 60s
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 2g
-    networks:
-      - edu-network
-    logging: *default-logging
-
   # ── One-shot migrations. NOT started by `up` (migrate profile). The deploy
   #    script runs this to completion BEFORE rolling out the app; a failed
   #    migration fails the deploy and leaves the running version untouched.
@@ -220,8 +191,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      silero-tts:
-        condition: service_started
     restart: unless-stopped
     deploy:
       resources:
@@ -249,8 +218,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      silero-tts:
-        condition: service_started
       backend:
         condition: service_started
     restart: unless-stopped
@@ -279,8 +246,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      silero-tts:
-        condition: service_started
       backend:
         condition: service_started
     restart: unless-stopped
@@ -365,7 +330,7 @@ services:
       # Yandex.Metrika counter id — set in .env.prod (NUXT_PUBLIC_METRIKA_ID=...).
       NUXT_PUBLIC_METRIKA_ID: ${NUXT_PUBLIC_METRIKA_ID:-}
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/ >/dev/null 2>&1 || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5
@@ -497,8 +462,6 @@ volumes:
   # mounted RO into nginx for direct /files/* delivery. Replaces the dev host
   # bind-mount ./backend/storage.
   app_storage:
-  silero_models:
-  silero_audios:
   # Shared between nginx (RO) and certbot (RW).
   letsencrypt:
   certbot_webroot:
