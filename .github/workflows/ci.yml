@@ -77,7 +77,7 @@ jobs:
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
-    needs: []  # TEMP: gate disabled to verify deploy job in isolation, see revert commit below
+    needs: test
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
