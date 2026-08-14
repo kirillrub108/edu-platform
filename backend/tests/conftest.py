@@ -140,14 +140,15 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
         base_url=_config_mod.settings.BASE_URL,
     )
     # Re-export to other modules that did `from .storage_service import storage_service`
+    import app.tasks.video_pipeline as _vp_mod2
+    import app.tasks.vision_pipeline as _vis_mod2
+    import app.tasks.purge_pipeline as _purge_mod2
     import app.routers.lessons as _lessons_router
     import app.routers.slides as _slides_router
     import app.routers.students as _students_router
     import app.routers.uploads as _uploads_router
-    import app.tasks.video_pipeline as _vp_mod2
-    import app.tasks.vision_pipeline as _vis_mod2
     for _mod in (
-        _vp_mod2, _vis_mod2, _lessons_router, _slides_router,
+        _vp_mod2, _vis_mod2, _purge_mod2, _lessons_router, _slides_router,
         _students_router, _uploads_router,
     ):
         if hasattr(_mod, "storage_service"):
