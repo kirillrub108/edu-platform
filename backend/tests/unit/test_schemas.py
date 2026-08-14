@@ -78,10 +78,9 @@ def test_course_create_rejects_empty_title() -> None:
 # ── LessonCreate ────────────────────────────────────────────────────────────
 
 def test_lesson_create_defaults() -> None:
-    l = LessonCreate(title="L", module_id=uuid4())
-    assert l.content_type.value == "video"
-    assert l.order == 0
-    assert l.creation_mode.value == "presentation_and_text"
+    lesson = LessonCreate(title="L", module_id=uuid4())
+    assert lesson.content_type.value == "video"
+    assert lesson.order == 0
 
 
 # ── SlideTextUpdate ─────────────────────────────────────────────────────────

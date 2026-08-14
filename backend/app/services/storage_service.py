@@ -11,7 +11,6 @@ from fastapi import UploadFile
 from app.config import settings
 from app.services.signed_url_service import generate_signed_url
 
-
 # Streaming granularity for bounded uploads (1 MiB).
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 

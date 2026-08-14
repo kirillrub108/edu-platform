@@ -26,7 +26,6 @@ from app.schemas.auth import (
     VerifyEmailRequest,
 )
 from app.services import email_token_service, password_reset_service
-from app.services.webhook_security import resolve_client_ip
 from app.services.auth_service import (
     AuthService,
     decode_token,
@@ -34,6 +33,7 @@ from app.services.auth_service import (
     get_auth_service,
     verify_email_verification_token,
 )
+from app.services.webhook_security import resolve_client_ip
 from app.tasks.email_pipeline import send_email
 
 logger = structlog.get_logger()

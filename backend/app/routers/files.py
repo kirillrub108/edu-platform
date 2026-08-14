@@ -1,10 +1,10 @@
-import structlog
 import mimetypes
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 import aiofiles
+import structlog
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 

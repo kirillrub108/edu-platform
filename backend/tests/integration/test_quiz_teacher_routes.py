@@ -1,7 +1,6 @@
 """Integration tests for the teacher-side quiz API."""
 from __future__ import annotations
 
-from typing import Any
 from uuid import UUID
 
 import pytest
@@ -128,7 +127,7 @@ async def test_reorder_questions(client, db_session, teacher_user, teacher_token
 async def test_other_teachers_cannot_touch(client, db_session, teacher_user, teacher_token):
     """Owner check via get_owned_lesson — another teacher's lesson is 404."""
     from app.models.user import User, UserRole
-    from app.services.auth_service import create_access_token, hash_password
+    from app.services.auth_service import hash_password
 
     other = User(
         email="other@e.com", hashed_password=hash_password("x"),

@@ -14,11 +14,9 @@ from __future__ import annotations
 
 import io
 import os
-import subprocess
 import uuid
 import wave
 from collections.abc import AsyncIterator, Iterator
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -26,12 +24,10 @@ import numpy as np
 import pytest
 import pytest_asyncio
 
-
 # ── 1. PostgreSQL container ──────────────────────────────────────────────────
 # Start the container FIRST and overwrite DATABASE_URL before any `app.*`
 # module is imported. `app/tasks/video_pipeline.py` constructs a sync engine
 # at import time, so the URL must be valid by then.
-
 from testcontainers.postgres import PostgresContainer
 
 
@@ -136,20 +132,20 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
     celery_app.__dict__.pop("backend", None)
 
     # 3) storage_service singleton — base_path captured at import
-    from app.services.storage_service import StorageService
     import app.services.storage_service as _storage_mod
+    from app.services.storage_service import StorageService
 
     _storage_mod.storage_service = StorageService(
         base_path=_config_mod.settings.STORAGE_PATH,
         base_url=_config_mod.settings.BASE_URL,
     )
     # Re-export to other modules that did `from .storage_service import storage_service`
-    import app.tasks.video_pipeline as _vp_mod2
-    import app.tasks.vision_pipeline as _vis_mod2
     import app.routers.lessons as _lessons_router
     import app.routers.slides as _slides_router
     import app.routers.students as _students_router
     import app.routers.uploads as _uploads_router
+    import app.tasks.video_pipeline as _vp_mod2
+    import app.tasks.vision_pipeline as _vis_mod2
     for _mod in (
         _vp_mod2, _vis_mod2, _lessons_router, _slides_router,
         _students_router, _uploads_router,
@@ -165,8 +161,9 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
 @pytest.fixture(scope="session")
 def _alembic_upgraded(_set_database_url: None) -> None:
     """Apply migrations once per session. Called by the engine fixture."""
-    from alembic import command
     from alembic.config import Config
+
+    from alembic import command
 
     # Resolve alembic.ini relative to this file: backend/tests/conftest.py
     # → backend/alembic.ini
@@ -662,7 +659,6 @@ __all__ = [
     "mock_llm_split",
     "mock_vision",
     "mock_subprocess",
-    "sample_pdf",
     "sample_pptx",
     "sample_pptx_bytes",
     "synthetic_wav_bytes",

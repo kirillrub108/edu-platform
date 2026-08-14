@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import io
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -11,7 +10,7 @@ import pytest
 from PIL import Image
 
 from app.services import vision_analysis as vis_mod
-from app.services.vision_analysis import VisionAnalysisService, vision_analysis_service
+from app.services.vision_analysis import VisionAnalysisService
 
 pytestmark = pytest.mark.unit
 

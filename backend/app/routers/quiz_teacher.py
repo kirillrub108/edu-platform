@@ -6,12 +6,11 @@ that re-aggregates the student's attempt score atomically.
 """
 from __future__ import annotations
 
-import structlog
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any
 from uuid import UUID, uuid4
 
+import structlog
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import desc, func, select

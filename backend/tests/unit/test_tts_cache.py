@@ -14,7 +14,6 @@ import pytest
 from app.services import tts_service as tts_mod
 from app.services.tts_service import (
     _chunk_cache_key,
-    _chunk_cache_path,
     _read_chunk_cache,
     _write_chunk_cache,
     tts_service,

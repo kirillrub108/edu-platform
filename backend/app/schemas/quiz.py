@@ -19,7 +19,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.quiz import AttemptStatus, QuestionType, QuizStatus
 
-
 # ── Teacher-facing payloads (with reference answers) ────────────────────────
 
 

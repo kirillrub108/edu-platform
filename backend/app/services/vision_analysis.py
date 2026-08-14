@@ -1,11 +1,11 @@
 import asyncio
 import base64
 import hashlib
-import structlog
 import os
 from typing import Any
 
 import httpx
+import structlog
 from openai import AsyncOpenAI
 
 from app.config import provider_routing, settings

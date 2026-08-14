@@ -9,12 +9,12 @@ on the answer view.
 """
 from __future__ import annotations
 
-import structlog
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,7 +33,6 @@ from app.models.quiz import (
     Quiz,
     QuizAnswer,
     QuizAttempt,
-    QuizQuestion,
     QuizStatus,
 )
 from app.models.user import User
@@ -49,7 +48,6 @@ from app.schemas.quiz import (
     to_student_payload,
 )
 from app.services import quota_service
-from app.services.progress_service import get_or_create_lesson_progress
 from app.services.grading_service import (
     ResolvedQuestion,
     aggregate_score,
@@ -59,6 +57,7 @@ from app.services.grading_service import (
     open_answer_too_long,
     resolved_index,
 )
+from app.services.progress_service import get_or_create_lesson_progress
 from app.services.quiz_service import BrokenSnapshotError, resolve_snapshot
 from app.tasks.quiz_pipeline import grade_attempt_task
 

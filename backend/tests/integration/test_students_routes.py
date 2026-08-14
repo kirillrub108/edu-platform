@@ -104,7 +104,7 @@ async def test_my_courses_filters_by_student(
     student_token: dict[str, str],
 ) -> None:
     enrolled = await make_course(db_session, owner=teacher_user, is_published=True, title="Enrolled")
-    other = await make_course(db_session, owner=teacher_user, is_published=True, title="Other")
+    _other = await make_course(db_session, owner=teacher_user, is_published=True, title="Other")
     await make_enrollment(db_session, student_user, enrolled)
 
     resp = await client.get("/api/v1/students/my-courses", cookies=student_token)

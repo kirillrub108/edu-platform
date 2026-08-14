@@ -1,5 +1,4 @@
 import hashlib
-import structlog
 import os
 import re
 import shutil
@@ -9,12 +8,15 @@ from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+import structlog
 from cachetools import TTLCache
 from pptx import Presentation
 
 from app.config import settings
 from app.constants import (
     ENCODE_WORKERS as _ENCODE_WORKERS_DEFAULT,
+)
+from app.constants import (
     SEGMENT_AUDIO_BITRATE,
     SEGMENT_AUDIO_CHANNELS,
     SEGMENT_FPS,

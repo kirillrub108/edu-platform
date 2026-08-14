@@ -19,14 +19,11 @@ tests/unit/test_quiz_graded_by_ai_unit.py.
 """
 from __future__ import annotations
 
-import uuid
 from decimal import Decimal
-from uuid import UUID
 
 import pytest
-from sqlalchemy import select
 
-from app.models.quiz import AttemptStatus, QuizAnswer, QuizAttempt
+from app.models.quiz import AttemptStatus, QuizAnswer
 from tests.factories import (
     make_course,
     make_enrollment,
@@ -36,7 +33,6 @@ from tests.factories import (
     make_quiz_attempt,
     make_quiz_question,
 )
-
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 

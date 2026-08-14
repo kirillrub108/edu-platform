@@ -1,4 +1,3 @@
-import structlog
 import base64
 import hashlib
 import os
@@ -10,6 +9,7 @@ import wave
 
 import httpx
 import numpy as np
+import structlog
 
 from app.config import settings
 from app.constants import (

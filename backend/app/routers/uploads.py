@@ -6,17 +6,16 @@ from html.parser import HTMLParser
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from sqlalchemy import delete, select
-
+from app.constants import MAX_DECOMPRESSED_DOCX_BYTES, MAX_SCRIPT_BYTES
 from app.database import get_db
 from app.dependencies import require_verified_teacher
 from app.models.course import Course
 from app.models.lesson import Lesson, LessonStatus
 from app.models.slide_text import SlideText
 from app.models.user import User
-from app.constants import MAX_DECOMPRESSED_DOCX_BYTES, MAX_SCRIPT_BYTES
 from app.services.file_validation_service import validate_upload
 from app.services.storage_service import storage_service
 

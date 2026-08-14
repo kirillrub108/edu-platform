@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import Float, and_, case, cast, desc, exists, func, select
+from sqlalchemy import Float, and_, case, cast, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import QUIZ_PASS_THRESHOLD
@@ -18,13 +18,11 @@ from app.schemas.analytics import (
     QuizLessonStats,
     QuizLessonStatsPage,
     QuizResultOut,
-    QuizResultPatch,
     QuizResultsResponse,
     QuizSubmission,
     QuizSubmissionPage,
     SortOrder,
 )
-
 
 # ── Source of truth ─────────────────────────────────────────────────────────
 # Analytics aggregates QuizAttempt directly. LessonProgress is *only* written

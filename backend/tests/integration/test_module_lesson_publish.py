@@ -97,7 +97,7 @@ async def test_fully_published_chain_is_visible_to_student(
     )
     assert detail.status_code == 200
     modules = detail.json()["modules"]
-    assert [l["id"] for l in modules[0]["lessons"]] == [str(lesson.id)]
+    assert [entry["id"] for entry in modules[0]["lessons"]] == [str(lesson.id)]
 
     direct = await client.get(
         f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
@@ -127,7 +127,7 @@ async def test_unpublished_course_keeps_enrolled_student_access(
     )
     assert detail.status_code == 200
     modules = detail.json()["modules"]
-    assert [l["id"] for l in modules[0]["lessons"]] == [str(lesson.id)]
+    assert [entry["id"] for entry in modules[0]["lessons"]] == [str(lesson.id)]
 
     direct = await client.get(
         f"/api/v1/students/lessons/{lesson.id}", cookies=student_token

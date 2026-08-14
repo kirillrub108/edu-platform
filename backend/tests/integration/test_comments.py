@@ -8,10 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.user import User
 from tests.factories import (
-    make_course,
     make_enrollment,
-    make_lesson,
-    make_module,
     make_published_course_with_lesson,
 )
 
@@ -169,10 +166,11 @@ async def test_other_student_cannot_delete(
 ) -> None:
     """A second student, enrolled in the same course, cannot delete another
     student's comment (only author or teacher-owner can)."""
+    import uuid
+
     from app.models.user import User as UserModel
     from app.models.user import UserRole
-    from app.services.auth_service import hash_password, create_access_token
-    import uuid
+    from app.services.auth_service import create_access_token, hash_password
 
     other = UserModel(
         email=f"other-{uuid.uuid4().hex[:6]}@example.com",

@@ -1,6 +1,6 @@
-import structlog
 from uuid import UUID, uuid4
 
+import structlog
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, HTTPException, Request
 from redis.asyncio import Redis
@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_app import celery_app
+from app.config import settings
 from app.constants import CREDIT_WEIGHTS, SIGNED_URL_TTL_SLIDE, TRIAL_MAX_SLIDES
 from app.database import get_db
 from app.dependencies import (
@@ -22,15 +23,14 @@ from app.models.lesson import CreationMode, Lesson, LessonStatus
 from app.models.slide_text import SlideText
 from app.models.user import User
 from app.redis_client import get_redis
-from app.services import billing_service, quota_service, tier_service, usage_service
+from app.routers.lessons import cancel_generation_impl
 from app.schemas.slide import (
     AnalyzeStatusResponse,
     SlideListResponse,
     SlideTextOut,
     SlideTextUpdate,
 )
-from app.config import settings
-from app.routers.lessons import cancel_generation_impl
+from app.services import billing_service, quota_service, tier_service, usage_service
 from app.services.llm_service import llm_service
 from app.services.storage_service import storage_service
 from app.services.video_service import count_source_slides

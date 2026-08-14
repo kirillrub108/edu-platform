@@ -150,7 +150,8 @@ async def test_gradebook_foreign_teacher_gets_403(
     db_session: AsyncSession,
     teacher_user: User,
 ) -> None:
-    from app.models.user import User as UserModel, UserRole
+    from app.models.user import User as UserModel
+    from app.models.user import UserRole
     from app.services.auth_service import create_access_token, hash_password
 
     other = UserModel(
@@ -343,7 +344,8 @@ async def test_patch_progress_foreign_teacher_gets_403(
     teacher_user: User,
     student_user: User,
 ) -> None:
-    from app.models.user import User as UserModel, UserRole
+    from app.models.user import User as UserModel
+    from app.models.user import UserRole
     from app.services.auth_service import create_access_token, hash_password
 
     other = UserModel(

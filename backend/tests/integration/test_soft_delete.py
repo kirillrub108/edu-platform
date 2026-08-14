@@ -29,7 +29,7 @@ from app.models.enrollment import Enrollment
 from app.models.lesson import ContentType, CreationMode, Lesson, LessonStatus, Module
 from app.models.user import User, UserRole
 from app.services.auth_service import hash_password
-from tests.factories import make_course, make_enrollment, make_lesson, make_module
+from tests.factories import make_course, make_enrollment
 
 pytestmark = pytest.mark.integration
 

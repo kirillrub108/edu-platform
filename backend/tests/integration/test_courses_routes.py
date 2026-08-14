@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from typing import Any
-from uuid import UUID
-
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -13,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.course import Course
 from app.models.lesson import Lesson, Module
 from app.models.user import User, UserRole
-from app.services.auth_service import create_access_token, hash_password
+from app.services.auth_service import hash_password
 from tests.factories import make_course, make_enrollment, make_lesson, make_module
 
 pytestmark = pytest.mark.integration

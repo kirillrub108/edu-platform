@@ -22,7 +22,7 @@ from app.models.lesson import ContentType, Lesson, Module
 from app.models.quiz import AttemptStatus, Quiz, QuizAttempt, QuizStatus
 from app.models.user import User
 from app.routers.lessons import video_playback_url
-from app.schemas.course import CourseOut, CoursePreview, StudentCourseOut
+from app.schemas.course import CoursePreview, StudentCourseOut
 from app.schemas.gradebook import StudentCourseDetailRead, StudentLessonProgressRead
 from app.schemas.lesson import LessonOut
 from app.schemas.student import (

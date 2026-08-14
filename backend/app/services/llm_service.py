@@ -1,8 +1,8 @@
 import json
-import structlog
 import re
-from typing import Any, Awaitable, Callable
+from typing import Any, Callable
 
+import structlog
 from openai import AsyncOpenAI
 
 from app.config import provider_routing, settings

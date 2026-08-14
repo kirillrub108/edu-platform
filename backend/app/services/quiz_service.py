@@ -6,12 +6,12 @@ the teacher sees on the page.
 """
 from __future__ import annotations
 
-import structlog
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
+import structlog
 from sqlalchemy import select, tuple_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession

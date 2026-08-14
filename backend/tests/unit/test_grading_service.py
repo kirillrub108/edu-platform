@@ -11,14 +11,12 @@ from decimal import Decimal
 import pytest
 
 from app.services.grading_service import (
-    GradingResult,
     aggregate_score,
     build_snapshot,
     grade_question,
     is_open_type,
     snapshot_pointers,
 )
-
 
 # ── single_choice ──────────────────────────────────────────────────────────
 

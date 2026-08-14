@@ -16,7 +16,7 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.lesson import ContentType, LessonStatus
-from app.models.quiz import AttemptStatus, Quiz, QuizAttempt, QuizStatus
+from app.models.quiz import AttemptStatus, Quiz, QuizAttempt
 from app.models.user import User, UserRole
 from app.services.auth_service import create_access_token, hash_password
 from tests.conftest import _TEST_CSRF
