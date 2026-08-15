@@ -68,20 +68,34 @@ async def test_analyze_slide_returns_text_from_ollama(
     assert result == "narration"
 
 
-async def test_analyze_slide_returns_empty_when_llm_yields_empty(
+async def test_analyze_slide_raises_when_llm_yields_empty(
     monkeypatch: pytest.MonkeyPatch, slide_png: Path
 ) -> None:
+    """Пустой content — осознанный RuntimeError (_call_ollama), не тихое "":
+    иначе слайд молча остаётся без озвучки ниже по пайплайну (KNOWN_PROBLEMS §2.5)."""
     svc = VisionAnalysisService()
     monkeypatch.setattr(svc, "_ollama_client", _stub_ollama_client(""))
 
-    # Real behaviour: returns "" (whitespace-stripped). NOT ValueError.
-    result = await svc.analyze_slide(
-        slide_image_path=str(slide_png),
-        slide_number=1,
-        total_slides=1,
-        course_title="Course",
-    )
-    assert result == ""
+    with pytest.raises(RuntimeError, match="empty message"):
+        await svc.analyze_slide(
+            slide_image_path=str(slide_png),
+            slide_number=1,
+            total_slides=1,
+            course_title="Course",
+        )
+
+
+async def test_analyze_presentation_degrades_empty_slide_to_blank(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path
+) -> None:
+    """Сдерживание на уровне выше: analyze_presentation ловит RuntimeError одного
+    слайда и подставляет "", не роняя весь прогон (DATA_FLOW §6.2 п.6 — весь
+    прогон падает только если ВСЕ слайды окажутся пустыми)."""
+    svc = VisionAnalysisService()
+    monkeypatch.setattr(svc, "_ollama_client", _stub_ollama_client(""))
+
+    texts = await svc.analyze_presentation([str(slide_png)], "Course")
+    assert texts == [""]
 
 
 def test_cache_key_changes_with_different_model(slide_png: Path) -> None:
