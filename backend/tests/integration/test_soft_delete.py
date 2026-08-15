@@ -240,9 +240,9 @@ def test_purge_only_removes_records_older_than_threshold(sync_session: Session) 
     assert recent_id in remaining
 
 
-def test_purge_removes_files_via_os_remove(
-    sync_session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_purge_removes_stored_files(sync_session: Session) -> None:
+    """_remove_file удаляет файл через storage_service.delete_file() (абстракция
+    local/s3), а не os.remove напрямую — проверяем результат, а не сам вызов."""
     from app.services.storage_service import storage_service
     from app.tasks import purge_pipeline
 
@@ -263,12 +263,9 @@ def test_purge_removes_files_via_os_remove(
     sync_session.add(course)
     sync_session.commit()
 
-    removed: list[str] = []
-    monkeypatch.setattr(purge_pipeline.os, "remove", lambda p: removed.append(p))
-
     purge_pipeline.purge_soft_deleted()
 
-    assert any("purge-test.png" in p for p in removed)
+    assert not os.path.exists(full)
 
 
 def _make_graded_attachment(session: Session, *, graded_days_ago: int | None) -> dict[str, object]:
