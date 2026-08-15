@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import uuid
 from decimal import Decimal
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
 
@@ -24,11 +24,24 @@ from app.constants import CREDIT_WEIGHTS
 from app.models.quiz import Quiz
 from app.services.llm_service import LLMOutputError
 from app.services.quiz_service import EmptyMaterialError
-from app.tasks import quiz_pipeline as qp
 
 pytestmark = pytest.mark.unit
 
 _ESTIMATE = CREDIT_WEIGHTS["quiz_generate"]
+
+
+@pytest.fixture()
+def qp() -> ModuleType:
+    """Import the task module lazily.
+
+    `app.tasks.quiz_pipeline` does `from ...video_pipeline import SyncSession`,
+    and conftest rebinds that sessionmaker only once the Postgres container is
+    up. Importing at collection time would freeze the placeholder engine into
+    the module and break every other test that uses it.
+    """
+    from app.tasks import quiz_pipeline
+
+    return quiz_pipeline
 
 
 class _Recorder:
@@ -42,7 +55,7 @@ class _Recorder:
 
 
 @pytest.fixture()
-def gen_env(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
+def gen_env(qp: ModuleType, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     """Wire generate_quiz_task to a mocked session and stubbed collaborators."""
     quiz = MagicMock()
     quiz.id = uuid.uuid4()
@@ -89,7 +102,7 @@ def gen_env(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     return env
 
 
-def _run_generate(**overrides: Any) -> dict[str, Any]:
+def _run_generate(qp: ModuleType, **overrides: Any) -> dict[str, Any]:
     args: dict[str, Any] = {
         "lesson_id": str(uuid.uuid4()),
         "num_questions": 5,
@@ -107,8 +120,10 @@ def _run_generate(**overrides: Any) -> dict[str, Any]:
 # ── generate_quiz_task ────────────────────────────────────────────────────────
 
 
-def test_generate_quiz_charges_full_price_and_clears_handle(gen_env: SimpleNamespace) -> None:
-    result = _run_generate()
+def test_generate_quiz_charges_full_price_and_clears_handle(
+    qp: ModuleType, gen_env: SimpleNamespace
+) -> None:
+    result = _run_generate(qp)
 
     assert result == {"status": "ok", "total": 1, "quiz_id": str(gen_env.quiz.id)}
     assert gen_env.replaced.calls[0][1:] == (gen_env.quiz.id, gen_env.generated)
@@ -119,8 +134,10 @@ def test_generate_quiz_charges_full_price_and_clears_handle(gen_env: SimpleNames
     assert gen_env.release_slot.calls == []
 
 
-def test_generate_quiz_forwards_requested_shape_to_the_llm(gen_env: SimpleNamespace) -> None:
-    _run_generate(num_questions=8, num_options=3, types=["true_false"])
+def test_generate_quiz_forwards_requested_shape_to_the_llm(
+    qp: ModuleType, gen_env: SimpleNamespace
+) -> None:
+    _run_generate(qp, num_questions=8, num_options=3, types=["true_false"])
 
     assert gen_env.generate_kwargs == {
         "num_questions": 8,
@@ -129,14 +146,14 @@ def test_generate_quiz_forwards_requested_shape_to_the_llm(gen_env: SimpleNamesp
     }
 
 
-def test_generate_quiz_defaults_types_when_none(gen_env: SimpleNamespace) -> None:
-    _run_generate(types=None)
+def test_generate_quiz_defaults_types_when_none(qp: ModuleType, gen_env: SimpleNamespace) -> None:
+    _run_generate(qp, types=None)
 
     assert gen_env.generate_kwargs["types"] == list(qp.QUIZ_TYPE_DISTRIBUTION.keys())
 
 
-def test_generate_quiz_publishes_progress_steps(gen_env: SimpleNamespace) -> None:
-    _run_generate()
+def test_generate_quiz_publishes_progress_steps(qp: ModuleType, gen_env: SimpleNamespace) -> None:
+    _run_generate(qp)
 
     assert [p["step"] for p in gen_env.published] == ["material", "llm", "persist", "persist"]
     assert gen_env.published[-1] == {"step": "persist", "done": 3, "total": 3}
@@ -151,7 +168,11 @@ def test_generate_quiz_publishes_progress_steps(gen_env: SimpleNamespace) -> Non
     ],
 )
 def test_generate_quiz_releases_credits_on_every_failure(
-    gen_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, exc: Exception, match: str
+    qp: ModuleType,
+    gen_env: SimpleNamespace,
+    monkeypatch: pytest.MonkeyPatch,
+    exc: Exception,
+    match: str,
 ) -> None:
     async def _boom(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
         raise exc
@@ -161,7 +182,7 @@ def test_generate_quiz_releases_credits_on_every_failure(
     else:
         monkeypatch.setattr(qp.llm_service, "generate_quiz_v2", _boom)
 
-    result = _run_generate()
+    result = _run_generate(qp)
 
     assert result["status"] == "error"
     assert match in result["error"]
@@ -173,27 +194,31 @@ def test_generate_quiz_releases_credits_on_every_failure(
 
 
 def test_generate_quiz_returns_trial_slot_only_on_failure(
-    gen_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    qp: ModuleType, gen_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(
         qp, "assemble_material_sync", MagicMock(side_effect=EmptyMaterialError("x"))
     )
 
-    _run_generate(billed_via="trial", billing_ref=None)
+    _run_generate(qp, billed_via="trial", billing_ref=None)
 
     assert gen_env.release_slot.calls[0][2] == qp.TRIAL_QUIZ
     assert gen_env.finalize.calls == []
 
 
-def test_generate_quiz_keeps_trial_slot_spent_on_success(gen_env: SimpleNamespace) -> None:
-    _run_generate(billed_via="trial", billing_ref=None)
+def test_generate_quiz_keeps_trial_slot_spent_on_success(
+    qp: ModuleType, gen_env: SimpleNamespace
+) -> None:
+    _run_generate(qp, billed_via="trial", billing_ref=None)
 
     assert gen_env.release_slot.calls == []
     assert gen_env.finalize.calls == []
 
 
-def test_generate_quiz_without_owner_settles_nothing(gen_env: SimpleNamespace) -> None:
-    result = _run_generate(owner_id=None)
+def test_generate_quiz_without_owner_settles_nothing(
+    qp: ModuleType, gen_env: SimpleNamespace
+) -> None:
+    result = _run_generate(qp, owner_id=None)
 
     assert result["status"] == "ok"
     assert gen_env.finalize.calls == []
@@ -201,34 +226,34 @@ def test_generate_quiz_without_owner_settles_nothing(gen_env: SimpleNamespace) -
 
 
 def test_generate_quiz_survives_a_billing_failure(
-    gen_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    qp: ModuleType, gen_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A broken ledger write must not turn a finished quiz into an error."""
     monkeypatch.setattr(
         qp, "sync_finalize_generation", MagicMock(side_effect=RuntimeError("ledger down"))
     )
 
-    result = _run_generate()
+    result = _run_generate(qp)
 
     assert result["status"] == "ok"
     assert gen_env.quiz.generation_task_id is None
 
 
 def test_generate_quiz_error_without_quiz_row_still_returns_error(
-    gen_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+    qp: ModuleType, gen_env: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     gen_env.session.query.return_value.filter.return_value.first.return_value = None
     monkeypatch.setattr(
         qp, "assemble_material_sync", MagicMock(side_effect=EmptyMaterialError("x"))
     )
 
-    assert _run_generate()["status"] == "error"
+    assert _run_generate(qp)["status"] == "error"
 
 
 # ── _clear_generation_task ────────────────────────────────────────────────────
 
 
-def test_clear_generation_task_is_a_noop_for_a_missing_quiz() -> None:
+def test_clear_generation_task_is_a_noop_for_a_missing_quiz(qp: ModuleType) -> None:
     session = MagicMock()
     session.get.return_value = None
 
@@ -237,7 +262,7 @@ def test_clear_generation_task_is_a_noop_for_a_missing_quiz() -> None:
     assert not session.commit.called
 
 
-def test_clear_generation_task_commits_the_reset() -> None:
+def test_clear_generation_task_commits_the_reset(qp: ModuleType) -> None:
     session = MagicMock()
     quiz = MagicMock(generation_task_id="task-1")
     session.get.return_value = quiz
@@ -251,7 +276,9 @@ def test_clear_generation_task_commits_the_reset() -> None:
 # ── _grade_one_open ───────────────────────────────────────────────────────────
 
 
-def test_grade_one_open_returns_llm_verdict(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_grade_one_open_returns_llm_verdict(
+    qp: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
     async def _grade(payload: dict[str, Any], text: str) -> tuple[float, str]:
         assert payload["prompt"] == "Что такое энтропия?"
         assert text == "мера беспорядка"
@@ -266,6 +293,7 @@ def test_grade_one_open_returns_llm_verdict(monkeypatch: pytest.MonkeyPatch) -> 
 
 
 def test_grade_one_open_degrades_to_needs_review_on_llm_failure(
+    qp: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A provider outage must never silently score a student 0/1."""
@@ -300,6 +328,7 @@ def _answer(question_id: uuid.UUID, awarded: str | None, max_score: str = "1.0")
 
 
 def _recompute(
+    qp: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     questions: list[SimpleNamespace],
     answers: list[SimpleNamespace],
@@ -321,9 +350,12 @@ def _recompute(
     return attempt
 
 
-def test_recompute_attempt_uses_snapshot_weights(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_recompute_attempt_uses_snapshot_weights(
+    qp: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
     heavy, light = _snap_question("3.0"), _snap_question("1.0")
     attempt = _recompute(
+        qp,
         monkeypatch,
         [heavy, light],
         [_answer(heavy.id, "1.0"), _answer(light.id, "0.0")],
@@ -334,27 +366,32 @@ def test_recompute_attempt_uses_snapshot_weights(monkeypatch: pytest.MonkeyPatch
 
 
 def test_recompute_attempt_counts_ungraded_answers_as_zero(
+    qp: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     q1, q2 = _snap_question("1.0"), _snap_question("1.0")
-    attempt = _recompute(monkeypatch, [q1, q2], [_answer(q1.id, "1.0"), _answer(q2.id, None)])
+    attempt = _recompute(qp, monkeypatch, [q1, q2], [_answer(q1.id, "1.0"), _answer(q2.id, None)])
 
     assert attempt.score == Decimal("0.5")
     assert attempt.passed is False  # below the 0.6 threshold
 
 
 def test_recompute_attempt_ignores_answers_outside_the_snapshot(
+    qp: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A question deleted after submission must not dilute the score."""
     q1 = _snap_question("1.0")
-    attempt = _recompute(monkeypatch, [q1], [_answer(q1.id, "1.0"), _answer(uuid.uuid4(), "0.0")])
+    attempt = _recompute(
+        qp, monkeypatch, [q1], [_answer(q1.id, "1.0"), _answer(uuid.uuid4(), "0.0")]
+    )
 
     assert attempt.score == Decimal("1")
     assert attempt.passed is True
 
 
 def test_recompute_attempt_falls_back_to_default_threshold(
+    qp: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(qp, "resolve_snapshot_sync", lambda _s, _snap: [])
@@ -407,7 +444,7 @@ def _progress_env(
     return session, attempt
 
 
-def test_progress_created_for_a_passing_attempt() -> None:
+def test_progress_created_for_a_passing_attempt(qp: ModuleType) -> None:
     session, attempt = _progress_env()
 
     qp._mark_lesson_progress_if_passed(session, attempt)
@@ -418,7 +455,7 @@ def test_progress_created_for_a_passing_attempt() -> None:
     assert created.completed_at is not None
 
 
-def test_progress_keeps_the_best_previous_score() -> None:
+def test_progress_keeps_the_best_previous_score(qp: ModuleType) -> None:
     """A later, worse attempt must never regress a completed lesson."""
     previous = SimpleNamespace(
         quiz_score=0.95, is_completed=True, completed_at="2026-01-01T00:00:00Z"
@@ -432,7 +469,7 @@ def test_progress_keeps_the_best_previous_score() -> None:
     assert not session.add.called
 
 
-def test_progress_upgrades_score_on_a_better_attempt() -> None:
+def test_progress_upgrades_score_on_a_better_attempt(qp: ModuleType) -> None:
     previous = SimpleNamespace(quiz_score=0.5, is_completed=False, completed_at=None)
     session, attempt = _progress_env(score="0.8", progress=previous)
 
@@ -443,7 +480,7 @@ def test_progress_upgrades_score_on_a_better_attempt() -> None:
     assert previous.completed_at is not None
 
 
-def test_progress_untouched_for_a_failed_attempt() -> None:
+def test_progress_untouched_for_a_failed_attempt(qp: ModuleType) -> None:
     session, attempt = _progress_env(passed=False)
 
     qp._mark_lesson_progress_if_passed(session, attempt)
@@ -453,7 +490,7 @@ def test_progress_untouched_for_a_failed_attempt() -> None:
 
 
 @pytest.mark.parametrize("missing", ["quiz", "lesson", "module", "enrollment"])
-def test_progress_noop_when_a_link_in_the_chain_is_missing(missing: str) -> None:
+def test_progress_noop_when_a_link_in_the_chain_is_missing(qp: ModuleType, missing: str) -> None:
     session, attempt = _progress_env(**{missing: None})
 
     qp._mark_lesson_progress_if_passed(session, attempt)

@@ -64,7 +64,7 @@ async def test_double_extension_trap(name: str) -> None:
 
 
 async def test_version_markers_in_the_name_are_allowed() -> None:
-    """"report.v1.2.pdf" is a legitimate name, not a double-extension trick."""
+    """ "report.v1.2.pdf" is a legitimate name, not a double-extension trick."""
     await validate_upload(_upload("report.v1.2.pdf", _PDF), [".pdf"])
 
 
@@ -127,7 +127,9 @@ async def test_zip_slip_entries_are_rejected(entry: str) -> None:
 
 async def test_backslash_entry_paths_are_normalized_before_the_check() -> None:
     with pytest.raises(HTTPException, match="Archive entry path is invalid"):
-        await validate_upload(_upload("deck.pptx", _zip_bytes(["a\\..\\..\\escape.xml"])), [".pptx"])
+        await validate_upload(
+            _upload("deck.pptx", _zip_bytes(["a\\..\\..\\escape.xml"])), [".pptx"]
+        )
 
 
 async def test_too_many_archive_entries_are_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
