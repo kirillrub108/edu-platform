@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { Upload, CheckCircle2 } from 'lucide-vue-next'
+import { ref } from 'vue'
+import { Upload, CheckCircle2, X } from 'lucide-vue-next'
 
 defineProps<{
   pptxPath: string | null
@@ -13,9 +14,16 @@ const emit = defineEmits<{
   upload: []
 }>()
 
+const fileInputRef = ref<HTMLInputElement | null>(null)
+
 const onFileChange = (e: Event) => {
   const input = e.target as HTMLInputElement
   emit('file-change', input.files?.[0] ?? null)
+}
+
+const clearFile = () => {
+  if (fileInputRef.value) fileInputRef.value.value = ''
+  emit('file-change', null)
 }
 </script>
 
@@ -32,16 +40,25 @@ const onFileChange = (e: Event) => {
       <span class="truncate">{{ pptxPath.split('/').pop() }}</span>
     </div>
 
-    <div class="flex gap-2 items-center flex-wrap">
+    <div class="flex gap-4 items-center flex-wrap">
       <label class="cursor-pointer inline-flex items-center gap-2 px-4 py-2 border border-gray-200 rounded-xl text-sm font-medium text-gray-700 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-700 transition">
         <Upload class="w-4 h-4" />
         {{ selectedFile ? selectedFile.name : 'Выбрать файл' }}
-        <input type="file" accept=".pptx,.ppt,.pdf" class="hidden" @change="onFileChange" />
+        <button
+          v-if="selectedFile"
+          type="button"
+          class="ml-1 pl-2 py-1 border-l border-gray-200 text-gray-400 hover:text-rose-600 transition"
+          @click.stop.prevent="clearFile"
+        >
+          <X class="w-4 h-4" />
+        </button>
+        <input ref="fileInputRef" type="file" accept=".pptx,.ppt,.pdf" class="hidden" @change="onFileChange" />
       </label>
       <UiButton
         v-if="selectedFile"
         variant="primary"
         size="sm"
+        class="!px-4 !py-2 !text-sm shimmer-cta"
         :loading="uploading"
         @click="emit('upload')"
       >
@@ -51,3 +68,16 @@ const onFileChange = (e: Event) => {
     <p v-if="error" class="mt-2 text-sm text-rose-600">{{ error }}</p>
   </section>
 </template>
+
+<style scoped>
+/* Draws attention to the upload CTA once a file is picked: a soft pulsing
+   violet glow behind the button. */
+.shimmer-cta {
+  animation: shimmer-cta-glow 1.8s ease-in-out infinite;
+}
+
+@keyframes shimmer-cta-glow {
+  0%, 100% { box-shadow: 0 0 0 0 oklch(0.63 0.235 282 / 0.45); }
+  50% { box-shadow: 0 0 16px 4px oklch(0.63 0.235 282 / 0.45); }
+}
+</style>

@@ -582,7 +582,7 @@ watch(lessonId, (newId, oldId) => {
               @cancel-analyze="cancelAnalysis"
               @toggle-slide-editor="showSlideEditor = !showSlideEditor"
               @slide-back="showSlideEditor = false"
-              @slide-ready="async () => { showSlideEditor = false; await generateVideo() }"
+              @slide-ready="showSlideEditor = false; activeStep = 'generate'"
             />
           </div>
 
