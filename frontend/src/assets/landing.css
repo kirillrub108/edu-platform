@@ -882,8 +882,9 @@ html:has(.ldg) {
   border-top: 1px solid var(--line);
   font-size: 14px;
 }
-.ldg .prow:first-of-type {
+.ldg .innerbox + .prow {
   margin-top: 4px;
+  border-top: none;
 }
 .ldg .prow .cr {
   font-weight: 800;
