@@ -39,6 +39,15 @@ POLZA_MAX_CHARS: int = 4000
 # character count, so chunks stay far below the documented 5000-char limit.
 YANDEX_TTS_MAX_CHARS: int = 200  # v3 hard-caps ~250 chars/request; kept under with margin
 YANDEX_TTS_MAX_RETRIES: int = 3
+# Ceiling for a pause translated from <break time="..."/> into sil<[ms]> — an LLM
+# that emits time="60s" must not stall a slide for a minute.
+YANDEX_TTS_MAX_PAUSE_MS: int = 5000
+# Ranges of the v3 `speed` / `pitchShift` hints, straight from the API reference.
+# Used to validate the teacher-supplied values in schemas/lesson.py.
+YANDEX_TTS_SPEED_MIN: float = 0.1
+YANDEX_TTS_SPEED_MAX: float = 3.0
+YANDEX_TTS_PITCH_MIN: int = -1000
+YANDEX_TTS_PITCH_MAX: int = 1000
 YANDEX_TTS_VOICES: frozenset[str] = frozenset(
     {
         "alena",

@@ -3,7 +3,14 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.constants import POLZA_TTS_VOICES, YANDEX_TTS_VOICES
+from app.constants import (
+    POLZA_TTS_VOICES,
+    YANDEX_TTS_PITCH_MAX,
+    YANDEX_TTS_PITCH_MIN,
+    YANDEX_TTS_SPEED_MAX,
+    YANDEX_TTS_SPEED_MIN,
+    YANDEX_TTS_VOICES,
+)
 from app.models.lesson import ContentType, CreationMode, LessonStatus
 
 
@@ -102,6 +109,14 @@ _VOICE_PATTERN = "^(" + "|".join(_ALL_VOICES) + ")(:[a-z]+)?$"
 class VideoGenerateRequest(BaseModel):
     pptx_path: str | None = None
     voice: str = Field(default="nova", pattern=_VOICE_PATTERN)
+    # SpeechKit-only hints; ignored when TTS_PROVIDER is silero/polza. None =
+    # "leave the provider default alone", which is not the same as 1.0 / 0.
+    speed: float | None = Field(
+        default=None, ge=YANDEX_TTS_SPEED_MIN, le=YANDEX_TTS_SPEED_MAX
+    )
+    pitch: int | None = Field(
+        default=None, ge=YANDEX_TTS_PITCH_MIN, le=YANDEX_TTS_PITCH_MAX
+    )
 
 
 class TaskStatusResponse(BaseModel):

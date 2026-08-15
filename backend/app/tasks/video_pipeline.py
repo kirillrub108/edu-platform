@@ -132,7 +132,9 @@ def _split_voice_role(voice_field: str) -> tuple[str, str | None]:
     return voice_field, None
 
 
-def _tts_cache_path(ssml: str, voice: str) -> str | None:
+def _tts_cache_path(
+    ssml: str, voice: str, speed: float | None = None, pitch: int | None = None
+) -> str | None:
     try:
         h = hashlib.sha256(ssml.encode()).hexdigest()
         cache_dir = os.path.join(settings.STORAGE_PATH, "tts_cache", h[:2])
@@ -149,6 +151,12 @@ def _tts_cache_path(ssml: str, voice: str) -> str | None:
             suffix = f".{settings.TTS_PROVIDER}"
         else:
             suffix = ""
+        # Speed/pitch change the audio, so they must key the cache — but only
+        # when actually set, so untouched sliders keep hitting existing entries.
+        if speed is not None:
+            suffix += f".s{speed}"
+        if pitch:
+            suffix += f".p{pitch}"
         return os.path.join(cache_dir, f"{h}.{voice}{suffix}.wav")
     except Exception:
         return None
@@ -246,6 +254,8 @@ def generate_video_lesson(
     pptx_relative_path: str,
     voice: str | None = None,
     is_regen: bool = False,
+    speed: float | None = None,
+    pitch: int | None = None,
 ) -> dict:
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(task_id=self.request.id, task_name=self.name)
@@ -484,9 +494,12 @@ def generate_video_lesson(
             # Persist ssml_chunks and voice to checkpoint. If the voice changed
             # compared to what was previously checkpointed, invalidate tts_done
             # and segments_done (audio must be re-synthesised with the new voice)
-            # but keep ssml_chunks to avoid re-running the LLM.
-            _voice_matches = cp.get("voice", "") == effective_voice
-            cp["voice"] = effective_voice
+            # but keep ssml_chunks to avoid re-running the LLM. Speed and pitch
+            # ride in the same signature — they change the audio just as much,
+            # so a resumed run must not splice slides synthesised at two tempos.
+            _voice_sig = f"{effective_voice}|{speed}|{pitch}"
+            _voice_matches = cp.get("voice", "") == _voice_sig
+            cp["voice"] = _voice_sig
             cp["ssml_chunks"] = slide_scripts
             if not _voice_matches:
                 cp["tts_done"] = []
@@ -543,7 +556,7 @@ def generate_video_lesson(
                 usage_service.set_usage_context("tts", lesson_id=lesson_id)
                 audio_path = os.path.join(audio_dir, f"slide_{idx:04d}.wav")
                 ssml = slide_scripts[idx]
-                cache_path = _tts_cache_path(ssml, effective_voice)
+                cache_path = _tts_cache_path(ssml, effective_voice, speed, pitch)
 
                 if cache_path and os.path.exists(cache_path) and os.path.getsize(cache_path) > 0:
                     logger.info("tts_cache_hit", slide=idx)
@@ -554,7 +567,14 @@ def generate_video_lesson(
                         logger.warning("tts_cache_corrupted", slide=idx, path=cache_path)
                     logger.info("tts_cache_miss", slide=idx)
                     _ya_voice, _ya_role = _split_voice_role(effective_voice)
-                    tts_service.synthesize(ssml, audio_path, voice=_ya_voice, role=_ya_role)
+                    tts_service.synthesize(
+                        ssml,
+                        audio_path,
+                        voice=_ya_voice,
+                        role=_ya_role,
+                        speed=speed,
+                        pitch=pitch,
+                    )
                     if cache_path:
                         try:
                             shutil.copy2(audio_path, cache_path)

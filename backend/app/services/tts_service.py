@@ -21,6 +21,7 @@ from app.constants import (
     TTS_CHUNK_CACHE_DIR_NAME,
     TTS_CHUNK_CACHE_ENABLED,
     YANDEX_TTS_MAX_CHARS,
+    YANDEX_TTS_MAX_PAUSE_MS,
     YANDEX_TTS_MAX_RETRIES,
     YANDEX_TTS_ROLES_BY_VOICE,
     YANDEX_TTS_RUB_PER_MCHAR,
@@ -103,13 +104,63 @@ def strip_tts_artifacts(text: str) -> str:
 def _strip_ssml_tags(text: str) -> str:
     """Return plain text after removing all XML/SSML tags.
 
-    Block/line tags (<br>, </p>, </speak>) are replaced with a space first so
-    adjacent words are not concatenated (e.g. "Тема: Скаты<br>Предмет:" →
-    "Тема: Скаты Предмет:").
+    Every tag becomes a space, never an empty string — an inline tag with no
+    surrounding whitespace would otherwise weld two sentences together
+    ("Закон Ома.<break time="500ms"/>Это важно." → "Закон Ома.Это важно.",
+    which the synthesiser then reads without a sentence boundary). Doubled
+    spaces are squeezed afterwards.
     """
-    text = re.sub(r"<br\s*/?>|</?p>|</?speak>", " ", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"<[^>]+>", " ", text)
     text = re.sub(r" {2,}", " ", text)
+    # A tag sitting right before punctuation leaves " ," — a stray micro-pause.
+    text = re.sub(r"[ \t]+([,.;:!?…])", r"\1", text)
+    return text.strip()
+
+
+def _speechkit_pause(match: re.Match) -> str:
+    value, unit = match.group(1), match.group(2)
+    ms = float(value) * (1000 if unit.lower() == "s" else 1)
+    return f" sil<[{int(max(1, min(ms, YANDEX_TTS_MAX_PAUSE_MS)))}]> "
+
+
+def _ssml_to_speechkit(text: str) -> str:
+    """Translate the LLM's W3C SSML into SpeechKit v3 TTS markup.
+
+    llm_service._SSML_SYSTEM annotates narration in Silero-flavoured SSML.
+    SpeechKit speaks a different dialect, so feeding it through
+    _strip_ssml_tags would discard every pause and emphasis the LLM chose.
+    Mapping:
+        <break time="500ms"/>            -> sil<[500]>
+        <break/> (no time)               -> <[medium]>
+        </p>                             -> <[large]>
+        <prosody rate="slow">x</prosody>  -> **x**   (accent on word)
+    Any other tag becomes a space. Markup already written in SpeechKit syntax
+    (`<[...]>`, `sil<[...]>`) passes through untouched.
+
+    Run this AFTER strip_tts_artifacts: that helper strips markdown bold, so
+    the ** it would otherwise eat are the ones emitted here.
+    """
+    # Emphasis first — the inner text must survive the generic tag sweep below.
+    text = re.sub(
+        r"<prosody\b[^>]*>(.*?)</prosody\s*>",
+        lambda m: f"**{m.group(1).strip()}**" if m.group(1).strip() else "",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    text = re.sub(
+        r"<break\b[^>]*\btime\s*=\s*[\"']?([\d.]+)\s*(ms|s)[\"']?[^>]*>",
+        _speechkit_pause,
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(r"<break\b[^>]*>", " <[medium]> ", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", " <[large]> ", text, flags=re.IGNORECASE)
+    # Everything else goes, but never the SpeechKit markup emitted above.
+    text = re.sub(r"<(?!\[)[^>]*>", " ", text)
+    text = re.sub(r"[ \t]{2,}", " ", text)
+    text = re.sub(r"[ \t]+([,.;:!?…])", r"\1", text)
+    # A pause at the very end is dead air before the next slide — drop it.
+    text = re.sub(r"(?:\s*(?:sil<\[\d+\]>|<\[[a-z]+\]>))+\s*$", "", text, flags=re.IGNORECASE)
     return text.strip()
 
 
@@ -259,6 +310,8 @@ class TTSService:
         output_path: str,
         voice: str | None = None,
         role: str | None = None,
+        speed: float | None = None,
+        pitch: int | None = None,
     ) -> str:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
@@ -276,7 +329,8 @@ class TTSService:
         elif provider == "polza":
             return self._synthesize_polza(text, output_path, effective_voice)
         elif provider == "yandex":
-            return self._synthesize_yandex(text, output_path, effective_voice, role)
+            # speed/pitch are SpeechKit hints; silero and polza have no equivalent.
+            return self._synthesize_yandex(text, output_path, effective_voice, role, speed, pitch)
         else:
             return self._synthesize_stub(text, output_path)
 
@@ -492,7 +546,13 @@ class TTSService:
         return data
 
     def _synthesize_yandex(
-        self, text: str, output_path: str, voice: str, role: str | None = None
+        self,
+        text: str,
+        output_path: str,
+        voice: str,
+        role: str | None = None,
+        speed: float | None = None,
+        pitch: int | None = None,
     ) -> str:
         """Send text to Yandex SpeechKit API v3, chunking if long.
 
@@ -513,15 +573,18 @@ class TTSService:
             raise RuntimeError(
                 "Yandex TTS is selected (TTS_PROVIDER=yandex) but YANDEX_API_KEY is not set"
             )
-        plain = strip_tts_artifacts(_strip_ssml_tags(text))
-        if not plain:
+        # Order matters: strip markdown/LLM chatter first, then translate the
+        # SSML — see _ssml_to_speechkit. The markup characters ride along into
+        # the request, so they count toward both the split and the billed size.
+        marked = _ssml_to_speechkit(strip_tts_artifacts(text))
+        if not marked:
             logger.warning("tts_empty_ssml_chunk", raw=repr(text[:80]), output=output_path)
             return self._synthesize_stub(text, output_path)
-        chunks = _split_for_tts(plain, max_chars=YANDEX_TTS_MAX_CHARS)
+        chunks = _split_for_tts(marked, max_chars=YANDEX_TTS_MAX_CHARS)
         if len(chunks) > 1:
-            logger.info("tts_splitting", chars=len(plain), chunks=len(chunks))
+            logger.info("tts_splitting", chars=len(marked), chunks=len(chunks))
         usage_service.record_tts_usage(
-            "yandex-speechkit-v3", len(plain), rub_per_mchar=YANDEX_TTS_RUB_PER_MCHAR
+            "yandex-speechkit-v3", len(marked), rub_per_mchar=YANDEX_TTS_RUB_PER_MCHAR
         )
         if voice in YANDEX_TTS_VOICES:
             ya_voice = voice
@@ -536,6 +599,9 @@ class TTSService:
         ya_role = role if role in allowed_roles else None
         if role and ya_role is None:
             logger.info("tts_yandex_role_unsupported", voice=ya_voice, requested=role)
+        # Per-request hints win over the deployment-wide default.
+        ya_speed = speed if speed is not None else settings.YANDEX_TTS_SPEED
+        ya_pitch = pitch or None  # 0 means "no shift" — same as unset
         tmp_paths: list[str] = []
         try:
             for chunk in chunks:
@@ -546,8 +612,10 @@ class TTSService:
                     chunk,
                     "yandex",
                     f"{ya_voice}:{ya_role or '-'}",
-                    "speechkit-v3",
-                    settings.YANDEX_TTS_SPEED,
+                    # Pitch only enters the key when set, so the default keeps
+                    # reusing entries cached before pitch was a parameter.
+                    "speechkit-v3" if ya_pitch is None else f"speechkit-v3:p{ya_pitch}",
+                    ya_speed,
                 )
                 cache_path = _chunk_cache_path(cache_key) if TTS_CHUNK_CACHE_ENABLED else None
                 cached = _read_chunk_cache(cache_path) if cache_path else None
@@ -556,7 +624,9 @@ class TTSService:
                     with open(tmp.name, "wb") as f:
                         f.write(cached)
                 else:
-                    audio = self._yandex_speech_request_v3(chunk, ya_voice, ya_role)
+                    audio = self._yandex_speech_request_v3(
+                        chunk, ya_voice, ya_role, ya_speed, ya_pitch
+                    )
                     with open(tmp.name, "wb") as f:
                         f.write(audio)
                     if cache_path:
@@ -568,7 +638,14 @@ class TTSService:
                     os.unlink(p)
         return output_path
 
-    def _yandex_speech_request_v3(self, chunk: str, ya_voice: str, ya_role: str | None) -> bytes:
+    def _yandex_speech_request_v3(
+        self,
+        chunk: str,
+        ya_voice: str,
+        ya_role: str | None,
+        ya_speed: float | None = None,
+        ya_pitch: int | None = None,
+    ) -> bytes:
         """POST one chunk to SpeechKit v3, return WAV bytes at 48 kHz.
 
         v3's response is server-streamed: one JSON object per line, each
@@ -582,11 +659,15 @@ class TTSService:
             "Authorization": f"Api-Key {settings.YANDEX_API_KEY}",
             "Content-Type": "application/json",
         }
+        # Each hint is its own object: the v3 Hints message is a oneof, so
+        # packing several into one dict silently drops all but the last.
         hints: list[dict[str, str | float]] = [{"voice": ya_voice}]
         if ya_role:
             hints.append({"role": ya_role})
-        if settings.YANDEX_TTS_SPEED is not None:
-            hints.append({"speed": settings.YANDEX_TTS_SPEED})
+        if ya_speed is not None:
+            hints.append({"speed": ya_speed})
+        if ya_pitch:
+            hints.append({"pitchShift": ya_pitch})
         body = {
             "text": chunk,
             "hints": hints,

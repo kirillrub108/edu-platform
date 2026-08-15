@@ -436,6 +436,10 @@ async def generate_video(
     try:
         task = generate_video_lesson.apply_async(
             args=[str(lesson.id), pptx_path, data.voice, is_regen],
+            # Passed by name: both are optional SpeechKit hints, and keeping
+            # them out of the positional list leaves the existing args order
+            # (and any in-flight message that lacks them) readable as-is.
+            kwargs={"speed": data.speed, "pitch": data.pitch},
             queue="video",
             priority=priority,
         )

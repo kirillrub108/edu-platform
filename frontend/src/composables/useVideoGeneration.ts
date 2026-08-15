@@ -40,6 +40,11 @@ export function useVideoGeneration(
   ]
 
   const selectedVoice = ref<string>('alena:neutral')
+  // Подсказки SpeechKit v3. Значения по умолчанию (1x / 0) отправляются как
+  // null — бэкенд тогда вообще не кладёт hint в запрос, и ключи кэша остаются
+  // теми же, что до появления этих ручек.
+  const selectedSpeed = ref<number>(1)
+  const selectedPitch = ref<number>(0)
   const taskId = ref<string | null>(null)
   const taskStatus = ref('')
   const taskMeta = ref<{ step: string; done: number; total: number } | null>(null)
@@ -224,7 +229,11 @@ export function useVideoGeneration(
     try {
       const res = await apiFetch<any>(`/lessons/${lessonId.value}/generate-video`, {
         method: 'POST',
-        body: { voice: selectedVoice.value },
+        body: {
+          voice: selectedVoice.value,
+          speed: selectedSpeed.value === 1 ? null : selectedSpeed.value,
+          pitch: selectedPitch.value === 0 ? null : selectedPitch.value,
+        },
       })
       taskId.value = res.task_id
       taskStatus.value = 'PENDING'
@@ -356,7 +365,7 @@ export function useVideoGeneration(
   })
 
   return {
-    voices, selectedVoice,
+    voices, selectedVoice, selectedSpeed, selectedPitch,
     generating, cancellingVideo, taskError,
     creditsSpent, creditsReserved, billedVia, needTopup, cancelled,
     generateVideo, cancelVideo, stopPolling,

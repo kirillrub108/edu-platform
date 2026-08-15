@@ -18,9 +18,11 @@ import pytest
 
 from app.constants import POLZA_TTS_MAX_RETRIES as _POLZA_TTS_MAX_RETRIES
 from app.constants import SILERO_MAX_CHARS as _SILERO_MAX_CHARS
+from app.constants import YANDEX_TTS_MAX_PAUSE_MS as _YANDEX_TTS_MAX_PAUSE_MS
 from app.services import tts_service as tts_mod
 from app.services.tts_service import (
     _split_for_tts,
+    _ssml_to_speechkit,
     _strip_ssml_tags,
     strip_tts_artifacts,
     tts_service,
@@ -48,11 +50,13 @@ def _isolate_tts_chunk_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         ("<p>Hello world</p>", "Hello world", "<p>"),
         ("text<br/>more", "text more", "<br"),
         ("<speak>x</speak>", "x", "<speak>"),
-        # All other SSML tags (e.g. <break/>, <prosody>) are stripped
-        # without inserting a space — this is intentional, the surrounding
-        # text usually already has the right spacing.
-        ("a<break time='500ms'/>b", "ab", "<break"),
-        ("normal<prosody rate='slow'>term</prosody>end", "normaltermend", "<prosody"),
+        # Every tag becomes a space, inline ones included: the LLM emits
+        # "...Ома.<break time='500ms'/>Это..." with no spaces around the tag,
+        # so stripping to "" would weld the two sentences into one word.
+        ("a<break time='500ms'/>b", "a b", "<break"),
+        ("normal<prosody rate='slow'>term</prosody>end", "normal term end", "<prosody"),
+        # ...but a tag hugging punctuation must not leave " ," behind.
+        ("word<prosody rate='slow'>x</prosody>, next", "word x, next", "<prosody"),
     ],
 )
 def test_strip_ssml_tags_keeps_text(raw: str, expected_substr: str, must_not_contain: str) -> None:
@@ -63,6 +67,43 @@ def test_strip_ssml_tags_keeps_text(raw: str, expected_substr: str, must_not_con
 
 def test_strip_ssml_tags_collapses_multiple_spaces() -> None:
     assert _strip_ssml_tags("a<br/><br/>b") == "a b"
+
+
+# ── _ssml_to_speechkit: W3C SSML → SpeechKit TTS markup ─────────────────────
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        # Pauses carry over instead of being discarded.
+        ('a.<break time="500ms"/>b.', "a. sil<[500]> b."),
+        ('<break time="0.8s"/>b.', "sil<[800]> b."),
+        ('<break/>b.', "<[medium]> b."),
+        # Paragraph break becomes a long pause.
+        ("<p>a.</p><p>b.</p>", "a. <[large]> b."),
+        # Emphasis becomes an accent; empty emphasis disappears.
+        ('<prosody rate="slow">term</prosody> x.', "**term** x."),
+        ('<prosody rate="slow"></prosody>x.', "x."),
+        # Markup already in SpeechKit syntax survives the tag sweep.
+        ("a <[medium]> and sil<[300]> b.", "a <[medium]> and sil<[300]> b."),
+        # Stress marks are not tags and must be left alone.
+        ("зам+ок", "зам+ок"),
+    ],
+)
+def test_ssml_to_speechkit(raw: str, expected: str) -> None:
+    assert _ssml_to_speechkit(raw) == expected
+
+
+def test_ssml_to_speechkit_caps_runaway_pause() -> None:
+    """An LLM emitting time="60s" must not stall the slide for a minute."""
+    out = _ssml_to_speechkit('a.<break time="60s"/>b.')
+    assert f"sil<[{_YANDEX_TTS_MAX_PAUSE_MS}]>" in out
+
+
+def test_ssml_to_speechkit_trims_trailing_pause() -> None:
+    """A pause at the end of a chunk is dead air before the next slide."""
+    assert _ssml_to_speechkit("<p>Конец.</p>") == "Конец."
+    assert _ssml_to_speechkit('Конец.<break time="800ms"/>') == "Конец."
 
 
 # ── strip_tts_artifacts: CJK leakage ────────────────────────────────────────

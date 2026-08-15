@@ -4,6 +4,8 @@ import { ArrowDown, Video, Square, AlertCircle } from 'lucide-vue-next'
 const props = defineProps<{
   voices: Array<{ value: string; label: string }>
   selectedVoice: string
+  selectedSpeed: number
+  selectedPitch: number
   generating: boolean
   cancellingVideo: boolean
   lessonStatus: string
@@ -29,6 +31,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   'update:selectedVoice': [voice: string]
+  'update:selectedSpeed': [speed: number]
+  'update:selectedPitch': [pitch: number]
   generate: []
   cancel: []
   publish: []
@@ -37,6 +41,18 @@ const emit = defineEmits<{
 }>()
 
 const isProcessing = computed(() => props.generating || props.lessonStatus === 'processing')
+
+// Подсказки SpeechKit: 1x / 0 — значения по умолчанию, при них hint не шлётся.
+const isDefaultTuning = computed(() => props.selectedSpeed === 1 && props.selectedPitch === 0)
+const pitchLabel = computed(() => {
+  if (props.selectedPitch === 0) return 'обычная'
+  return `${props.selectedPitch > 0 ? 'выше' : 'ниже'} на ${Math.abs(props.selectedPitch)} Гц`
+})
+
+function resetTuning() {
+  emit('update:selectedSpeed', 1)
+  emit('update:selectedPitch', 0)
+}
 
 const videoRetried = ref(false)
 watch(() => props.videoUrl, () => { videoRetried.value = false })
@@ -106,6 +122,59 @@ const hint = computed(() => {
             <option v-for="v in voices" :key="v.value" :value="v.value">{{ v.label }}</option>
           </select>
           <ArrowDown class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+        </div>
+      </div>
+
+      <div class="mb-5 rounded-xl border border-gray-200 bg-gray-50/70 p-4">
+        <div class="flex items-center justify-between mb-3">
+          <span class="text-sm font-medium text-gray-700">Настройка речи</span>
+          <button
+            v-if="!isDefaultTuning"
+            type="button"
+            :disabled="isProcessing"
+            class="text-xs text-violet-600 hover:text-violet-700 disabled:opacity-50 transition"
+            @click="resetTuning"
+          >
+            Сбросить
+          </button>
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <div class="flex items-baseline justify-between mb-1.5">
+              <label class="text-sm text-gray-600">Скорость</label>
+              <span class="text-sm font-semibold tabular-nums text-gray-900">
+                {{ selectedSpeed.toFixed(1) }}x
+              </span>
+            </div>
+            <input
+              type="range"
+              min="0.5"
+              max="2"
+              step="0.1"
+              :value="selectedSpeed"
+              :disabled="isProcessing"
+              class="w-full accent-violet-600 disabled:opacity-50"
+              @input="emit('update:selectedSpeed', Number(($event.target as HTMLInputElement).value))"
+            >
+          </div>
+
+          <div>
+            <div class="flex items-baseline justify-between mb-1.5">
+              <label class="text-sm text-gray-600">Высота голоса</label>
+              <span class="text-sm font-semibold tabular-nums text-gray-900">{{ pitchLabel }}</span>
+            </div>
+            <input
+              type="range"
+              min="-500"
+              max="500"
+              step="50"
+              :value="selectedPitch"
+              :disabled="isProcessing"
+              class="w-full accent-violet-600 disabled:opacity-50"
+              @input="emit('update:selectedPitch', Number(($event.target as HTMLInputElement).value))"
+            >
+          </div>
         </div>
       </div>
 

@@ -2,6 +2,8 @@
 defineProps<{
   voices: Array<{ value: string; label: string }>
   selectedVoice: string
+  selectedSpeed: number
+  selectedPitch: number
   generating: boolean
   cancellingVideo: boolean
   lessonStatus: string
@@ -27,6 +29,8 @@ defineProps<{
 
 const emit = defineEmits<{
   'update:selectedVoice': [voice: string]
+  'update:selectedSpeed': [speed: number]
+  'update:selectedPitch': [pitch: number]
   generate: []
   cancel: []
   publish: []
@@ -39,6 +43,8 @@ const emit = defineEmits<{
   <LessonVideoGenerationPanel
     :voices="voices"
     :selected-voice="selectedVoice"
+    :selected-speed="selectedSpeed"
+    :selected-pitch="selectedPitch"
     :generating="generating"
     :cancelling-video="cancellingVideo"
     :lesson-status="lessonStatus"
@@ -61,6 +67,8 @@ const emit = defineEmits<{
     :latest-published="latestPublished"
     :publishing="publishing"
     @update:selected-voice="emit('update:selectedVoice', $event)"
+    @update:selected-speed="emit('update:selectedSpeed', $event)"
+    @update:selected-pitch="emit('update:selectedPitch', $event)"
     @generate="emit('generate')"
     @cancel="emit('cancel')"
     @publish="emit('publish')"

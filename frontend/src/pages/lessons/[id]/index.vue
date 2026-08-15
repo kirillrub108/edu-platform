@@ -92,7 +92,7 @@ const {
 
 const {
   generateVideo: _generateVideo, cancelVideo, generating, taskError,
-  selectedVoice, voices, canGenerateVideo, showPipeline,
+  selectedVoice, selectedSpeed, selectedPitch, voices, canGenerateVideo, showPipeline,
   pipelineStages, currentStageIdx, cancellingVideo, stopPolling: stopVideoPolling,
   creditsSpent, creditsReserved, billedVia, needTopup, cancelled,
 } = useVideoGeneration(lessonId, lesson, mode, script, flushScript, isAuto, showSlideEditor)
@@ -603,6 +603,8 @@ watch(lessonId, (newId, oldId) => {
             <LessonVideoSection
               v-if="isManual || isAuto"
               v-model:selected-voice="selectedVoice"
+              v-model:selected-speed="selectedSpeed"
+              v-model:selected-pitch="selectedPitch"
               :voices="voices"
               :generating="generating"
               :cancelling-video="cancellingVideo"
