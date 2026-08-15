@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertCircle, Eye, MessageSquare, X } from 'lucide-vue-next'
+import { AlertCircle, ChevronLeft, ChevronRight, Eye, MessageSquare, X } from 'lucide-vue-next'
 import type { Comment } from '~/stores/comments'
 
 definePageMeta({ middleware: ['auth', 'teacher'], layout: 'workspace' })
@@ -304,6 +304,24 @@ watch(workflowSteps, (steps) => {
   }
 })
 
+// Sticky footer Prev/Next — pure navigation over the already-free step list
+// (LessonWorkflowNav lets teachers jump to any step directly), just one step
+// at a time with a labelled, boundary-disabled pair of buttons.
+const activeStepPos = computed(() => {
+  const idx = workflowSteps.value.findIndex((s) => s.key === activeStep.value)
+  return idx >= 0 ? idx + 1 : 1
+})
+const prevWorkflowStep = computed(() => {
+  const idx = workflowSteps.value.findIndex((s) => s.key === activeStep.value)
+  return idx > 0 ? workflowSteps.value[idx - 1] : null
+})
+const nextWorkflowStep = computed(() => {
+  const idx = workflowSteps.value.findIndex((s) => s.key === activeStep.value)
+  return idx >= 0 && idx < workflowSteps.value.length - 1 ? workflowSteps.value[idx + 1] : null
+})
+const goPrevStep = () => { if (prevWorkflowStep.value) activeStep.value = prevWorkflowStep.value.key as StepKey }
+const goNextStep = () => { if (nextWorkflowStep.value) activeStep.value = nextWorkflowStep.value.key as StepKey }
+
 // Surface long-running work: jump to its step when it starts.
 watch(analyzing, (v) => { if (v) activeStep.value = 'presentation' })
 watch(generating, (v) => { if (v) activeStep.value = 'generate' })
@@ -508,7 +526,7 @@ watch(lessonId, (newId, oldId) => {
           id="tabpanel-lesson"
           role="tabpanel"
           aria-labelledby="tab-lesson"
-          class="space-y-6"
+          class="space-y-6 pb-28"
         >
           <!-- Mobile step chips (desktop uses the right-column nav) -->
           <LessonWorkflowNav
@@ -668,6 +686,59 @@ watch(lessonId, (newId, oldId) => {
               </div>
             </section>
           </div>
+
+          <!-- Fixed step Prev/Next — pinned to the same viewport spot at all times
+               (not sticky-in-flow), so it never shifts between short and long
+               steps. Glass panel overlays whatever content scrolls beneath it. -->
+          <div
+            v-if="workflowSteps.length > 1"
+            class="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4 pointer-events-none lg:pl-[280px]"
+          >
+            <div class="pointer-events-auto w-full max-w-2xl relative overflow-hidden bg-white/20 backdrop-blur-xl ring-1 ring-white/40 rounded-2xl border border-violet-200/40 shadow-soft-hover px-5 py-4 sm:px-6 sm:py-5 flex items-center justify-between gap-4">
+              <div class="absolute inset-x-0 top-0 h-1 bg-brand-gradient"></div>
+
+              <UiButton
+                variant="secondary"
+                size="md"
+                :disabled="!prevWorkflowStep"
+                @click="goPrevStep"
+              >
+                <template #icon><ChevronLeft class="w-5 h-5" /></template>
+                {{ prevWorkflowStep ? prevWorkflowStep.title : 'Назад' }}
+              </UiButton>
+
+              <div class="flex flex-col items-center gap-2 shrink-0">
+                <div class="flex items-center gap-1.5">
+                  <span
+                    v-for="(s, idx) in workflowSteps"
+                    :key="s.key"
+                    :class="[
+                      'w-2.5 h-2.5 rounded-full transition-colors duration-300',
+                      s.key === activeStep
+                        ? 'bg-violet-600'
+                        : idx < activeStepPos - 1
+                          ? 'bg-violet-300'
+                          : 'bg-gray-200',
+                    ]"
+                  />
+                </div>
+                <div class="text-xs font-medium text-gray-400 hidden sm:block whitespace-nowrap">
+                  Шаг {{ activeStepPos }} из {{ workflowSteps.length }} ·
+                  <span class="text-gray-700 font-semibold">{{ STEP_TITLES[activeStep] }}</span>
+                </div>
+              </div>
+
+              <UiButton
+                variant="primary"
+                size="md"
+                :disabled="!nextWorkflowStep"
+                @click="goNextStep"
+              >
+                <span>{{ nextWorkflowStep ? nextWorkflowStep.title : 'Готово' }}</span>
+                <ChevronRight class="w-5 h-5" />
+              </UiButton>
+            </div>
+          </div>
         </div>
 
         <!-- Тест tab panel — v-show preserves QuizEditor's polling and save timers -->
@@ -793,7 +864,8 @@ watch(lessonId, (newId, oldId) => {
       <!-- Mobile comments trigger (FAB) with count badge -->
       <button
         type="button"
-        class="lg:hidden fixed bottom-5 right-5 z-30 inline-flex items-center gap-2 rounded-full bg-violet-600 text-white pl-4 pr-5 py-3 shadow-lg hover:bg-violet-700 transition"
+        class="lg:hidden fixed right-5 z-30 inline-flex items-center gap-2 rounded-full bg-violet-600 text-white pl-4 pr-5 py-3 shadow-lg hover:bg-violet-700 transition"
+        :class="activeTab === 'lesson' && workflowSteps.length > 1 ? 'bottom-20' : 'bottom-5'"
         @click="commentsOpen = true"
       >
         <MessageSquare class="w-5 h-5" />
