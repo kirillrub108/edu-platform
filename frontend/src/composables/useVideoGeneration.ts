@@ -27,6 +27,7 @@ export function useVideoGeneration(
   // Список и допустимые амплуа сверены с YANDEX_TTS_ROLES_BY_VOICE
   // (backend/app/constants.py) — не расширять без проверки на живом API.
   const voices: Array<{ value: string; label: string }> = [
+    { value: 'filipp',          label: 'Филипп' },
     { value: 'alena:neutral',   label: 'Алёна — нейтральный' },
     { value: 'alena:good',      label: 'Алёна — радостный' },
     { value: 'anton:neutral',   label: 'Антон — нейтральный' },
@@ -35,11 +36,9 @@ export function useVideoGeneration(
     { value: 'zahar:good',      label: 'Захар — радостный' },
     { value: 'marina:neutral',  label: 'Марина — нейтральный' },
     { value: 'marina:friendly', label: 'Марина — дружелюбный' },
-    { value: 'omazh:neutral',   label: 'Омаж — нейтральный' },
-    { value: 'filipp',          label: 'Филипп' },
   ]
 
-  const selectedVoice = ref<string>('alena:neutral')
+  const selectedVoice = ref<string>('filipp')
   // Подсказки SpeechKit v3. Значения по умолчанию (1x / 0) отправляются как
   // null — бэкенд тогда вообще не кладёт hint в запрос, и ключи кэша остаются
   // теми же, что до появления этих ручек.

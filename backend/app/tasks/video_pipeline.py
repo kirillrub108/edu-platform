@@ -663,6 +663,8 @@ def generate_video_lesson(
                 video_url=video_url,
                 voice=effective_voice,
                 creation_mode=mode.value,
+                speed=speed,
+                pitch=pitch,
                 is_published=False,
             )
             session.add(new_video)

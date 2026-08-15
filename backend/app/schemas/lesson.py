@@ -47,6 +47,8 @@ class LessonVideoOut(BaseModel):
     video_url: str
     voice: str
     creation_mode: str
+    speed: float | None = None
+    pitch: int | None = None
     is_published: bool
     created_at: datetime
 
