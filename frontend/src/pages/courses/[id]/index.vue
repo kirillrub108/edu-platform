@@ -178,7 +178,9 @@ const joinLinkUrl = computed(() =>
   import.meta.client ? `${window.location.origin}/join?courseId=${course.value?.id}` : ''
 )
 const joinCodeUrl = computed(() =>
-  import.meta.client ? `${window.location.origin}/join?code=${course.value?.access_code}` : ''
+  import.meta.client && course.value?.access_code
+    ? `${window.location.origin}/join?code=${course.value.access_code}`
+    : ''
 )
 
 const copyCode = async (text: string) => {
@@ -381,7 +383,7 @@ onMounted(async () => {
     {{ pageError }}
   </div>
 
-  <div v-else-if="course" class="max-w-3xl">
+  <div v-else-if="course" class="max-w-5xl">
 
     <!-- Header -->
     <div class="flex items-start justify-between mb-6">
@@ -441,10 +443,10 @@ onMounted(async () => {
       </div>
 
       <div class="flex flex-col items-end gap-2">
-        <div class="flex gap-2">
+        <div class="flex flex-nowrap justify-end gap-2 flex-shrink-0">
           <NuxtLink
             :to="previewCourseUrl"
-            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center inline-flex items-center gap-1.5"
+            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center inline-flex items-center gap-1.5 whitespace-nowrap flex-shrink-0"
             title="Посмотреть курс глазами студента"
           >
             <Eye class="w-4 h-4" />
@@ -452,7 +454,7 @@ onMounted(async () => {
           </NuxtLink>
           <NuxtLink
             :to="`/courses/${route.params.id}/gradebook`"
-            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center"
+            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center whitespace-nowrap flex-shrink-0"
           >
             Журнал оценок
           </NuxtLink>
@@ -460,7 +462,7 @@ onMounted(async () => {
           <!-- Active course: publish toggle + archive -->
           <template v-if="!course.is_archived">
             <button
-              class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 min-w-36 text-center"
+              class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 min-w-36 text-center whitespace-nowrap flex-shrink-0"
               :disabled="publishing"
               @click="togglePublish"
             >
@@ -470,6 +472,7 @@ onMounted(async () => {
               v-if="!showArchiveConfirm"
               variant="danger"
               size="sm"
+              class="whitespace-nowrap flex-shrink-0"
               :disabled="archivingCourse || loading"
               @click="showArchiveConfirm = true"
             >
@@ -479,11 +482,11 @@ onMounted(async () => {
               <span class="text-xs text-amber-600 self-center max-w-44 text-right leading-tight">
                 В архив? Студенты потеряют доступ, через 30 дней курс будет удалён.
               </span>
-              <UiButton variant="danger" size="sm" :loading="archivingCourse" @click="archiveCourse">
+              <UiButton variant="danger" size="sm" class="whitespace-nowrap flex-shrink-0" :loading="archivingCourse" @click="archiveCourse">
                 В архив
               </UiButton>
               <button
-                class="text-sm text-gray-500 hover:text-gray-700"
+                class="text-sm text-gray-500 hover:text-gray-700 whitespace-nowrap flex-shrink-0"
                 @click="showArchiveConfirm = false"
               >
                 Отмена
@@ -496,6 +499,7 @@ onMounted(async () => {
             v-else
             variant="primary"
             size="sm"
+            class="whitespace-nowrap flex-shrink-0"
             :loading="restoringCourse"
             @click="restoreCourse"
           >
@@ -697,7 +701,7 @@ onMounted(async () => {
         {{ accessError }}
       </p>
 
-      <div class="space-y-5">
+      <div v-if="course.access_code" class="space-y-5">
         <div>
           <p class="text-sm text-gray-600 mb-2">Код доступа — продиктуйте или отправьте ученикам:</p>
           <div class="flex gap-2 items-center">
@@ -738,6 +742,17 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+      <p v-else class="text-sm text-gray-500">
+        Код доступа не найден. Нажмите «Обновить код», чтобы создать новый.
+      </p>
+      <button
+        v-if="!course.access_code"
+        class="mt-2 text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 transition disabled:opacity-50"
+        :disabled="accessLoading"
+        @click="regenerateCode"
+      >
+        {{ accessLoading ? '…' : 'Обновить код' }}
+      </button>
     </section>
 
   </div>

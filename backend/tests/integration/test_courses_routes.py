@@ -47,6 +47,8 @@ async def test_teacher_can_create_course(
     body = resp.json()
     assert body["title"] == "Python 101"
     assert body["is_published"] is False
+    assert body["access_code"] is not None
+    assert len(body["access_code"]) == 6
 
 
 async def test_student_cannot_create_course(

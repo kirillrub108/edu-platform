@@ -497,11 +497,17 @@ class TTSService:
         """Send text to Yandex SpeechKit API v3, chunking if long.
 
         v3 is priced per 250-char request unit (~half the cost of v1's
-        per-character billing) and returns full-quality audio by request
-        (v1's default is a muffled, telephony-grade encode). The request body
-        caps at 250 chars per unit too, so chunks stay well under that.
-        Response is streamed as newline-delimited JSON objects, each holding
-        one base64 audio fragment — not a single JSON document.
+        per-character billing). The request body caps at 250 chars per unit
+        too, so chunks stay well under that. Response is streamed as
+        newline-delimited JSON objects, each holding one base64 audio
+        fragment — not a single JSON document.
+
+        outputAudioSpec.containerAudio (WAV) comes back at 22050 Hz and takes
+        no sample-rate argument — but that is the voices' native rate, not a
+        downgrade: measured 2026-08-16, every voice in YANDEX_TTS_VOICES rolls
+        off at ~11 kHz. Switching to rawAudio at 48 kHz only makes SpeechKit
+        resample server-side — 2.2x the bytes for zero extra bandwidth. Keep
+        the container. Rationale and measurements in docs/DECISIONS.md.
         """
         if not settings.YANDEX_API_KEY:
             raise RuntimeError(

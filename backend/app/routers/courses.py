@@ -1,4 +1,3 @@
-import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
@@ -9,7 +8,6 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.constants import ACCESS_CODE_ALPHABET, ACCESS_CODE_LENGTH, ACCESS_CODE_MAX_RETRIES
 from app.database import get_db
 from app.dependencies import get_current_user, require_teacher
 from app.models.course import AccessMode, Course
@@ -28,7 +26,7 @@ from app.schemas.course import (
     ModuleOut,
     ModuleUpdate,
 )
-from app.services import visibility_service
+from app.services import course_service, visibility_service
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/courses", tags=["courses"])
@@ -56,15 +54,6 @@ def _course_detail_out(course: Course, user_id: str) -> CourseDetail:
     elif out.cover_url:
         out.cover_image_url = out.cover_url  # already re-signed above
     return out
-
-
-async def generate_unique_access_code(db: AsyncSession) -> str:
-    for _ in range(ACCESS_CODE_MAX_RETRIES):
-        code = "".join(secrets.choice(ACCESS_CODE_ALPHABET) for _ in range(ACCESS_CODE_LENGTH))
-        taken = await db.scalar(select(Course.id).where(Course.access_code == code).limit(1))
-        if not taken:
-            return code
-    raise HTTPException(status_code=500, detail="Failed to generate unique access code")
 
 
 async def _get_owned_course(course_id: UUID, owner: User, db: AsyncSession) -> Course:
@@ -156,7 +145,7 @@ async def create_course(
         title=data.title, description=data.description, cover_url=data.cover_url, owner_id=user.id
     )
     db.add(course)
-    await db.commit()
+    await course_service.assign_unique_access_code(db, course)
     await db.refresh(course, attribute_names=["owner"])
     return _course_out(course, str(user.id))
 
@@ -375,13 +364,7 @@ async def generate_access_code(
     db: AsyncSession = Depends(get_db),
 ):
     course = await _get_owned_course(course_id, user, db)
-    course.access_code = await generate_unique_access_code(db)
-    course.access_mode = AccessMode.code
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=500, detail="Failed to generate unique access code")
+    await course_service.assign_unique_access_code(db, course, access_mode=AccessMode.code)
     await db.refresh(course, attribute_names=["owner"])
     return _course_out(course, str(user.id))
 
