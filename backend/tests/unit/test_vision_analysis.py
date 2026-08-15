@@ -139,6 +139,11 @@ async def test_call_ollama_payload_has_no_ollama_only_fields(
 
     monkeypatch.setattr(vis_settings, "VISION_REASONING_DISABLED", False)
     monkeypatch.setattr(vis_settings, "VISION_PROVIDER_ORDER", "")
+    # Pinned like its two siblings above: left unpinned this reads the developer's
+    # .env, so a machine with VISION_REASONING_EFFORT=none fails a test that is
+    # supposed to describe the clean baseline. (.env.example omits the variable,
+    # which is why CI never saw it.)
+    monkeypatch.setattr(vis_settings, "VISION_REASONING_EFFORT", "")
     svc = VisionAnalysisService()
     captured: dict[str, Any] = {}
 
@@ -197,6 +202,44 @@ async def test_call_ollama_reasoning_flag_adds_extra_body(
         slide_image_path=str(slide_png), slide_number=1, total_slides=1, course_title="C"
     )
     assert "extra_body" not in captured
+
+
+async def test_call_ollama_reasoning_effort_is_a_top_level_field(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path
+) -> None:
+    """VISION_REASONING_EFFORT is a first-class OpenAI argument, so it must ride
+    as a top-level kwarg — burying it in extra_body would silently stop
+    suppressing hidden reasoning on Yandex-hosted models. Empty = not sent."""
+    from app.services.vision_analysis import settings as vis_settings
+
+    monkeypatch.setattr(vis_settings, "VISION_REASONING_DISABLED", False)
+    monkeypatch.setattr(vis_settings, "VISION_PROVIDER_ORDER", "")
+    svc = VisionAnalysisService()
+    captured: dict[str, Any] = {}
+
+    async def _create(**kwargs: Any) -> SimpleNamespace:
+        captured.clear()
+        captured.update(kwargs)
+        return _llm_response("narration")
+
+    monkeypatch.setattr(
+        svc,
+        "_ollama_client",
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create))),
+    )
+
+    monkeypatch.setattr(vis_settings, "VISION_REASONING_EFFORT", "none")
+    await svc.analyze_slide(
+        slide_image_path=str(slide_png), slide_number=1, total_slides=1, course_title="C"
+    )
+    assert captured["reasoning_effort"] == "none"
+    assert "reasoning_effort" not in captured.get("extra_body", {})
+
+    monkeypatch.setattr(vis_settings, "VISION_REASONING_EFFORT", "")
+    await svc.analyze_slide(
+        slide_image_path=str(slide_png), slide_number=1, total_slides=1, course_title="C"
+    )
+    assert "reasoning_effort" not in captured
 
 
 async def test_call_ollama_pins_provider_when_configured(
