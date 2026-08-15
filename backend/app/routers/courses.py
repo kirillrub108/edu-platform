@@ -152,7 +152,9 @@ async def create_course(
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
-    course = Course(title=data.title, description=data.description, cover_url=data.cover_url, owner_id=user.id)
+    course = Course(
+        title=data.title, description=data.description, cover_url=data.cover_url, owner_id=user.id
+    )
     db.add(course)
     await db.commit()
     await db.refresh(course, attribute_names=["owner"])
@@ -180,9 +182,7 @@ async def get_course(
     # Enrolled-student count drives the "unpublish keeps enrolled access" warning
     # on the frontend; computed here (no column) the same way as lessons_count.
     course.enrollment_count = (
-        await db.scalar(
-            select(func.count(Enrollment.id)).where(Enrollment.course_id == course.id)
-        )
+        await db.scalar(select(func.count(Enrollment.id)).where(Enrollment.course_id == course.id))
         or 0
     )
     return _course_detail_out(course, str(user.id))
@@ -409,7 +409,9 @@ async def upload_course_cover(
 ):
     ext = Path(file.filename or "").suffix.lower()
     if ext not in _COVER_EXTS:
-        raise HTTPException(status_code=400, detail="Допустимые форматы: .jpg .jpeg .png .webp .gif")  # noqa: E501
+        raise HTTPException(
+            status_code=400, detail="Допустимые форматы: .jpg .jpeg .png .webp .gif"
+        )  # noqa: E501
     content = await file.read()
     if len(content) > _MAX_COVER_BYTES:
         raise HTTPException(status_code=400, detail="Файл слишком большой (максимум 5 МБ)")

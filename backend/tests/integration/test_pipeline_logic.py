@@ -36,6 +36,7 @@ pytestmark = pytest.mark.integration
 
 # ── Sync session helper (separate from db_session async fixture) ────────────
 
+
 @pytest.fixture()
 def sync_session(_alembic_upgraded: None) -> Iterator[Session]:
     """psycopg2 session that mirrors what the Celery worker uses.
@@ -103,6 +104,7 @@ def _seed_lesson(
 
 # ── Common mock for storage on disk (PPTX file must exist for the worker) ──
 
+
 @pytest.fixture()
 def _seed_pptx_on_disk(tmp_path_factory: pytest.TempPathFactory, sample_pptx_bytes: bytes) -> str:
     """Put a real pptx at STORAGE_PATH/pptx/x.pptx so storage_service.get_full_path resolves."""
@@ -114,6 +116,7 @@ def _seed_pptx_on_disk(tmp_path_factory: pytest.TempPathFactory, sample_pptx_byt
 
 
 # ── Vision pipeline ─────────────────────────────────────────────────────────
+
 
 def test_analyze_presentation_task_happy_path(
     sync_session: Session,
@@ -166,6 +169,7 @@ def test_analyze_presentation_task_handles_vision_error(
 
 # ── Video pipeline ──────────────────────────────────────────────────────────
 
+
 def test_generate_video_lesson_happy_path(
     sync_session: Session,
     monkeypatch: pytest.MonkeyPatch,
@@ -179,9 +183,7 @@ def test_generate_video_lesson_happy_path(
 
     lesson = _seed_lesson(sync_session, pptx_path=_seed_pptx_on_disk)
 
-    result = generate_video_lesson.apply(
-        args=[str(lesson.id), lesson.pptx_path, "nova"]
-    ).get()
+    result = generate_video_lesson.apply(args=[str(lesson.id), lesson.pptx_path, "nova"]).get()
     assert result["status"] == "ok"
     assert result["video_url"]
     assert result["video_id"]
@@ -248,9 +250,7 @@ def test_generate_video_lesson_uses_llm_fallback_on_llm_error(
     mock_llm_split["raise"] = RuntimeError("LLM down")
     lesson = _seed_lesson(sync_session, pptx_path=_seed_pptx_on_disk)
 
-    result = generate_video_lesson.apply(
-        args=[str(lesson.id), lesson.pptx_path, "nova"]
-    ).get()
+    result = generate_video_lesson.apply(args=[str(lesson.id), lesson.pptx_path, "nova"]).get()
     assert result["status"] == "ok"
 
     sync_session.expire_all()
@@ -288,9 +288,7 @@ def _billing_state(sync_session: Session, user_id: Any) -> dict[str, Any]:
     from app.models.credit import CreditAccount, CreditOperation, CreditTransaction
 
     sync_session.expire_all()
-    account = (
-        sync_session.query(CreditAccount).filter(CreditAccount.owner_id == user_id).one()
-    )
+    account = sync_session.query(CreditAccount).filter(CreditAccount.owner_id == user_id).one()
     txs = (
         sync_session.query(CreditTransaction)
         .filter(CreditTransaction.account_id == account.id)
@@ -303,8 +301,7 @@ def _billing_state(sync_session: Session, user_id: Any) -> dict[str, Any]:
         "charges": [
             t
             for t in txs
-            if t.operation
-            in (CreditOperation.LESSON_GENERATE, CreditOperation.LESSON_REGEN)
+            if t.operation in (CreditOperation.LESSON_GENERATE, CreditOperation.LESSON_REGEN)
         ],
     }
 
@@ -377,9 +374,7 @@ def test_video_success_charges_exactly_estimate(
     lesson.credit_estimate = 9
     sync_session.commit()
 
-    result = generate_video_lesson.apply(
-        args=[str(lesson.id), lesson.pptx_path, "nova"]
-    ).get()
+    result = generate_video_lesson.apply(args=[str(lesson.id), lesson.pptx_path, "nova"]).get()
     assert result["status"] == "ok"
 
     state = _billing_state(sync_session, user_id)
@@ -418,9 +413,7 @@ def test_video_cooperative_cancel_charges_partially(
     lesson.cancel_requested = True
     sync_session.commit()
 
-    result = generate_video_lesson.apply(
-        args=[str(lesson.id), lesson.pptx_path, "nova"]
-    ).get()
+    result = generate_video_lesson.apply(args=[str(lesson.id), lesson.pptx_path, "nova"]).get()
     assert result["status"] == "cancelled"
     assert result["credits_spent"] == VIDEO_TEXT_BASE_CREDITS  # no slides voiced yet
 

@@ -67,9 +67,7 @@ async def consume(redis: Redis, token: str) -> str:
 
     # SET NX is atomic: the first caller wins and marks the token spent; any
     # concurrent or later replay of the same token gets a falsey result.
-    fresh = await redis.set(
-        _used_key(token), user_id, nx=True, ex=EMAIL_VERIFICATION_TTL_SECONDS
-    )
+    fresh = await redis.set(_used_key(token), user_id, nx=True, ex=EMAIL_VERIFICATION_TTL_SECONDS)
     if not fresh:
         raise TokenError("used")
     return user_id
@@ -80,6 +78,4 @@ async def under_cooldown(redis: Redis, user_id: str) -> bool:
 
 
 async def start_cooldown(redis: Redis, user_id: str) -> None:
-    await redis.set(
-        _cooldown_key(user_id), "1", ex=EMAIL_VERIFY_RESEND_COOLDOWN_SECONDS
-    )
+    await redis.set(_cooldown_key(user_id), "1", ex=EMAIL_VERIFY_RESEND_COOLDOWN_SECONDS)

@@ -227,8 +227,8 @@ class Settings(BaseSettings):
     SLIDES_CACHE_MAX_SIZE: int = 256
 
     # Cookies
-    COOKIE_SECURE: bool = False      # set True in production (HTTPS only)
-    COOKIE_SAMESITE: str = "Lax"    # Lax works with same-origin dev proxy
+    COOKIE_SECURE: bool = False  # set True in production (HTTPS only)
+    COOKIE_SAMESITE: str = "Lax"  # Lax works with same-origin dev proxy
 
     # Sentry
     SENTRY_DSN: str = ""

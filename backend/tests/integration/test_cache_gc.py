@@ -6,6 +6,7 @@ dir) at a tmp path and monkeypatch the module-bound GC thresholds. LessonVideo
 tests use a psycopg2 `sync_session` mirroring the Celery worker, exactly like
 tests/integration/test_soft_delete.py (the task opens its own SyncSession).
 """
+
 from __future__ import annotations
 
 import os
@@ -33,6 +34,7 @@ def _days_ago_ts(days: float) -> float:
 
 # ── Cache-entry fixtures on disk ──────────────────────────────────────────────
 
+
 def _make_slides_entry(root: Path, key: str, *, age_days: float, size: int = 16) -> Path:
     """One slides_cache entry: a <key>/ dir holding a PNG, with the DIRECTORY
     mtime set to `age_days` ago (recency is the dir mtime the GC evicts by)."""
@@ -55,6 +57,7 @@ def _make_summary_entry(root: Path, key: str, *, age_days: float, size: int = 16
 
 
 # ── Cache GC: TTL + size cap + kill-switch ────────────────────────────────────
+
 
 def test_cache_ttl_evicts_stale_keeps_fresh(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -99,9 +102,7 @@ def test_cache_size_cap_evicts_least_recently_used_first(
     assert counts["slides_removed"] == 2
 
 
-def test_cache_gc_disabled_is_noop(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cache_gc_disabled_is_noop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.tasks import purge_pipeline
 
     monkeypatch.setattr("app.tasks.purge_pipeline.settings.STORAGE_PATH", str(tmp_path))
@@ -121,9 +122,7 @@ def test_cache_gc_disabled_is_noop(
     }
 
 
-def test_summaries_cache_ttl_evicts_stale(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_summaries_cache_ttl_evicts_stale(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.tasks import purge_pipeline
 
     monkeypatch.setattr("app.tasks.purge_pipeline.settings.STORAGE_PATH", str(tmp_path))
@@ -141,9 +140,7 @@ def test_summaries_cache_ttl_evicts_stale(
     assert counts["summaries_removed"] == 1
 
 
-def test_cache_gc_idempotent_on_empty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_cache_gc_idempotent_on_empty(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.tasks import purge_pipeline
 
     monkeypatch.setattr("app.tasks.purge_pipeline.settings.STORAGE_PATH", str(tmp_path))
@@ -155,6 +152,7 @@ def test_cache_gc_idempotent_on_empty(
 
 
 # ── Recency bump on cache HIT (both slide branches + summaries read) ───────────
+
 
 def test_slides_disk_hit_bumps_dir_mtime(tmp_path: Path) -> None:
     from app.services import video_service
@@ -172,9 +170,7 @@ def test_slides_disk_hit_bumps_dir_mtime(tmp_path: Path) -> None:
     os.utime(entry, (old, old))
 
     svc = video_service.VideoService()
-    result = svc.convert_pptx_to_images(
-        str(pptx), str(tmp_path / "out"), cache_dir=str(cache_dir)
-    )
+    result = svc.convert_pptx_to_images(str(pptx), str(tmp_path / "out"), cache_dir=str(cache_dir))
 
     assert [Path(p).name for p in result] == ["slide-1.png"]  # return value unchanged
     assert os.path.getmtime(entry) > old  # recency bumped
@@ -205,9 +201,7 @@ def test_slides_memory_hit_also_bumps_dir_mtime(tmp_path: Path) -> None:
     assert os.path.getmtime(entry) > old
 
 
-def test_summaries_read_bumps_file_mtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_summaries_read_bumps_file_mtime(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from app.services import vision_analysis
 
     monkeypatch.setattr(vision_analysis, "SUMMARY_CACHE_DIR", str(tmp_path))
@@ -226,6 +220,7 @@ def test_summaries_read_bumps_file_mtime(
 
 
 # ── LessonVideo GC (sync) ─────────────────────────────────────────────────────
+
 
 @pytest.fixture()
 def sync_session(_alembic_upgraded: None) -> Iterator[Session]:
@@ -316,9 +311,7 @@ def _add_video(
 def _remaining_ids(session: Session, lesson_id: uuid.UUID) -> list[uuid.UUID]:
     session.expire_all()
     return (
-        session.execute(
-            select(LessonVideo.id).where(LessonVideo.lesson_id == lesson_id)
-        )
+        session.execute(select(LessonVideo.id).where(LessonVideo.lesson_id == lesson_id))
         .scalars()
         .all()
     )
@@ -451,6 +444,7 @@ def test_lesson_video_gc_disabled_is_noop(
 
 
 # ── Beat / worker wiring ──────────────────────────────────────────────────────
+
 
 def test_gc_tasks_registered_and_routed_to_quiz() -> None:
     from app.celery_app import celery_app

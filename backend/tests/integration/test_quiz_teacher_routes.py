@@ -1,4 +1,5 @@
 """Integration tests for the teacher-side quiz API."""
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -130,8 +131,11 @@ async def test_other_teachers_cannot_touch(client, db_session, teacher_user, tea
     from app.services.auth_service import hash_password
 
     other = User(
-        email="other@e.com", hashed_password=hash_password("x"),
-        full_name="Other", role=UserRole.teacher, is_active=True,
+        email="other@e.com",
+        hashed_password=hash_password("x"),
+        full_name="Other",
+        role=UserRole.teacher,
+        is_active=True,
     )
     db_session.add(other)
     await db_session.commit()
@@ -147,7 +151,11 @@ async def test_other_teachers_cannot_touch(client, db_session, teacher_user, tea
 
 @pytest.mark.asyncio
 async def test_manual_override_recomputes_score(
-    client, db_session, teacher_user, teacher_token, student_user,
+    client,
+    db_session,
+    teacher_user,
+    teacher_token,
+    student_user,
 ):
     """End-to-end: build attempt with a wrong open answer scored 0.0, then
     teacher overrides to 1.0 → attempt score and passed flip in one PATCH."""
@@ -161,7 +169,8 @@ async def test_manual_override_recomputes_score(
     lesson = await make_lesson(db_session, module)
     quiz = await make_quiz(db_session, lesson, published=True)
     q = await make_quiz_question(
-        db_session, quiz,
+        db_session,
+        quiz,
         type=QuestionType.essay,
         payload={"type": "essay", "prompt": "Опишите тему", "rubric": "глубина"},
         weight=1.0,
@@ -171,13 +180,20 @@ async def test_manual_override_recomputes_score(
         "pointers": [{"question_id": str(q.id), "version": int(q.version), "order": 0}],
     }
     attempt = await make_quiz_attempt(
-        db_session, quiz, student_user,
-        questions_snapshot=snapshot, status=AttemptStatus.submitted,
+        db_session,
+        quiz,
+        student_user,
+        questions_snapshot=snapshot,
+        status=AttemptStatus.submitted,
     )
     answer = QuizAnswer(
-        attempt_id=attempt.id, question_id=q.id,
-        response={"text": "плохой ответ"}, awarded_score=Decimal("0"),
-        max_score=Decimal("1"), is_correct=False, needs_review=True,
+        attempt_id=attempt.id,
+        question_id=q.id,
+        response={"text": "плохой ответ"},
+        awarded_score=Decimal("0"),
+        max_score=Decimal("1"),
+        is_correct=False,
+        needs_review=True,
     )
     db_session.add(answer)
     attempt.score = Decimal("0")
@@ -203,7 +219,10 @@ async def test_manual_override_recomputes_score(
 
 @pytest.mark.asyncio
 async def test_edit_payload_bumps_version_and_supersedes_old(
-    client, db_session, teacher_user, teacher_token,
+    client,
+    db_session,
+    teacher_user,
+    teacher_token,
 ):
     """PATCH on a question payload must insert a new (id, version+1) row and
     stamp `superseded_at` on the previous row, instead of mutating in place.
@@ -221,15 +240,25 @@ async def test_edit_payload_bumps_version_and_supersedes_old(
     r = await client.patch(
         f"/api/v1/lessons/{lesson.id}/quiz/questions/{q.id}",
         cookies=teacher_token,
-        json={"payload": {
-            "type": "single_choice", "prompt": "edited",
-            "options": ["A", "B"], "correct_index": 1,
-        }},
+        json={
+            "payload": {
+                "type": "single_choice",
+                "prompt": "edited",
+                "options": ["A", "B"],
+                "correct_index": 1,
+            }
+        },
     )
     assert r.status_code == 200, r.text
-    rows = (await db_session.execute(
-        select(QuizQuestion).where(QuizQuestion.id == q.id).order_by(QuizQuestion.version)
-    )).scalars().all()
+    rows = (
+        (
+            await db_session.execute(
+                select(QuizQuestion).where(QuizQuestion.id == q.id).order_by(QuizQuestion.version)
+            )
+        )
+        .scalars()
+        .all()
+    )
     assert [row.version for row in rows] == [1, 2]
     assert rows[0].superseded_at is not None
     assert rows[1].superseded_at is None
@@ -238,7 +267,10 @@ async def test_edit_payload_bumps_version_and_supersedes_old(
 
 @pytest.mark.asyncio
 async def test_delete_question_is_soft_delete(
-    client, db_session, teacher_user, teacher_token,
+    client,
+    db_session,
+    teacher_user,
+    teacher_token,
 ):
     """DELETE marks `superseded_at`; the row stays so older attempts can still
     resolve their snapshot pointer to it."""
@@ -262,7 +294,10 @@ async def test_delete_question_is_soft_delete(
 
 @pytest.mark.asyncio
 async def test_first_load_does_not_trigger_lazy_relationship(
-    client, db_session, teacher_user, teacher_token,
+    client,
+    db_session,
+    teacher_user,
+    teacher_token,
 ):
     """Regression: the previous `get_or_create_quiz` did
     `if lesson.quiz is not None:` on a lazy relationship, which in async
@@ -285,7 +320,10 @@ async def test_first_load_does_not_trigger_lazy_relationship(
 
 @pytest.mark.asyncio
 async def test_list_questions_only_returns_current(
-    client, db_session, teacher_user, teacher_token,
+    client,
+    db_session,
+    teacher_user,
+    teacher_token,
 ):
     """After an edit, the listing shows only the current version, not history."""
     course = await make_course(db_session, teacher_user)
@@ -296,15 +334,17 @@ async def test_list_questions_only_returns_current(
     await client.patch(
         f"/api/v1/lessons/{lesson.id}/quiz/questions/{q.id}",
         cookies=teacher_token,
-        json={"payload": {
-            "type": "single_choice", "prompt": "v2",
-            "options": ["A", "B"], "correct_index": 0,
-        }},
+        json={
+            "payload": {
+                "type": "single_choice",
+                "prompt": "v2",
+                "options": ["A", "B"],
+                "correct_index": 0,
+            }
+        },
     )
 
-    r = await client.get(
-        f"/api/v1/lessons/{lesson.id}/quiz/questions", cookies=teacher_token
-    )
+    r = await client.get(f"/api/v1/lessons/{lesson.id}/quiz/questions", cookies=teacher_token)
     assert r.status_code == 200
     body = r.json()
     assert len(body) == 1

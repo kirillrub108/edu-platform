@@ -84,9 +84,7 @@ def build_provider() -> EmailProvider:
     raise RuntimeError(f"Unsupported EMAIL_PROVIDER: {settings.EMAIL_PROVIDER}")
 
 
-def send_email_sync(
-    *, to: str, subject: str, template_name: str, context: dict[str, Any]
-) -> None:
+def send_email_sync(*, to: str, subject: str, template_name: str, context: dict[str, Any]) -> None:
     """Render `template_name` with `context` and send it. Sync — call only from
     the send_email Celery task. Raises EmailDeliveryError on retriable failures."""
     html = render_template(template_name, context)

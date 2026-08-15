@@ -61,9 +61,7 @@ async def test_full_flow_create_publish_submit_grade_gradebook(
     )
     assert hidden.status_code == 404
 
-    pub = await client.post(
-        f"/api/v1/assignments/{assignment_id}/publish", cookies=teacher_token
-    )
+    pub = await client.post(f"/api/v1/assignments/{assignment_id}/publish", cookies=teacher_token)
     assert pub.status_code == 200
     assert pub.json()["status"] == "published"
 
@@ -102,16 +100,12 @@ async def test_full_flow_create_publish_submit_grade_gradebook(
     assert grade.json()["points_awarded"] == 16
 
     # Student now sees the grade + feedback.
-    mine = await client.get(
-        f"/api/v1/students/assignments/{assignment_id}", cookies=student_token
-    )
+    mine = await client.get(f"/api/v1/students/assignments/{assignment_id}", cookies=student_token)
     assert mine.json()["my_submission"]["feedback"] == "Good work"
     assert mine.json()["my_submission"]["score"] == pytest.approx(0.8)
 
     # Gradebook surfaces the assignment axis.
-    book = await client.get(
-        f"/api/v1/courses/{course.id}/gradebook", cookies=teacher_token
-    )
+    book = await client.get(f"/api/v1/courses/{course.id}/gradebook", cookies=teacher_token)
     assert book.status_code == 200
     body = book.json()
     assert len(body["assignments"]) == 1
@@ -199,9 +193,7 @@ async def test_resubmit_after_graded_409_then_reopen(
     )
     assert blocked.status_code == 409
 
-    reopen = await client.post(
-        f"/api/v1/submissions/{submission.id}/reopen", cookies=teacher_token
-    )
+    reopen = await client.post(f"/api/v1/submissions/{submission.id}/reopen", cookies=teacher_token)
     assert reopen.status_code == 200
 
     again = await client.post(
@@ -222,9 +214,7 @@ async def test_non_enrolled_student_cannot_view_assignment(
     _, _, lesson = await _scaffold(db_session, teacher_user, student_user, enroll=False)
     assignment = await make_assignment(db_session, lesson, published=True)
 
-    resp = await client.get(
-        f"/api/v1/students/assignments/{assignment.id}", cookies=student_token
-    )
+    resp = await client.get(f"/api/v1/students/assignments/{assignment.id}", cookies=student_token)
     assert resp.status_code == 403
 
 
@@ -381,7 +371,5 @@ async def test_private_thread_both_roles(
     assert t_msg.status_code == 201
     assert t_msg.json()["author"]["role"] == "teacher"
 
-    detail = await client.get(
-        f"/api/v1/submissions/{submission.id}", cookies=teacher_token
-    )
+    detail = await client.get(f"/api/v1/submissions/{submission.id}", cookies=teacher_token)
     assert len(detail.json()["messages"]) == 2

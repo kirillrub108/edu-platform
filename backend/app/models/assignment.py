@@ -27,15 +27,15 @@ class AssignmentStatus(str, enum.Enum):
 
 
 class SubmissionStatus(str, enum.Enum):
-    draft = "draft"          # student is still editing (re-submittable)
+    draft = "draft"  # student is still editing (re-submittable)
     submitted = "submitted"  # handed in, awaiting grading
-    graded = "graded"        # graded but not yet released to the student
-    returned = "returned"    # graded AND released — student sees score/feedback
+    graded = "graded"  # graded but not yet released to the student
+    returned = "returned"  # graded AND released — student sees score/feedback
 
 
 class AttachmentKind(str, enum.Enum):
     submission = "submission"  # uploaded by the student with their answer
-    feedback = "feedback"      # uploaded by the teacher alongside the grade
+    feedback = "feedback"  # uploaded by the teacher alongside the grade
 
 
 class Assignment(Base):
@@ -44,9 +44,7 @@ class Assignment(Base):
 
     __tablename__ = "assignments"
     __mapper_args__ = {"eager_defaults": True}
-    __table_args__ = (
-        Index("ix_assignments_lesson_id", "lesson_id"),
-    )
+    __table_args__ = (Index("ix_assignments_lesson_id", "lesson_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     lesson_id = Column(
@@ -93,7 +91,8 @@ class AssignmentSubmission(Base):
     __mapper_args__ = {"eager_defaults": True}
     __table_args__ = (
         UniqueConstraint(
-            "enrollment_id", "assignment_id",
+            "enrollment_id",
+            "assignment_id",
             name="uq_assignment_submissions_enrollment_assignment",
         ),
         Index("ix_assignment_submissions_assignment_id", "assignment_id"),
@@ -153,9 +152,7 @@ class AssignmentSubmission(Base):
 class AssignmentAttachment(Base):
     __tablename__ = "assignment_attachments"
     __mapper_args__ = {"eager_defaults": True}
-    __table_args__ = (
-        Index("ix_assignment_attachments_submission_id", "submission_id"),
-    )
+    __table_args__ = (Index("ix_assignment_attachments_submission_id", "submission_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     submission_id = Column(
@@ -183,9 +180,7 @@ class AssignmentMessage(Base):
 
     __tablename__ = "assignment_messages"
     __mapper_args__ = {"eager_defaults": True}
-    __table_args__ = (
-        Index("ix_assignment_messages_submission_id", "submission_id"),
-    )
+    __table_args__ = (Index("ix_assignment_messages_submission_id", "submission_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     submission_id = Column(

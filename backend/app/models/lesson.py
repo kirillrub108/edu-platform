@@ -110,9 +110,7 @@ class Lesson(Base):
     credits_spent = Column(Integer, nullable=False, default=0, server_default="0")
     billing_ref = Column(String(64), nullable=True)
     billed_via = Column(String(16), nullable=True)
-    cancel_requested = Column(
-        Boolean, nullable=False, default=False, server_default="false"
-    )
+    cancel_requested = Column(Boolean, nullable=False, default=False, server_default="false")
     # Soft delete: non-null = hidden everywhere (see app/database.py global filter).
     deleted_at = Column(DateTime(timezone=True), nullable=True, default=None, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

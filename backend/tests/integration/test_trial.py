@@ -27,9 +27,7 @@ def _mock_video_enqueue(monkeypatch: pytest.MonkeyPatch, slides: int = 5) -> Non
     monkeypatch.setattr(vp.generate_video_lesson, "apply_async", lambda *a, **k: _Fake())
 
 
-async def _launch_video(
-    client: AsyncClient, lesson_id: Any, teacher_token: dict[str, str]
-) -> Any:
+async def _launch_video(client: AsyncClient, lesson_id: Any, teacher_token: dict[str, str]) -> Any:
     return await client.post(
         f"/api/v1/lessons/{lesson_id}/generate-video",
         json={"pptx_path": "pptx/x.pptx", "voice": "nova"},
@@ -170,9 +168,7 @@ async def test_estimate_endpoint_reports_trial_state(
     monkeypatch.setattr(lessons_router, "count_source_slides", lambda _p: 5)
     course = await make_course(db_session, owner=teacher_user)
     module = await make_module(db_session, course)
-    lesson = await make_lesson(
-        db_session, module, pptx_path="pptx/x.pptx", script="x" * 4500
-    )
+    lesson = await make_lesson(db_session, module, pptx_path="pptx/x.pptx", script="x" * 4500)
 
     resp = await client.get(
         f"/api/v1/lessons/{lesson.id}/generation-estimate", cookies=teacher_token

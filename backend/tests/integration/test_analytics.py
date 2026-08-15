@@ -84,7 +84,9 @@ async def _graded_attempt(
 ) -> QuizAttempt:
     threshold = float(quiz.pass_threshold)
     attempt = await make_quiz_attempt(
-        db, quiz, student,
+        db,
+        quiz,
+        student,
         status=AttemptStatus.graded,
         attempt_number=attempt_number,
         score=Decimal(str(score)),
@@ -102,9 +104,7 @@ async def test_summary_empty_for_teacher_without_quizzes(
     client: AsyncClient,
     teacher_token: dict[str, str],
 ) -> None:
-    resp = await client.get(
-        "/api/v1/teacher/analytics/summary", cookies=teacher_token
-    )
+    resp = await client.get("/api/v1/teacher/analytics/summary", cookies=teacher_token)
     assert resp.status_code == 200
     body = resp.json()
     assert body == {
@@ -128,19 +128,23 @@ async def test_summary_counts_failed_attempts(
     student = await _make_student(db_session)
     await make_enrollment(db_session, student, course)
     await _graded_attempt(
-        db_session, quiz, student, score=0.1,
+        db_session,
+        quiz,
+        student,
+        score=0.1,
         submitted_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         attempt_number=1,
     )
     await _graded_attempt(
-        db_session, quiz, student, score=0.3,
+        db_session,
+        quiz,
+        student,
+        score=0.3,
         submitted_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
         attempt_number=2,
     )
 
-    resp = await client.get(
-        "/api/v1/teacher/analytics/summary", cookies=teacher_token
-    )
+    resp = await client.get("/api/v1/teacher/analytics/summary", cookies=teacher_token)
     body = resp.json()
     assert body["total_quiz_lessons"] == 1
     assert body["total_attempts"] == 2
@@ -165,21 +169,28 @@ async def test_summary_aggregates_mixed_outcomes(
     for s in (s1, s2, s3):
         await make_enrollment(db_session, s, course)
     await _graded_attempt(
-        db_session, quiz, s1, score=0.9,
+        db_session,
+        quiz,
+        s1,
+        score=0.9,
         submitted_at=datetime(2026, 1, 5, tzinfo=timezone.utc),
     )
     await _graded_attempt(
-        db_session, quiz, s2, score=0.6,
+        db_session,
+        quiz,
+        s2,
+        score=0.6,
         submitted_at=datetime(2026, 1, 6, tzinfo=timezone.utc),
     )
     await _graded_attempt(
-        db_session, quiz, s3, score=0.4,
+        db_session,
+        quiz,
+        s3,
+        score=0.4,
         submitted_at=datetime(2026, 1, 7, tzinfo=timezone.utc),
     )
 
-    resp = await client.get(
-        "/api/v1/teacher/analytics/summary", cookies=teacher_token
-    )
+    resp = await client.get("/api/v1/teacher/analytics/summary", cookies=teacher_token)
     body = resp.json()
     assert body["total_attempts"] == 3
     assert body["avg_score"] == pytest.approx((0.9 + 0.6 + 0.4) / 3, rel=1e-3)
@@ -207,13 +218,14 @@ async def test_summary_isolates_per_teacher(
     student = await _make_student(db_session)
     await make_enrollment(db_session, student, course)
     await _graded_attempt(
-        db_session, quiz, student, score=0.95,
+        db_session,
+        quiz,
+        student,
+        score=0.95,
         submitted_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
 
-    resp = await client.get(
-        "/api/v1/teacher/analytics/summary", cookies=teacher_token
-    )
+    resp = await client.get("/api/v1/teacher/analytics/summary", cookies=teacher_token)
     body = resp.json()
     assert body["total_quiz_lessons"] == 0
     assert body["total_attempts"] == 0
@@ -230,16 +242,16 @@ async def test_summary_ignores_in_progress_attempts(
     await make_enrollment(db_session, student, course)
     # In-progress attempt with no score must be ignored.
     await make_quiz_attempt(
-        db_session, quiz, student,
+        db_session,
+        quiz,
+        student,
         status=AttemptStatus.in_progress,
         attempt_number=1,
         score=None,
         passed=None,
     )
 
-    resp = await client.get(
-        "/api/v1/teacher/analytics/summary", cookies=teacher_token
-    )
+    resp = await client.get("/api/v1/teacher/analytics/summary", cookies=teacher_token)
     body = resp.json()
     assert body["total_quiz_lessons"] == 1
     assert body["total_attempts"] == 0
@@ -255,9 +267,7 @@ async def test_quiz_lessons_includes_lesson_without_attempts(
     teacher_token: dict[str, str],
 ) -> None:
     _, _, lesson, _ = await _make_quiz_lesson(db_session, teacher_user, title="Lonely")
-    resp = await client.get(
-        "/api/v1/teacher/analytics/quiz-lessons", cookies=teacher_token
-    )
+    resp = await client.get("/api/v1/teacher/analytics/quiz-lessons", cookies=teacher_token)
     body = resp.json()
     assert body["total"] == 1
     item = body["items"][0]
@@ -279,12 +289,12 @@ async def test_quiz_lessons_skips_lessons_without_quiz(
     module = await make_module(db_session, course)
     # Plain video lesson, no quiz attached → not in the report.
     await make_lesson(
-        db_session, module, content_type=ContentType.video,
+        db_session,
+        module,
+        content_type=ContentType.video,
         status=LessonStatus.published,
     )
-    resp = await client.get(
-        "/api/v1/teacher/analytics/quiz-lessons", cookies=teacher_token
-    )
+    resp = await client.get("/api/v1/teacher/analytics/quiz-lessons", cookies=teacher_token)
     assert resp.json()["total"] == 0
 
 
@@ -349,11 +359,17 @@ async def test_quiz_lessons_sort_by_avg_score_desc(
     await make_enrollment(db_session, student, course_h)
     await make_enrollment(db_session, student, course_l)
     await _graded_attempt(
-        db_session, quiz_h, student, score=0.9,
+        db_session,
+        quiz_h,
+        student,
+        score=0.9,
         submitted_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
     await _graded_attempt(
-        db_session, quiz_l, student, score=0.2,
+        db_session,
+        quiz_l,
+        student,
+        score=0.2,
         submitted_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
     resp = await client.get(
@@ -417,12 +433,18 @@ async def test_submissions_returns_best_attempt_per_student(
     student = await _make_student(db_session, "x@e.com")
     await make_enrollment(db_session, student, course)
     await _graded_attempt(
-        db_session, quiz, student, score=0.3,
+        db_session,
+        quiz,
+        student,
+        score=0.3,
         submitted_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         attempt_number=1,
     )
     await _graded_attempt(
-        db_session, quiz, student, score=0.8,
+        db_session,
+        quiz,
+        student,
+        score=0.8,
         submitted_at=datetime(2026, 1, 2, tzinfo=timezone.utc),
         attempt_number=2,
     )
@@ -448,7 +470,10 @@ async def test_submissions_includes_failed_attempts(
     student = await _make_student(db_session, "fail@e.com")
     await make_enrollment(db_session, student, course)
     await _graded_attempt(
-        db_session, quiz, student, score=0.2,
+        db_session,
+        quiz,
+        student,
+        score=0.2,
         submitted_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
     )
     resp = await client.get(
@@ -496,7 +521,9 @@ async def test_submissions_404_for_lesson_without_quiz(
     course = await make_course(db_session, teacher_user, is_published=True)
     module = await make_module(db_session, course)
     lesson = await make_lesson(
-        db_session, module, content_type=ContentType.video,
+        db_session,
+        module,
+        content_type=ContentType.video,
         status=LessonStatus.published,
     )
     resp = await client.get(
@@ -521,7 +548,5 @@ async def test_summary_forbidden_for_student(
     client: AsyncClient,
     student_token: dict[str, str],
 ) -> None:
-    resp = await client.get(
-        "/api/v1/teacher/analytics/summary", cookies=student_token
-    )
+    resp = await client.get("/api/v1/teacher/analytics/summary", cookies=student_token)
     assert resp.status_code == 403

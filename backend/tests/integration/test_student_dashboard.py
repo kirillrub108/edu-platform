@@ -60,14 +60,10 @@ async def test_dashboard_aggregates_student_activity(
         db_session, module, content_type=ContentType.quiz, status=LessonStatus.published
     )
     quiz = await make_quiz(db_session, quiz_lesson, published=True)
-    await make_quiz_attempt(
-        db_session, quiz, student_user, status=AttemptStatus.graded, score=0.8
-    )
+    await make_quiz_attempt(db_session, quiz, student_user, status=AttemptStatus.graded, score=0.8)
 
     # A submitted assignment with a future deadline → completed count + nearest deadline.
-    assignment_lesson = await make_lesson(
-        db_session, module, status=LessonStatus.published
-    )
+    assignment_lesson = await make_lesson(db_session, module, status=LessonStatus.published)
     due = datetime.now(timezone.utc) + timedelta(days=3)
     assignment = await make_assignment(
         db_session, assignment_lesson, published=True, title="Эссе", due_at=due
@@ -89,9 +85,7 @@ async def test_dashboard_aggregates_student_activity(
 
 
 @pytest.mark.parametrize("path", ["/quizzes", "/results", "/assignments"])
-async def test_cabinet_lists_unauthorized_returns_401(
-    client: AsyncClient, path: str
-) -> None:
+async def test_cabinet_lists_unauthorized_returns_401(client: AsyncClient, path: str) -> None:
     resp = await client.get(f"/api/v1/students{path}")
     assert resp.status_code == 401
 

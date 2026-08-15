@@ -5,6 +5,7 @@ Plain `require_teacher` + ownership (get_owned_lesson / service loaders) — the
 endpoints trigger no LLM/TTS/vision, so they are NOT in AI_GATED_ENDPOINTS and
 need no verified-email gate, exactly like lesson/quiz authoring CRUD.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -100,9 +101,7 @@ async def update_assignment(
     return _read(assignment, counts.get(assignment.id, (0, 0)))
 
 
-@router.delete(
-    "/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT
-)
+@router.delete("/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_assignment(
     assignment_id: UUID,
     user: User = Depends(require_teacher),

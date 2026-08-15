@@ -41,16 +41,12 @@ async def test_draft_module_hides_its_lessons_from_student(
     lesson = await make_lesson(db_session, module, is_published=True)
     await make_enrollment(db_session, student_user, course)
 
-    detail = await client.get(
-        f"/api/v1/students/courses/{course.id}", cookies=student_token
-    )
+    detail = await client.get(f"/api/v1/students/courses/{course.id}", cookies=student_token)
     assert detail.status_code == 200
     assert detail.json()["modules"] == []
 
     # Direct-by-id access must not leak the draft.
-    direct = await client.get(
-        f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
-    )
+    direct = await client.get(f"/api/v1/students/lessons/{lesson.id}", cookies=student_token)
     assert direct.status_code == 404
 
 
@@ -66,17 +62,13 @@ async def test_draft_lesson_hidden_but_module_still_listed(
     lesson = await make_lesson(db_session, module, is_published=False)
     await make_enrollment(db_session, student_user, course)
 
-    detail = await client.get(
-        f"/api/v1/students/courses/{course.id}", cookies=student_token
-    )
+    detail = await client.get(f"/api/v1/students/courses/{course.id}", cookies=student_token)
     assert detail.status_code == 200
     modules = detail.json()["modules"]
     assert len(modules) == 1
     assert modules[0]["lessons"] == []
 
-    direct = await client.get(
-        f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
-    )
+    direct = await client.get(f"/api/v1/students/lessons/{lesson.id}", cookies=student_token)
     assert direct.status_code == 404
 
 
@@ -92,16 +84,12 @@ async def test_fully_published_chain_is_visible_to_student(
     lesson = await make_lesson(db_session, module, is_published=True)
     await make_enrollment(db_session, student_user, course)
 
-    detail = await client.get(
-        f"/api/v1/students/courses/{course.id}", cookies=student_token
-    )
+    detail = await client.get(f"/api/v1/students/courses/{course.id}", cookies=student_token)
     assert detail.status_code == 200
     modules = detail.json()["modules"]
     assert [entry["id"] for entry in modules[0]["lessons"]] == [str(lesson.id)]
 
-    direct = await client.get(
-        f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
-    )
+    direct = await client.get(f"/api/v1/students/lessons/{lesson.id}", cookies=student_token)
     assert direct.status_code == 200
 
 
@@ -122,16 +110,12 @@ async def test_unpublished_course_keeps_enrolled_student_access(
     lesson = await make_lesson(db_session, module, is_published=True)
     await make_enrollment(db_session, student_user, course)
 
-    detail = await client.get(
-        f"/api/v1/students/courses/{course.id}", cookies=student_token
-    )
+    detail = await client.get(f"/api/v1/students/courses/{course.id}", cookies=student_token)
     assert detail.status_code == 200
     modules = detail.json()["modules"]
     assert [entry["id"] for entry in modules[0]["lessons"]] == [str(lesson.id)]
 
-    direct = await client.get(
-        f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
-    )
+    direct = await client.get(f"/api/v1/students/lessons/{lesson.id}", cookies=student_token)
     assert direct.status_code == 200
 
 
@@ -149,15 +133,11 @@ async def test_unpublished_course_with_draft_module_still_hidden(
     lesson = await make_lesson(db_session, module, is_published=True)
     await make_enrollment(db_session, student_user, course)
 
-    detail = await client.get(
-        f"/api/v1/students/courses/{course.id}", cookies=student_token
-    )
+    detail = await client.get(f"/api/v1/students/courses/{course.id}", cookies=student_token)
     assert detail.status_code == 200
     assert detail.json()["modules"] == []
 
-    direct = await client.get(
-        f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
-    )
+    direct = await client.get(f"/api/v1/students/lessons/{lesson.id}", cookies=student_token)
     assert direct.status_code == 404
 
 
@@ -174,14 +154,10 @@ async def test_non_enrolled_student_still_forbidden(
     module = await make_module(db_session, course, is_published=True)
     lesson = await make_lesson(db_session, module, is_published=True)
 
-    detail = await client.get(
-        f"/api/v1/students/courses/{course.id}", cookies=student_token
-    )
+    detail = await client.get(f"/api/v1/students/courses/{course.id}", cookies=student_token)
     assert detail.status_code == 403
 
-    direct = await client.get(
-        f"/api/v1/students/lessons/{lesson.id}", cookies=student_token
-    )
+    direct = await client.get(f"/api/v1/students/lessons/{lesson.id}", cookies=student_token)
     assert direct.status_code == 403
 
 

@@ -38,10 +38,14 @@ from app.schemas.analytics import (
 
 def _best_attempts_cte():
     """Pick the best graded attempt per (quiz_id, student_id)."""
-    row_number = func.row_number().over(
-        partition_by=(QuizAttempt.quiz_id, QuizAttempt.student_id),
-        order_by=(desc(QuizAttempt.score), desc(QuizAttempt.submitted_at)),
-    ).label("rn")
+    row_number = (
+        func.row_number()
+        .over(
+            partition_by=(QuizAttempt.quiz_id, QuizAttempt.student_id),
+            order_by=(desc(QuizAttempt.score), desc(QuizAttempt.submitted_at)),
+        )
+        .label("rn")
+    )
     subq = (
         select(
             QuizAttempt.id.label("attempt_id"),
@@ -209,9 +213,7 @@ async def list_quiz_lessons(
     total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
 
     attempts_col = func.count(QuizAttempt.id).label("attempts_count")
-    students_col = func.count(func.distinct(QuizAttempt.student_id)).label(
-        "students_count"
-    )
+    students_col = func.count(func.distinct(QuizAttempt.student_id)).label("students_count")
     avg_col = func.avg(cast(QuizAttempt.score, Float)).label("avg_score")
     pass_col = func.avg(
         cast(
@@ -282,9 +284,7 @@ async def list_quiz_lessons(
         )
         for r in rows
     ]
-    return QuizLessonStatsPage(
-        items=items, total=int(total), page=page, page_size=page_size
-    )
+    return QuizLessonStatsPage(items=items, total=int(total), page=page, page_size=page_size)
 
 
 class LessonNotOwnedOrNoQuiz(Exception):
@@ -318,11 +318,7 @@ async def get_lesson_submissions(
 
     best = _best_attempts_cte()
 
-    base = (
-        select(best.c.attempt_id)
-        .where(best.c.quiz_id == quiz_id)
-        .where(best.c.rn == 1)
-    )
+    base = select(best.c.attempt_id).where(best.c.quiz_id == quiz_id).where(best.c.rn == 1)
     total = await db.scalar(select(func.count()).select_from(base.subquery())) or 0
 
     stmt = (
@@ -358,9 +354,7 @@ async def get_lesson_submissions(
         )
         for r in rows
     ]
-    return QuizSubmissionPage(
-        items=items, total=int(total), page=page, page_size=page_size
-    )
+    return QuizSubmissionPage(items=items, total=int(total), page=page, page_size=page_size)
 
 
 class LessonNotOwnedByTeacher(Exception):
@@ -396,9 +390,7 @@ async def _lesson_owner_context(
     ).first()
     if row is None:
         raise LessonNotOwnedByTeacher()
-    threshold = (
-        float(row.pass_threshold) if row.pass_threshold is not None else QUIZ_PASS_THRESHOLD
-    )
+    threshold = float(row.pass_threshold) if row.pass_threshold is not None else QUIZ_PASS_THRESHOLD
     return row.title, row.course_id, row.quiz_id, threshold
 
 

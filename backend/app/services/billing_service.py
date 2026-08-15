@@ -15,6 +15,7 @@ the task settles it exactly once via the idempotent finalizer:
                               row (Celery redelivery / cancel races).
   release_reservation_if_held → cancel path for a task that never settled.
 """
+
 import math
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -48,11 +49,7 @@ def _to_operation(operation: "str | CreditOperation") -> CreditOperation:
 
 def estimate_video_text(slides: int, script_chars: int) -> int:
     """COST_VIDEO_TEXT: 2 + slides + ceil(script_chars / 3000)."""
-    return (
-        VIDEO_TEXT_BASE_CREDITS
-        + slides
-        + math.ceil(script_chars / TTS_CHARS_PER_CREDIT)
-    )
+    return VIDEO_TEXT_BASE_CREDITS + slides + math.ceil(script_chars / TTS_CHARS_PER_CREDIT)
 
 
 def estimate_video_auto(slides: int) -> int:
@@ -67,11 +64,7 @@ def estimate_video_auto(slides: int) -> int:
 def partial_video_cost(base_credits: int, processed_slides: int, voiced_chars: int) -> int:
     """Mid-run cancellation price: base + per-slide × processed + voiced chars
     rounded UP to whole credits. Callers clamp to the reserved estimate."""
-    return (
-        base_credits
-        + processed_slides
-        + math.ceil(voiced_chars / TTS_CHARS_PER_CREDIT)
-    )
+    return base_credits + processed_slides + math.ceil(voiced_chars / TTS_CHARS_PER_CREDIT)
 
 
 def partial_vision_cost(total_cost: int, done: int, total: int) -> int:
@@ -332,16 +325,12 @@ async def apply_purchase(db: AsyncSession, payment_id: UUID) -> bool:
         return False
     await get_or_create_account(db, peek.user_id)
 
-    payment = await db.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
+    payment = await db.scalar(select(Payment).where(Payment.id == payment_id).with_for_update())
     if payment is None or payment.status == PaymentStatus.succeeded:
         await db.rollback()
         return False
     account = await db.scalar(
-        select(CreditAccount)
-        .where(CreditAccount.owner_id == payment.user_id)
-        .with_for_update()
+        select(CreditAccount).where(CreditAccount.owner_id == payment.user_id).with_for_update()
     )
     account.balance += payment.credits
     db.add(
@@ -361,9 +350,7 @@ async def apply_purchase(db: AsyncSession, payment_id: UUID) -> bool:
 
 async def mark_payment_canceled(db: AsyncSession, payment_id: UUID) -> bool:
     """Mark a pending payment canceled; no-op for settled payments."""
-    payment = await db.scalar(
-        select(Payment).where(Payment.id == payment_id).with_for_update()
-    )
+    payment = await db.scalar(select(Payment).where(Payment.id == payment_id).with_for_update())
     if payment is None or payment.status != PaymentStatus.pending:
         await db.rollback()
         return False
@@ -429,9 +416,7 @@ async def process_monthly_renewal(db: AsyncSession) -> int:
 
 def sync_claim_billing(db: Session, lesson_id: UUID) -> str | None:
     """Sync mirror of claim_billing — see its docstring."""
-    billed = db.scalar(
-        select(Lesson.billed_via).where(Lesson.id == lesson_id).with_for_update()
-    )
+    billed = db.scalar(select(Lesson.billed_via).where(Lesson.id == lesson_id).with_for_update())
     if billed is None:
         db.rollback()
         return None
@@ -499,9 +484,7 @@ def sync_finalize_generation(
                 operation=CreditOperation.RELEASE,
                 ref_id=billing_ref,
                 description=(
-                    "Release reserved hold"
-                    if not spent
-                    else "Release remainder (partial charge)"
+                    "Release reserved hold" if not spent else "Release remainder (partial charge)"
                 ),
             )
         )

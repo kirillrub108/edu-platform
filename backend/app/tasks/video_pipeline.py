@@ -76,9 +76,7 @@ def _publish(lesson_id: str, payload: dict) -> None:
 # TTS_WORKERS=4 is tied to the Silero container's thread count; the polza cloud
 # gateway is bounded by its own rate limits instead, so its pool size is
 # deployment-tunable via POLZA_TTS_WORKERS.
-_TTS_WORKERS = (
-    settings.POLZA_TTS_WORKERS if settings.TTS_PROVIDER == "polza" else TTS_WORKERS
-)
+_TTS_WORKERS = settings.POLZA_TTS_WORKERS if settings.TTS_PROVIDER == "polza" else TTS_WORKERS
 _ENCODE_WORKERS = ENCODE_WORKERS
 
 
@@ -86,6 +84,7 @@ _ENCODE_WORKERS = ENCODE_WORKERS
 # Checkpoint key: job:{lesson_id}:checkpoint
 # Structure: {"voice": str, "ssml_chunks": [...], "tts_done": [...], "segments_done": [...]}
 # Written atomically via redis.set. Not a hard dependency — any error is logged and swallowed.
+
 
 def _cp_key(lesson_id: str) -> str:
     return f"job:{lesson_id}:checkpoint"
@@ -119,8 +118,9 @@ def _cp_delete(r: "_sync_redis.Redis", lesson_id: str) -> None:
 # Cache path: storage/tts_cache/{sha256[:2]}/{sha256}.{voice}.wav
 # Two-level directory keeps individual dirs from accumulating thousands of files.
 
+
 def _split_voice_role(voice_field: str) -> tuple[str, str | None]:
-    """"alena:neutral" -> ("alena", "neutral"); "alena" -> ("alena", None).
+    """ "alena:neutral" -> ("alena", "neutral"); "alena" -> ("alena", None).
 
     Only the synthesis call needs the split form — _tts_cache_path and the
     LessonVideo.voice column keep the raw "voice:role" string so a cache key
@@ -161,9 +161,7 @@ class GenerationCancelled(Exception):
 def _cancel_requested(session: Session, lesson_id: UUID) -> bool:
     """Fresh read of the cooperative-cancel flag (bypasses the identity map)."""
     return bool(
-        session.execute(
-            select(Lesson.cancel_requested).where(Lesson.id == lesson_id)
-        ).scalar()
+        session.execute(select(Lesson.cancel_requested).where(Lesson.id == lesson_id)).scalar()
     )
 
 
@@ -235,7 +233,13 @@ def _split_and_annotate(
     return llm_service._fallback_ssml(script, slides_count), None
 
 
-@celery_app.task(bind=True, name="generate_video_lesson", queue="video", acks_late=True, reject_on_worker_lost=True)
+@celery_app.task(
+    bind=True,
+    name="generate_video_lesson",
+    queue="video",
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def generate_video_lesson(
     self,
     lesson_id: str,
@@ -512,7 +516,8 @@ def generate_video_lesson(
             # Verify segments_done against disk: the worker may have written the
             # checkpoint entry but crashed before the MKV was fsynced.
             cp_segments_done = {
-                k for k in cp_segments_done
+                k
+                for k in cp_segments_done
                 if os.path.exists(os.path.join(seg_work_dir, f"segment_{k:03d}.mkv"))
             }
 
@@ -549,9 +554,7 @@ def generate_video_lesson(
                         logger.warning("tts_cache_corrupted", slide=idx, path=cache_path)
                     logger.info("tts_cache_miss", slide=idx)
                     _ya_voice, _ya_role = _split_voice_role(effective_voice)
-                    tts_service.synthesize(
-                        ssml, audio_path, voice=_ya_voice, role=_ya_role
-                    )
+                    tts_service.synthesize(ssml, audio_path, voice=_ya_voice, role=_ya_role)
                     if cache_path:
                         try:
                             shutil.copy2(audio_path, cache_path)

@@ -102,9 +102,7 @@ async def test_delete_course_soft_deletes_and_retains_children(
     # an expired ORM attribute (sync IO) inside the async session.
     course_id, module_id, lesson_id = course.id, module.id, lesson.id
 
-    resp = await client.delete(
-        f"/api/v1/courses/{course_id}", cookies=teacher_token
-    )
+    resp = await client.delete(f"/api/v1/courses/{course_id}", cookies=teacher_token)
     assert resp.status_code == 204
 
     db_session.expire_all()
@@ -128,15 +126,11 @@ async def test_publish_toggle_flips_is_published(
 ) -> None:
     course = await make_course(db_session, owner=teacher_user, is_published=False)
 
-    r1 = await client.put(
-        f"/api/v1/courses/{course.id}/publish", cookies=teacher_token
-    )
+    r1 = await client.put(f"/api/v1/courses/{course.id}/publish", cookies=teacher_token)
     assert r1.status_code == 200
     assert r1.json()["is_published"] is True
 
-    r2 = await client.put(
-        f"/api/v1/courses/{course.id}/publish", cookies=teacher_token
-    )
+    r2 = await client.put(f"/api/v1/courses/{course.id}/publish", cookies=teacher_token)
     assert r2.json()["is_published"] is False
 
 
@@ -156,9 +150,7 @@ async def test_teacher_cannot_access_another_teachers_course(
     await db_session.refresh(other)
     other_course = await make_course(db_session, owner=other)
 
-    resp = await client.get(
-        f"/api/v1/courses/{other_course.id}", cookies=teacher_token
-    )
+    resp = await client.get(f"/api/v1/courses/{other_course.id}", cookies=teacher_token)
     assert resp.status_code == 403
 
 

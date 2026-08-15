@@ -23,9 +23,7 @@ def slide_png(tmp_path: Path) -> Path:
 
 
 def _llm_response(content: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
-    )
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
 def _stub_ollama_client(content: str | Exception):
@@ -34,9 +32,7 @@ def _stub_ollama_client(content: str | Exception):
             raise content
         return _llm_response(content)
 
-    return SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
-    )
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create)))
 
 
 def test_cache_key_is_deterministic(slide_png: Path) -> None:
@@ -139,9 +135,7 @@ async def test_call_ollama_payload_has_no_ollama_only_fields(
     monkeypatch.setattr(
         svc,
         "_ollama_client",
-        SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
-        ),
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create))),
     )
 
     await svc.analyze_slide(
@@ -175,9 +169,7 @@ async def test_call_ollama_reasoning_flag_adds_extra_body(
     monkeypatch.setattr(
         svc,
         "_ollama_client",
-        SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
-        ),
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create))),
     )
 
     monkeypatch.setattr(vis_settings, "VISION_REASONING_DISABLED", True)
@@ -213,9 +205,7 @@ async def test_call_ollama_pins_provider_when_configured(
     monkeypatch.setattr(
         svc,
         "_ollama_client",
-        SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
-        ),
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create))),
     )
 
     await svc.analyze_slide(
@@ -253,9 +243,7 @@ async def test_summarize_presentation_uses_disk_cache(
     monkeypatch.setattr(
         svc,
         "_ollama_client",
-        SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=_counting_create))
-        ),
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_counting_create))),
     )
 
     result_1 = await svc.summarize_presentation([str(slide_png)])

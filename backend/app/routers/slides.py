@@ -1,6 +1,4 @@
 import asyncio
-
-import structlog
 from uuid import UUID, uuid4
 
 import structlog
@@ -42,8 +40,10 @@ from app.tasks.vision_pipeline import analyze_presentation_task
 
 logger = structlog.get_logger()
 
+
 async def _count_slides_offloop(pptx_path: str) -> int | None:
     """Slide count for the trial check, off the event loop (see lessons.py)."""
+
     def _count() -> int | None:
         with storage_service.local_copy(pptx_path) as local:
             return count_source_slides(local)
@@ -76,7 +76,9 @@ _ANALYSIS_STATUS_TO_CELERY: dict[LessonStatus, str] = {
 def _row_to_out(row: SlideText, user_id: str) -> SlideTextOut:
     image_url: str | None = None
     if row.image_path:
-        image_url = storage_service.get_url(row.image_path, user_id, expires_in=SIGNED_URL_TTL_SLIDE)
+        image_url = storage_service.get_url(
+            row.image_path, user_id, expires_in=SIGNED_URL_TTL_SLIDE
+        )
     return SlideTextOut(
         id=row.id,
         slide_number=row.slide_number,
@@ -342,9 +344,7 @@ async def regenerate_slide_text(
             course_title=lesson.title or "",
             previous_context=previous_context,
         )
-        text = await llm_service.refine_slide_narration(
-            vision_text, model=settings.REGEN_LLM_MODEL
-        )
+        text = await llm_service.refine_slide_narration(vision_text, model=settings.REGEN_LLM_MODEL)
     except Exception as exc:
         await billing_service.release_credits(db, user.id, amount, str(slide_id))
         logger.exception("slide_regen_failed", slide_id=str(slide_id))

@@ -11,6 +11,7 @@ A single httpx.AsyncClient is shared per process (built lazily, closed in the
 app lifespan). Network failures and timeouts on the idempotent calls are
 retried with backoff; HTTP 4xx/5xx are surfaced as domain errors without retry.
 """
+
 import asyncio
 import time
 from decimal import Decimal, InvalidOperation

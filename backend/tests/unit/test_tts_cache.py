@@ -34,6 +34,7 @@ def _silent_wav_bytes(nframes: int = 4800) -> bytes:
 
 # ── _chunk_cache_key ─────────────────────────────────────────────────────────
 
+
 def test_chunk_cache_key_stable_for_identical_input() -> None:
     key1 = _chunk_cache_key("hello world", "silero", "xenia", "", None)
     key2 = _chunk_cache_key("hello world", "silero", "xenia", "", None)
@@ -43,11 +44,11 @@ def test_chunk_cache_key_stable_for_identical_input() -> None:
 @pytest.mark.parametrize(
     "other",
     [
-        ("hello world", "silero", "baya", "", None),           # voice changes
-        ("hello world", "polza", "xenia", "", None),           # provider changes
-        ("hello world", "silero", "xenia", "tts-2", None),     # model changes
-        ("hello world", "silero", "xenia", "", 1.2),           # speed changes
-        ("different text", "silero", "xenia", "", None),       # text changes
+        ("hello world", "silero", "baya", "", None),  # voice changes
+        ("hello world", "polza", "xenia", "", None),  # provider changes
+        ("hello world", "silero", "xenia", "tts-2", None),  # model changes
+        ("hello world", "silero", "xenia", "", 1.2),  # speed changes
+        ("different text", "silero", "xenia", "", None),  # text changes
     ],
 )
 def test_chunk_cache_key_differs_on_any_param_change(other: tuple) -> None:
@@ -56,6 +57,7 @@ def test_chunk_cache_key_differs_on_any_param_change(other: tuple) -> None:
 
 
 # ── read/write helpers ───────────────────────────────────────────────────────
+
 
 def test_write_then_read_chunk_cache_roundtrip(tmp_path: Path) -> None:
     key = _chunk_cache_key("some chunk", "silero", "xenia", "", None)
@@ -88,6 +90,7 @@ def _chunk_cache_path_under(root: Path, key: str) -> str:
 
 
 # ── end-to-end via tts_service.synthesize (Silero) ──────────────────────────
+
 
 def test_synthesize_second_call_hits_cache_not_network(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -188,7 +191,9 @@ def _install_fake_ffmpeg(monkeypatch: pytest.MonkeyPatch) -> None:
         returncode = 0
         stderr = b""
 
-    def _fake_run(cmd: list[str], input: bytes | None = None, capture_output: bool = False, timeout: int = 0) -> _Result:
+    def _fake_run(
+        cmd: list[str], input: bytes | None = None, capture_output: bool = False, timeout: int = 0
+    ) -> _Result:
         with wave.open(cmd[-1], "wb") as w:
             w.setnchannels(1)
             w.setsampwidth(2)
@@ -219,7 +224,12 @@ def test_polza_second_call_hits_cache_not_network(
     _install_fake_ffmpeg(monkeypatch)
     calls = {"n": 0}
 
-    def _fake_post(url: str, json: dict[str, Any] | None = None, headers: dict[str, str] | None = None, timeout: float = 0) -> _PolzaResp:
+    def _fake_post(
+        url: str,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 0,
+    ) -> _PolzaResp:
         calls["n"] += 1
         return _PolzaResp({"audio": base64.b64encode(_FAKE_MP3).decode()})
 
@@ -242,7 +252,12 @@ def test_polza_different_voice_is_not_a_cache_hit(
     _install_fake_ffmpeg(monkeypatch)
     calls = {"n": 0}
 
-    def _fake_post(url: str, json: dict[str, Any] | None = None, headers: dict[str, str] | None = None, timeout: float = 0) -> _PolzaResp:
+    def _fake_post(
+        url: str,
+        json: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
+        timeout: float = 0,
+    ) -> _PolzaResp:
         calls["n"] += 1
         return _PolzaResp({"audio": base64.b64encode(_FAKE_MP3).decode()})
 

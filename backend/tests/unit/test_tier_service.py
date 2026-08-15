@@ -48,18 +48,14 @@ def test_priority_ordering_enterprise_is_highest() -> None:
 
 
 @pytest.mark.integration
-async def test_priority_for_user_free_default(
-    db_session: AsyncSession, teacher_user: User
-) -> None:
+async def test_priority_for_user_free_default(db_session: AsyncSession, teacher_user: User) -> None:
     # A fresh account is on the free plan → lowest priority.
     pr = await tier_service.priority_for_user(db_session, teacher_user.id)
     assert pr == TIER_PRIORITY["free"]
 
 
 @pytest.mark.integration
-async def test_priority_for_user_paid_plan(
-    db_session: AsyncSession, teacher_user: User
-) -> None:
+async def test_priority_for_user_paid_plan(db_session: AsyncSession, teacher_user: User) -> None:
     account = await billing_service.get_or_create_account(db_session, teacher_user.id)
     account.plan = CreditPlan.pro
     await db_session.commit()

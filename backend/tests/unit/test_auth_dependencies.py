@@ -3,6 +3,7 @@
 Covers: no cookie → 401, valid cookie → user, bad CSRF on POST → 403.
 Uses a minimal FastAPI app with mocked DB and fakeredis — no postgres needed.
 """
+
 from __future__ import annotations
 
 import secrets

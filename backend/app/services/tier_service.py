@@ -7,6 +7,7 @@ itself is governed by credits (see billing_service), not by quotas.
 
 Async only (FastAPI / AsyncSession); never imported into app/tasks/* (sync Celery).
 """
+
 import enum
 from uuid import UUID
 

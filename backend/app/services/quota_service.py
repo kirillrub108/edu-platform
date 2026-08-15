@@ -10,6 +10,7 @@ Async functions are used from FastAPI routers (AsyncSession); Celery tasks use
 the `sync_*` wrappers on their psycopg2 Session — never import the async
 functions into `app/tasks/*`.
 """
+
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -39,6 +40,7 @@ def grading_resource(quiz_id: UUID) -> str:
 def utc_day_key(now: datetime | None = None) -> str:
     """Daily period_key (UTC) — a new calendar day yields a fresh counter."""
     return (now or datetime.now(timezone.utc)).strftime("%Y-%m-%d")
+
 
 TRIAL_LIMITS: dict[str, int] = {
     TRIAL_LECTURE: TRIAL_LECTURES,

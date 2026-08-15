@@ -20,9 +20,7 @@ pytestmark = pytest.mark.unit
 
 def _llm_response(content: str) -> SimpleNamespace:
     """Shape that mirrors openai.types.chat.ChatCompletion."""
-    return SimpleNamespace(
-        choices=[SimpleNamespace(message=SimpleNamespace(content=content))]
-    )
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
 
 
 def _make_completions_stub(return_content: str | Exception) -> Any:
@@ -34,9 +32,7 @@ def _make_completions_stub(return_content: str | Exception) -> Any:
             raise return_content
         return _llm_response(return_content)
 
-    return SimpleNamespace(
-        chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
-    )
+    return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create)))
 
 
 async def test_split_and_annotate_returns_chunks_when_count_matches(
@@ -70,9 +66,7 @@ async def test_split_and_annotate_falls_back_when_too_few_chunks(
 async def test_split_and_annotate_falls_back_when_too_many_chunks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    payload = json.dumps(
-        {"chunks": ["<p>a</p>", "<p>b</p>", "<p>c</p>", "<p>d</p>"]}
-    )
+    payload = json.dumps({"chunks": ["<p>a</p>", "<p>b</p>", "<p>c</p>", "<p>d</p>"]})
     monkeypatch.setattr(llm_service, "client", _make_completions_stub(payload))
 
     chunks, warning = await llm_service.split_and_annotate_ssml(
@@ -85,9 +79,7 @@ async def test_split_and_annotate_falls_back_when_too_many_chunks(
 async def test_split_and_annotate_handles_invalid_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        llm_service, "client", _make_completions_stub("not-json-at-all")
-    )
+    monkeypatch.setattr(llm_service, "client", _make_completions_stub("not-json-at-all"))
 
     chunks, warning = await llm_service.split_and_annotate_ssml(
         script="One sentence. Two sentence.", slides_count=2
@@ -138,9 +130,7 @@ async def test_split_and_annotate_strips_json_code_fence(
     fenced = "```json\n" + json.dumps({"chunks": ["<p>a</p>", "<p>b</p>"]}) + "\n```"
     monkeypatch.setattr(llm_service, "client", _make_completions_stub(fenced))
 
-    chunks, warning = await llm_service.split_and_annotate_ssml(
-        script="A. B.", slides_count=2
-    )
+    chunks, warning = await llm_service.split_and_annotate_ssml(script="A. B.", slides_count=2)
     # Exact match proves the fence was stripped: the fallback path would instead
     # mechanically split the raw (fenced) text, never yielding these exact chunks.
     assert chunks == ["<p>a</p>", "<p>b</p>"]
@@ -180,9 +170,7 @@ async def test_split_injects_provider_pin_into_request(
     monkeypatch.setattr(
         llm_service,
         "client",
-        SimpleNamespace(
-            chat=SimpleNamespace(completions=SimpleNamespace(create=_create))
-        ),
+        SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=_create))),
     )
 
     monkeypatch.setattr(

@@ -94,13 +94,9 @@ async def _create_payment(
     return resp.json()
 
 
-async def _post_webhook(
-    client: AsyncClient, body: dict, ip: str | None = _TRUSTED_IP
-) -> Any:
+async def _post_webhook(client: AsyncClient, body: dict, ip: str | None = _TRUSTED_IP) -> Any:
     headers = {"X-Forwarded-For": ip} if ip else {}
-    return await client.post(
-        "/api/v1/billing/webhooks/yookassa", json=body, headers=headers
-    )
+    return await client.post("/api/v1/billing/webhooks/yookassa", json=body, headers=headers)
 
 
 # ── Create ──────────────────────────────────────────────────────────────────
@@ -253,9 +249,7 @@ async def test_poll_endpoint_settles_pending_payment(
     body = await _create_payment(client, teacher_token)
     _mock_get(monkeypatch, "succeeded")  # amount 190.00 == pack_50 price
 
-    resp = await client.get(
-        f"/api/v1/billing/payments/{body['payment_id']}", cookies=teacher_token
-    )
+    resp = await client.get(f"/api/v1/billing/payments/{body['payment_id']}", cookies=teacher_token)
     assert resp.status_code == 200
     assert resp.json()["status"] == "succeeded"
 
@@ -285,9 +279,7 @@ async def test_poll_amount_mismatch_does_not_credit(
     body = await _create_payment(client, teacher_token)  # pack_50 → 190.00
     _mock_get(monkeypatch, "succeeded", amount="1.00")
 
-    resp = await client.get(
-        f"/api/v1/billing/payments/{body['payment_id']}", cookies=teacher_token
-    )
+    resp = await client.get(f"/api/v1/billing/payments/{body['payment_id']}", cookies=teacher_token)
     assert resp.json()["status"] == "pending"
     balance = await billing_service.get_balance(db_session, teacher_user.id)
     assert balance["balance"] == 0
@@ -306,9 +298,7 @@ async def test_poll_does_not_credit_when_api_pending(
     body = await _create_payment(client, teacher_token)
     _mock_get(monkeypatch, "pending")
 
-    resp = await client.get(
-        f"/api/v1/billing/payments/{body['payment_id']}", cookies=teacher_token
-    )
+    resp = await client.get(f"/api/v1/billing/payments/{body['payment_id']}", cookies=teacher_token)
     assert resp.json()["status"] == "pending"
     balance = await billing_service.get_balance(db_session, teacher_user.id)
     assert balance["balance"] == 0
@@ -325,9 +315,7 @@ async def test_payment_canceled_marks_status(
     body = await _create_payment(client, teacher_token)
     _mock_get(monkeypatch, "canceled")
 
-    resp = await client.get(
-        f"/api/v1/billing/payments/{body['payment_id']}", cookies=teacher_token
-    )
+    resp = await client.get(f"/api/v1/billing/payments/{body['payment_id']}", cookies=teacher_token)
     assert resp.json()["status"] == "canceled"
     balance = await billing_service.get_balance(db_session, teacher_user.id)
     assert balance["balance"] == 0
@@ -498,9 +486,7 @@ def test_reconcile_and_webhook_task_credit_once(
     assert acct.balance == CREDIT_PACKAGES["pack_50"]["credits"]
 
 
-def test_reconcile_marks_canceled(
-    sync_session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_reconcile_marks_canceled(sync_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     user = _make_user_sync(sync_session)
     payment = _make_pending_payment_sync(sync_session, user, yk_id="yk-recon-1")
     _mock_get_sync(monkeypatch, status="canceled", payment_id=payment.id)
@@ -526,9 +512,7 @@ def test_reconcile_amount_mismatch_does_not_credit(
     assert _purchase_rows(sync_session, user) == []
 
 
-def test_reconcile_skips_too_recent(
-    sync_session: Session, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_reconcile_skips_too_recent(sync_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
     """Younger than RECONCILE_MIN_AGE_MINUTES → not even fetched."""
     user = _make_user_sync(sync_session)
     payment = _make_pending_payment_sync(sync_session, user, yk_id="yk-recon-1", age_minutes=1)

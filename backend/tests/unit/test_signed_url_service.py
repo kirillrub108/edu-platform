@@ -28,9 +28,7 @@ def test_generate_then_verify_roundtrip() -> None:
 def test_verify_fails_when_path_tampered() -> None:
     url = generate_signed_url("videos/a.mp4", "user-1", expires_in=60)
     q = _parse(url)
-    assert verify_signed_url(
-        "videos/EVIL.mp4", q["uid"], int(q["expires"]), q["sig"]
-    ) is False
+    assert verify_signed_url("videos/EVIL.mp4", q["uid"], int(q["expires"]), q["sig"]) is False
 
 
 def test_verify_fails_when_signature_tampered() -> None:

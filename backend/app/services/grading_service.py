@@ -12,6 +12,7 @@ the actual payloads/types/weights for the pinned (id, version) pairs. This
 module stays pure — it works on already-resolved questions, which keeps the
 grading logic decoupled from the DB.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -24,10 +25,10 @@ from app.constants import GRADING_MAX_ANSWER_CHARS
 
 @dataclass(frozen=True)
 class GradingResult:
-    awarded_score: Decimal      # 0..max_score
+    awarded_score: Decimal  # 0..max_score
     max_score: Decimal
-    is_correct: bool | None     # None for open-form (set later by LLM/teacher)
-    needs_review: bool          # True for open-form until graded
+    is_correct: bool | None  # None for open-form (set later by LLM/teacher)
+    needs_review: bool  # True for open-form until graded
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,7 @@ class ResolvedQuestion:
     `payload`/`type`/`weight` come from the (id, version) row, which is also
     immutable.
     """
+
     id: UUID
     version: int
     type: str
@@ -102,9 +104,7 @@ def _grade_true_false(payload: dict[str, Any], response: dict[str, Any]) -> Grad
 
 
 def _grade_matching(payload: dict[str, Any], response: dict[str, Any]) -> GradingResult:
-    correct_pairs = {
-        (int(li), int(ri)) for li, ri in (payload.get("correct_pairs") or [])
-    }
+    correct_pairs = {(int(li), int(ri)) for li, ri in (payload.get("correct_pairs") or [])}
     raw = response.get("pairs") or []
     if not isinstance(raw, list):
         raw = []
@@ -217,7 +217,7 @@ def open_answer_too_long(text: str) -> bool:
 
 @dataclass(frozen=True)
 class AggregateResult:
-    score: Decimal      # 0..1, weighted
+    score: Decimal  # 0..1, weighted
     passed: bool
     weight_total: Decimal
 

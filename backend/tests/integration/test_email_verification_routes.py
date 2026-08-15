@@ -49,6 +49,7 @@ def _cookies(user: User) -> dict[str, str]:
 
 # ── Registration ──────────────────────────────────────────────────────────────
 
+
 async def test_register_creates_unverified_user_and_enqueues_email(
     client: AsyncClient, mock_send_email: Any
 ) -> None:
@@ -72,6 +73,7 @@ async def test_register_creates_unverified_user_and_enqueues_email(
 
 
 # ── verify-email ──────────────────────────────────────────────────────────────
+
 
 async def test_verify_email_marks_verified_and_redirects(
     client: AsyncClient, db_session: Any
@@ -108,15 +110,14 @@ async def test_verify_email_invalid_token_redirects_not_500(client: AsyncClient)
 # Creating course/module/lesson structure no longer requires a verified email;
 # only AI operations stay gated (see test_verify_email_post.py).
 
+
 async def test_unverified_teacher_can_create_structure(
     client: AsyncClient, db_session: Any
 ) -> None:
     user = await _make_unverified_teacher(db_session)
     cookies = _cookies(user)
 
-    course = await client.post(
-        "/api/v1/courses/", json={"title": "Open course"}, cookies=cookies
-    )
+    course = await client.post("/api/v1/courses/", json={"title": "Open course"}, cookies=cookies)
     assert course.status_code == 201
     course_id = course.json()["id"]
 
@@ -156,6 +157,7 @@ async def test_verified_teacher_can_create_course(
 
 
 # ── resend-verification ───────────────────────────────────────────────────────
+
 
 async def test_resend_for_unverified_enqueues(
     client: AsyncClient, db_session: Any, mock_send_email: Any

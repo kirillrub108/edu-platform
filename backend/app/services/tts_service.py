@@ -1,7 +1,6 @@
-import json
-import structlog
 import base64
 import hashlib
+import json
 import os
 import re
 import subprocess
@@ -23,8 +22,8 @@ from app.constants import (
     TTS_CHUNK_CACHE_ENABLED,
     YANDEX_TTS_MAX_CHARS,
     YANDEX_TTS_MAX_RETRIES,
-    YANDEX_TTS_RUB_PER_MCHAR,
     YANDEX_TTS_ROLES_BY_VOICE,
+    YANDEX_TTS_RUB_PER_MCHAR,
     YANDEX_TTS_VOICES,
 )
 from app.services import usage_service
@@ -63,15 +62,15 @@ _BLANK_LINES_RE = re.compile(r"\n{3,}")
 # "Invalid XML format" → HTTP 500; polza (openai/tts-1) tries to pronounce them
 # mid-speech. Never pronounceable in our content — replace with a space.
 _CJK_RE = re.compile(
-    r"[ᄀ-ᇿ"   # Hangul Jamo
-    r"　-ヿ"    # CJK punctuation, Hiragana, Katakana
-    r"㄰-㆏"    # Hangul Compatibility Jamo
-    r"ㇰ-ㇿ"    # Katakana Phonetic Extensions
-    r"㐀-䶿"    # CJK Unified Ideographs Extension A
-    r"一-鿿"    # CJK Unified Ideographs
-    r"가-힯"    # Hangul Syllables
-    r"豈-﫿"    # CJK Compatibility Ideographs
-    r"･-ﾟ"    # Halfwidth Katakana
+    r"[ᄀ-ᇿ"  # Hangul Jamo
+    r"　-ヿ"  # CJK punctuation, Hiragana, Katakana
+    r"㄰-㆏"  # Hangul Compatibility Jamo
+    r"ㇰ-ㇿ"  # Katakana Phonetic Extensions
+    r"㐀-䶿"  # CJK Unified Ideographs Extension A
+    r"一-鿿"  # CJK Unified Ideographs
+    r"가-힯"  # Hangul Syllables
+    r"豈-﫿"  # CJK Compatibility Ideographs
+    r"･-ﾟ"  # Halfwidth Katakana
     r"]+"
 )
 
@@ -181,16 +180,26 @@ def _transcode_to_wav(audio: bytes, output_path: str) -> None:
     Silero output so the downstream FFmpeg encode needs no resampling.
     """
     result = subprocess.run(
-        ["ffmpeg", "-y", "-i", "pipe:0", "-ar", "48000", "-ac", "1",
-         "-c:a", "pcm_s16le", output_path],
+        [
+            "ffmpeg",
+            "-y",
+            "-i",
+            "pipe:0",
+            "-ar",
+            "48000",
+            "-ac",
+            "1",
+            "-c:a",
+            "pcm_s16le",
+            output_path,
+        ],
         input=audio,
         capture_output=True,
         timeout=120,
     )
     if result.returncode != 0:
         raise RuntimeError(
-            f"Polza TTS audio transcode failed: "
-            f"{result.stderr.decode(errors='replace')[:200]}"
+            f"Polza TTS audio transcode failed: {result.stderr.decode(errors='replace')[:200]}"
         )
 
 
@@ -199,6 +208,7 @@ def _transcode_to_wav(audio: bytes, output_path: str) -> None:
 # slides_cache / summaries_cache layout (two-level dir to avoid one directory
 # accumulating thousands of files). Key covers every parameter that affects the
 # resulting audio, so different providers/voices/models/speeds never collide.
+
 
 def _chunk_cache_key(chunk: str, provider: str, voice: str, model: str, speed: float | None) -> str:
     h = hashlib.sha256()
@@ -244,7 +254,10 @@ def _write_chunk_cache(cache_path: str, data: bytes) -> None:
 
 class TTSService:
     def synthesize(
-        self, text: str, output_path: str, voice: str | None = None,
+        self,
+        text: str,
+        output_path: str,
+        voice: str | None = None,
         role: str | None = None,
     ) -> str:
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -453,15 +466,11 @@ class TTSService:
         try:
             payload: object = response.json()
         except ValueError as exc:
-            raise RuntimeError(
-                f"Polza TTS returned non-JSON body: {response.text[:200]}"
-            ) from exc
+            raise RuntimeError(f"Polza TTS returned non-JSON body: {response.text[:200]}") from exc
 
         audio_field = payload.get("audio") if isinstance(payload, dict) else None
         if not isinstance(audio_field, str) or not audio_field:
-            raise RuntimeError(
-                f"Polza TTS returned no audio: {response.text[:200]}"
-            )
+            raise RuntimeError(f"Polza TTS returned no audio: {response.text[:200]}")
 
         if audio_field.startswith(("http://", "https://")):
             try:
@@ -482,7 +491,9 @@ class TTSService:
             raise RuntimeError("Polza TTS returned empty audio payload")
         return data
 
-    def _synthesize_yandex(self, text: str, output_path: str, voice: str, role: str | None = None) -> str:
+    def _synthesize_yandex(
+        self, text: str, output_path: str, voice: str, role: str | None = None
+    ) -> str:
         """Send text to Yandex SpeechKit API v3, chunking if long.
 
         v3 is priced per 250-char request unit (~half the cost of v1's
@@ -498,9 +509,7 @@ class TTSService:
             )
         plain = strip_tts_artifacts(_strip_ssml_tags(text))
         if not plain:
-            logger.warning(
-                "tts_empty_ssml_chunk", raw=repr(text[:80]), output=output_path
-            )
+            logger.warning("tts_empty_ssml_chunk", raw=repr(text[:80]), output=output_path)
             return self._synthesize_stub(text, output_path)
         chunks = _split_for_tts(plain, max_chars=YANDEX_TTS_MAX_CHARS)
         if len(chunks) > 1:
@@ -528,7 +537,10 @@ class TTSService:
                 tmp.close()
                 tmp_paths.append(tmp.name)
                 cache_key = _chunk_cache_key(
-                    chunk, "yandex", f"{ya_voice}:{ya_role or '-'}", "speechkit-v3",
+                    chunk,
+                    "yandex",
+                    f"{ya_voice}:{ya_role or '-'}",
+                    "speechkit-v3",
                     settings.YANDEX_TTS_SPEED,
                 )
                 cache_path = _chunk_cache_path(cache_key) if TTS_CHUNK_CACHE_ENABLED else None
@@ -617,7 +629,6 @@ class TTSService:
             f"Yandex SpeechKit v3 request failed ({url}) after "
             f"{YANDEX_TTS_MAX_RETRIES + 1} attempts: {last_error}"
         )
-
 
     def _synthesize_stub(self, text: str, output_path: str) -> str:
         sample_rate = 48000  # match Silero output rate → no resampling in FFmpeg

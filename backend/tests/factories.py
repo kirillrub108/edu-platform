@@ -40,9 +40,7 @@ from app.models.slide_text import SlideText
 from app.models.user import User
 
 
-async def make_course(
-    db: AsyncSession, owner: User, **overrides: Any
-) -> Course:
+async def make_course(db: AsyncSession, owner: User, **overrides: Any) -> Course:
     defaults: dict[str, Any] = {
         "title": f"Course {uuid.uuid4().hex[:6]}",
         "description": "Test course",
@@ -57,9 +55,7 @@ async def make_course(
     return course
 
 
-async def make_module(
-    db: AsyncSession, course: Course, **overrides: Any
-) -> Module:
+async def make_module(db: AsyncSession, course: Course, **overrides: Any) -> Module:
     # Default published so an enrolled student sees the lesson through the
     # course→module→lesson AND-chain; pass is_published=False for draft tests.
     defaults: dict[str, Any] = {
@@ -76,9 +72,7 @@ async def make_module(
     return module
 
 
-async def make_lesson(
-    db: AsyncSession, module: Module, **overrides: Any
-) -> Lesson:
+async def make_lesson(db: AsyncSession, module: Module, **overrides: Any) -> Lesson:
     # Published by default (see make_module) so visibility tests can opt into a
     # draft explicitly with is_published=False.
     defaults: dict[str, Any] = {
@@ -126,7 +120,9 @@ async def make_quiz(
 
 
 async def make_quiz_question(
-    db: AsyncSession, quiz: Quiz, *,
+    db: AsyncSession,
+    quiz: Quiz,
+    *,
     type: QuestionType = QuestionType.single_choice,
     payload: dict[str, Any] | None = None,
     weight: float = 1.0,
@@ -156,7 +152,10 @@ async def make_quiz_question(
 
 
 async def make_quiz_attempt(
-    db: AsyncSession, quiz: Quiz, student: User, *,
+    db: AsyncSession,
+    quiz: Quiz,
+    student: User,
+    *,
     questions_snapshot: dict[str, Any] | None = None,
     attempt_number: int = 1,
     status: AttemptStatus = AttemptStatus.in_progress,

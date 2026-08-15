@@ -30,9 +30,7 @@ async def list_lesson_comments(
     access: tuple[User, Lesson, bool] = Depends(require_lesson_access),
     db: AsyncSession = Depends(get_db),
 ) -> CommentListResponse:
-    items, total = await comment_service.list_comments(
-        db, lesson_id, limit=limit, offset=offset
-    )
+    items, total = await comment_service.list_comments(db, lesson_id, limit=limit, offset=offset)
     return CommentListResponse(
         items=[CommentRead.model_validate(c) for c in items],
         total=total,

@@ -61,16 +61,12 @@ async def test_owner_gets_full_tree_with_effective_visibility(
     course = await make_course(db_session, owner=teacher_user, is_published=False)
     pub_module = await make_module(db_session, course, is_published=True, order=0)
     visible_lesson = await make_lesson(db_session, pub_module, is_published=True)
-    draft_lesson = await make_lesson(
-        db_session, pub_module, is_published=False, order=1
-    )
+    draft_lesson = await make_lesson(db_session, pub_module, is_published=False, order=1)
     draft_module = await make_module(db_session, course, is_published=False, order=1)
     # Published lesson inside a draft module → effectively invisible.
     orphaned_lesson = await make_lesson(db_session, draft_module, is_published=True)
 
-    resp = await client.get(
-        f"/api/v1/courses/{course.id}/preview", cookies=teacher_token
-    )
+    resp = await client.get(f"/api/v1/courses/{course.id}/preview", cookies=teacher_token)
     assert resp.status_code == 200
     body = resp.json()
     assert body["id"] == str(course.id)
@@ -101,9 +97,7 @@ async def test_empty_course_returns_empty_tree(
 ) -> None:
     course = await make_course(db_session, owner=teacher_user)
 
-    resp = await client.get(
-        f"/api/v1/courses/{course.id}/preview", cookies=teacher_token
-    )
+    resp = await client.get(f"/api/v1/courses/{course.id}/preview", cookies=teacher_token)
     assert resp.status_code == 200
     assert resp.json()["modules"] == []
 
@@ -116,9 +110,7 @@ async def test_foreign_teacher_gets_404(
     course = await make_course(db_session, owner=teacher_user)
     other = await _make_second_teacher(db_session)
 
-    resp = await client.get(
-        f"/api/v1/courses/{course.id}/preview", cookies=_bearer(other)
-    )
+    resp = await client.get(f"/api/v1/courses/{course.id}/preview", cookies=_bearer(other))
     assert resp.status_code == 404
 
 
@@ -130,9 +122,7 @@ async def test_student_gets_404(
 ) -> None:
     course = await make_course(db_session, owner=teacher_user, is_published=True)
 
-    resp = await client.get(
-        f"/api/v1/courses/{course.id}/preview", cookies=student_token
-    )
+    resp = await client.get(f"/api/v1/courses/{course.id}/preview", cookies=student_token)
     assert resp.status_code == 404
 
 

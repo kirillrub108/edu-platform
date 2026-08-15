@@ -9,9 +9,8 @@ from pathlib import Path
 from typing import Protocol
 from urllib.parse import unquote, urlparse
 
-from fastapi import UploadFile
-
 import structlog
+from fastapi import UploadFile
 
 from app.config import settings
 from app.services.signed_url_service import generate_signed_url
@@ -96,6 +95,7 @@ class LocalBackend:
 class S3Backend:
     def __init__(self) -> None:
         import boto3
+
         self._client = boto3.client(
             "s3",
             endpoint_url=settings.S3_ENDPOINT_URL,
@@ -132,6 +132,7 @@ class S3Backend:
 
     def exists(self, relative_path: str) -> bool:
         from botocore.exceptions import ClientError
+
         try:
             self._client.head_object(Bucket=self._bucket, Key=relative_path)
             return True
@@ -252,7 +253,8 @@ class StorageService:
 
     def get_url(self, relative_path: str, user_id: str, expires_in: int | None = None) -> str:
         if isinstance(self._backend, LocalBackend):
-            return f"{self._backend.base_url}{generate_signed_url(relative_path, user_id, expires_in=expires_in)}"
+            signed_path = generate_signed_url(relative_path, user_id, expires_in=expires_in)
+            return f"{self._backend.base_url}{signed_path}"
         return self._backend.get_url(relative_path)
 
     def relative_path_from_url(self, stored_url: str | None) -> str | None:
@@ -269,12 +271,14 @@ class StorageService:
                 return None
             # generate_signed_url percent-encodes the path; undo that so callers
             # (e.g. resign_url -> get_url) get the raw path and don't double-encode.
-            rel = unquote(stored_url[idx + len(marker):].split("?", 1)[0])
+            rel = unquote(stored_url[idx + len(marker) :].split("?", 1)[0])
             return rel or None
         # S3: object key sits after the /{bucket}/ prefix of the presigned URL.
         return self._extract_s3_relative(stored_url)
 
-    def resign_url(self, stored_url: str | None, user_id: str, expires_in: int | None = None) -> str | None:
+    def resign_url(
+        self, stored_url: str | None, user_id: str, expires_in: int | None = None
+    ) -> str | None:
         if not stored_url:
             return stored_url
         rel = self.relative_path_from_url(stored_url)
@@ -292,7 +296,7 @@ class StorageService:
             # URL-decode: the S3 key is stored raw (may contain spaces/Cyrillic),
             # while the presigned URL percent-encodes it. Without unquote the key
             # gets double-encoded on re-signing (%20 -> %2520) and 404s.
-            return unquote(parsed.path[len(prefix):])
+            return unquote(parsed.path[len(prefix) :])
         return None
 
     def get_full_path(self, relative_path: str) -> str:

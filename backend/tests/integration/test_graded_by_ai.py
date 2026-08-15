@@ -17,6 +17,7 @@ therefore set up graded_by_ai state directly via the async session and verify
 the API serialisation separately. The task's flag-write logic is covered in
 tests/unit/test_quiz_graded_by_ai_unit.py.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -82,7 +83,11 @@ async def _setup_quiz_closed_only(db_session, teacher_user, student_user):
 
 
 async def _make_graded_attempt(
-    db_session, quiz, student_user, question, *,
+    db_session,
+    quiz,
+    student_user,
+    question,
+    *,
     graded_by_ai: bool,
 ):
     """Create a graded attempt with one QuizAnswer, setting graded_by_ai."""
@@ -132,7 +137,11 @@ def test_grade_attempt_not_in_ai_gated_endpoints():
 
 @pytest.mark.asyncio
 async def test_get_attempt_result_returns_ai_graded_true(
-    client, db_session, teacher_user, student_user, student_token,
+    client,
+    db_session,
+    teacher_user,
+    student_user,
+    student_token,
 ):
     """When an answer has graded_by_ai=True (set by grade_attempt_task),
     GET attempt result returns graded_by_ai=True per answer and ai_graded=True.
@@ -156,7 +165,11 @@ async def test_get_attempt_result_returns_ai_graded_true(
 
 @pytest.mark.asyncio
 async def test_get_attempt_result_ai_graded_false_when_flag_not_set(
-    client, db_session, teacher_user, student_user, student_token,
+    client,
+    db_session,
+    teacher_user,
+    student_user,
+    student_token,
 ):
     """When no answer has graded_by_ai=True, ai_graded=False."""
     lesson, quiz, question = await _setup_quiz_with_open_question(
@@ -181,12 +194,14 @@ async def test_get_attempt_result_ai_graded_false_when_flag_not_set(
 
 @pytest.mark.asyncio
 async def test_closed_only_attempt_ai_graded_false(
-    client, db_session, teacher_user, student_user, student_token,
+    client,
+    db_session,
+    teacher_user,
+    student_user,
+    student_token,
 ):
     """An attempt with only closed questions has ai_graded=False."""
-    lesson, quiz, question = await _setup_quiz_closed_only(
-        db_session, teacher_user, student_user
-    )
+    lesson, quiz, question = await _setup_quiz_closed_only(db_session, teacher_user, student_user)
     attempt, _ans = await _make_graded_attempt(
         db_session, quiz, student_user, question, graded_by_ai=False
     )
@@ -206,7 +221,12 @@ async def test_closed_only_attempt_ai_graded_false(
 
 @pytest.mark.asyncio
 async def test_override_resets_graded_by_ai(
-    client, db_session, teacher_user, teacher_token, student_user, student_token,
+    client,
+    db_session,
+    teacher_user,
+    teacher_token,
+    student_user,
+    student_token,
 ):
     """Teacher override of an AI-graded answer sets graded_by_ai=False."""
     lesson, quiz, question = await _setup_quiz_with_open_question(
@@ -243,7 +263,11 @@ async def test_override_resets_graded_by_ai(
 
 @pytest.mark.asyncio
 async def test_student_schema_has_graded_by_ai_no_reference_fields(
-    client, db_session, teacher_user, student_user, student_token,
+    client,
+    db_session,
+    teacher_user,
+    student_user,
+    student_token,
 ):
     """graded_by_ai is a status field — present in student schema.
     Reference-answer fields (reference_answer, correct_index, etc.) must never

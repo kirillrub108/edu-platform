@@ -4,6 +4,7 @@ Routers consume the async API; Celery uses the sync API (psycopg2). Both
 paths share the material assembly logic so generation reads exactly what
 the teacher sees on the page.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -64,9 +65,7 @@ async def assemble_material(
     max_chars: int = QUIZ_MAX_MATERIAL_CHARS,
 ) -> str:
     slides_q = await db.execute(
-        select(SlideText)
-        .where(SlideText.lesson_id == lesson.id)
-        .order_by(SlideText.slide_number)
+        select(SlideText).where(SlideText.lesson_id == lesson.id).order_by(SlideText.slide_number)
     )
     slides = list(slides_q.scalars())
     material = _slides_to_material(slides)
@@ -75,7 +74,10 @@ async def assemble_material(
     if not material:
         material = (lesson.text_content or "").strip()
     if not material:
-        raise EmptyMaterialError("У урока нет материала для генерации теста: загрузите презентацию или добавьте текст урока")
+        raise EmptyMaterialError(
+            "У урока нет материала для генерации теста: "
+            "загрузите презентацию или добавьте текст урока"
+        )
     return _truncate(material, max_chars)
 
 
@@ -101,7 +103,10 @@ def assemble_material_sync(
     if not material:
         material = (lesson.text_content or "").strip()
     if not material:
-        raise EmptyMaterialError("У урока нет материала для генерации теста: загрузите презентацию или добавьте текст урока")
+        raise EmptyMaterialError(
+            "У урока нет материала для генерации теста: "
+            "загрузите презентацию или добавьте текст урока"
+        )
     return _truncate(material, max_chars)
 
 
@@ -136,9 +141,7 @@ async def get_or_create_quiz(db: AsyncSession, lesson: Lesson) -> Quiz:
 
 
 def get_or_create_quiz_sync(session: Session, lesson_id: UUID) -> Quiz:
-    quiz = session.execute(
-        select(Quiz).where(Quiz.lesson_id == lesson_id)
-    ).scalar_one_or_none()
+    quiz = session.execute(select(Quiz).where(Quiz.lesson_id == lesson_id)).scalar_one_or_none()
     if quiz is None:
         quiz = Quiz(lesson_id=lesson_id)
         session.add(quiz)
@@ -262,16 +265,15 @@ def _to_resolved(
         ver = int(ptr["version"])
         row = rows_by_pk.get((qid, ver))
         if row is None:
-            raise BrokenSnapshotError(
-                f"snapshot references missing question version: {qid}@{ver}"
-            )
+            raise BrokenSnapshotError(f"snapshot references missing question version: {qid}@{ver}")
         out.append(
             ResolvedQuestion(
                 id=row.id,
                 version=row.version,
                 type=row.type.value if hasattr(row.type, "value") else str(row.type),
                 payload=dict(row.payload),
-                weight=Decimal(str(row.weight)) if row.weight is not None
+                weight=Decimal(str(row.weight))
+                if row.weight is not None
                 else Decimal(str(QUIZ_DEFAULT_WEIGHT)),
                 order=int(ptr.get("order", row.order)),
             )
@@ -283,34 +285,30 @@ def _row_pk(row: QuizQuestion) -> tuple[UUID, int]:
     return (row.id, int(row.version))
 
 
-async def resolve_snapshot(
-    db: AsyncSession, snapshot: dict[str, Any]
-) -> list[ResolvedQuestion]:
+async def resolve_snapshot(db: AsyncSession, snapshot: dict[str, Any]) -> list[ResolvedQuestion]:
     pointers = snapshot_pointers(snapshot)
     if not pointers:
         return []
     pairs = _pairs_from_snapshot(snapshot)
     # tuple_().in_(VALUES) — single batched lookup of (id, version) pairs.
     rows_q = await db.execute(
-        select(QuizQuestion).where(
-            tuple_(QuizQuestion.id, QuizQuestion.version).in_(pairs)
-        )
+        select(QuizQuestion).where(tuple_(QuizQuestion.id, QuizQuestion.version).in_(pairs))
     )
     rows_by_pk = {_row_pk(r): r for r in rows_q.scalars()}
     return _to_resolved(pointers, rows_by_pk)
 
 
-def resolve_snapshot_sync(
-    session: Session, snapshot: dict[str, Any]
-) -> list[ResolvedQuestion]:
+def resolve_snapshot_sync(session: Session, snapshot: dict[str, Any]) -> list[ResolvedQuestion]:
     pointers = snapshot_pointers(snapshot)
     if not pointers:
         return []
     pairs = _pairs_from_snapshot(snapshot)
-    rows = session.execute(
-        select(QuizQuestion).where(
-            tuple_(QuizQuestion.id, QuizQuestion.version).in_(pairs)
+    rows = (
+        session.execute(
+            select(QuizQuestion).where(tuple_(QuizQuestion.id, QuizQuestion.version).in_(pairs))
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     rows_by_pk = {_row_pk(r): r for r in rows}
     return _to_resolved(pointers, rows_by_pk)

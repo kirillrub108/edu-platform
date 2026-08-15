@@ -8,6 +8,7 @@ Two parallel question-read families exist to prevent reference-answer leakage:
 The discriminator is `type`. New types must register a Payload variant in both
 families so static validation catches missing branches.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -201,9 +202,17 @@ def to_student_payload(teacher_payload: dict[str, Any]) -> dict[str, Any]:
     """Strip reference-answer fields from a stored payload (JSONB dict)."""
     t = teacher_payload.get("type")
     if t == "single_choice":
-        return {"type": t, "prompt": teacher_payload["prompt"], "options": teacher_payload["options"]}
+        return {
+            "type": t,
+            "prompt": teacher_payload["prompt"],
+            "options": teacher_payload["options"],
+        }
     if t == "multiple_choice":
-        return {"type": t, "prompt": teacher_payload["prompt"], "options": teacher_payload["options"]}
+        return {
+            "type": t,
+            "prompt": teacher_payload["prompt"],
+            "options": teacher_payload["options"],
+        }
     if t == "true_false":
         return {"type": t, "prompt": teacher_payload["prompt"]}
     if t == "short_answer":
@@ -305,9 +314,7 @@ class QuizSettingsUpdate(BaseModel):
 
 # Subset of types the LLM is allowed to generate. Matching/ordering/fill_blank
 # come out poorly from current open-weight models; teachers add those manually.
-GeneratableType = Literal[
-    "single_choice", "multiple_choice", "true_false", "short_answer"
-]
+GeneratableType = Literal["single_choice", "multiple_choice", "true_false", "short_answer"]
 
 
 class QuizGenerateRequest(BaseModel):

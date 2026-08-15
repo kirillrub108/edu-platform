@@ -4,6 +4,7 @@ Covers every closed-form type, the multiple_choice Jaccard guard, partial
 scoring for matching/ordering, fill_blank normalization, and the weighted
 attempt aggregation used by both the LLM grader and the manual override.
 """
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -185,7 +186,9 @@ def test_unknown_type_raises():
 
 def test_aggregate_simple_average():
     # Three equal-weight questions, two correct → score 2/3.
-    items = [(Decimal("1"), Decimal("1"), Decimal("1"))] * 2 + [(Decimal("1"), Decimal("0"), Decimal("1"))]
+    items = [(Decimal("1"), Decimal("1"), Decimal("1"))] * 2 + [
+        (Decimal("1"), Decimal("0"), Decimal("1"))
+    ]
     agg = aggregate_score(items, Decimal("0.6"))
     assert agg.score == Decimal(2) / Decimal(3)
     assert agg.passed is True
@@ -219,10 +222,12 @@ def test_manual_override_recompute_matches_aggregate():
     snapshot weights, giving the same number aggregate_score would produce
     if it were re-run from scratch.
     """
-    snap = build_snapshot([
-        {"id": "00000000-0000-0000-0000-000000000001", "version": 1, "order": 0},
-        {"id": "00000000-0000-0000-0000-000000000002", "version": 1, "order": 1},
-    ])
+    snap = build_snapshot(
+        [
+            {"id": "00000000-0000-0000-0000-000000000001", "version": 1, "order": 0},
+            {"id": "00000000-0000-0000-0000-000000000002", "version": 1, "order": 1},
+        ]
+    )
     pointers = snapshot_pointers(snap)
     # Closed question correct (1.0). Essay: LLM gave 0.4 → teacher overrides to 0.9.
     items = [
@@ -238,10 +243,12 @@ def test_manual_override_recompute_matches_aggregate():
 
 
 def test_build_snapshot_preserves_order_and_versions():
-    snap = build_snapshot([
-        {"id": "00000000-0000-0000-0000-000000000001", "version": 3, "order": 0},
-        {"id": "00000000-0000-0000-0000-000000000002", "version": 1, "order": 1},
-    ])
+    snap = build_snapshot(
+        [
+            {"id": "00000000-0000-0000-0000-000000000001", "version": 3, "order": 0},
+            {"id": "00000000-0000-0000-0000-000000000002", "version": 1, "order": 1},
+        ]
+    )
     pointers = snapshot_pointers(snap)
     assert [p["version"] for p in pointers] == [3, 1]
     assert [p["order"] for p in pointers] == [0, 1]

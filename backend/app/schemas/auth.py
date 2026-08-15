@@ -45,6 +45,7 @@ class UserLogin(BaseModel):
 
 class TokenResponse(BaseModel):
     """Internal DTO returned by AuthService. Not exposed in API responses."""
+
     access_token: str
     refresh_token: str
     token_type: str = "bearer"

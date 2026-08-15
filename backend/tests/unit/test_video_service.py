@@ -39,6 +39,7 @@ def _write_wav(path: Path, duration_s: float, trailing_silence_s: float = 0.0) -
 # ── _trim_trailing_silence ───────────────────────────────────────────────────
 # Patch subprocess to simulate FFmpeg producing the expected output.
 
+
 @pytest.fixture()
 def _patch_silenceremove(monkeypatch: pytest.MonkeyPatch) -> None:
     """Patched ffmpeg silenceremove: writes a shorter WAV than the source."""
@@ -125,6 +126,7 @@ def test_trim_trailing_silence_returns_false_when_too_short(
 
 # ── convert_pptx_to_images cache hit ────────────────────────────────────────
 
+
 def test_convert_pptx_to_images_caches_repeat_calls(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -180,6 +182,7 @@ def test_convert_pptx_to_images_caches_repeat_calls(
 
 # ── convert_pptx_to_images: disk cache hit ──────────────────────────────────
 
+
 def test_convert_pptx_to_images_disk_cache_hit_skips_subprocess(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -210,15 +213,14 @@ def test_convert_pptx_to_images_disk_cache_hit_skips_subprocess(
     monkeypatch.setattr(vs_mod.subprocess, "run", _fake_run)
 
     svc = VideoService()
-    images = svc.convert_pptx_to_images(
-        str(pptx), str(tmp_path / "out"), cache_dir=str(cache_dir)
-    )
+    images = svc.convert_pptx_to_images(str(pptx), str(tmp_path / "out"), cache_dir=str(cache_dir))
 
     assert len(images) == 1
     assert call_count["n"] == 0  # no subprocess calls on disk-cache hit
 
 
 # ── convert_pptx_to_images: libreoffice failure ──────────────────────────────
+
 
 def test_convert_pptx_to_images_libreoffice_nonzero_exit_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -242,6 +244,7 @@ def test_convert_pptx_to_images_libreoffice_nonzero_exit_raises(
 
 
 # ── encode_segment ───────────────────────────────────────────────────────────
+
 
 def test_encode_segment_calls_ffmpeg_with_still_image_args(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -282,6 +285,7 @@ def test_encode_segment_calls_ffmpeg_with_still_image_args(
 
 # ── _trim_trailing_silence: ffmpeg failure ───────────────────────────────────
 
+
 def test_trim_trailing_silence_returns_false_when_ffmpeg_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -307,6 +311,7 @@ def test_trim_trailing_silence_returns_false_when_ffmpeg_errors(
 
 
 # ── concatenate_segments ────────────────────────────────────────────────────
+
 
 def test_concatenate_segments_invokes_ffmpeg_concat(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch

@@ -4,6 +4,7 @@ Two cases verified:
   1. Stuck lesson (task_id set, updated_at older than grace window) → error + task_id cleared.
   2. Fresh in-flight lesson (task_id set, updated_at recent) → status unchanged.
 """
+
 from __future__ import annotations
 
 import os

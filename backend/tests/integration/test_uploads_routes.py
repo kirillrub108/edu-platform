@@ -29,7 +29,13 @@ async def test_upload_pptx_persists_path_on_lesson(
     resp = await client.post(
         "/api/v1/uploads/pptx",
         params={"lesson_id": str(lesson.id)},
-        files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+        files={
+            "file": (
+                "deck.pptx",
+                sample_pptx_bytes,
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            )
+        },
         cookies=teacher_token,
     )
     assert resp.status_code == 200
@@ -108,7 +114,13 @@ async def test_upload_pptx_unauthenticated_returns_401(
 ) -> None:
     resp = await client.post(
         "/api/v1/uploads/pptx",
-        files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+        files={
+            "file": (
+                "deck.pptx",
+                sample_pptx_bytes,
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            )
+        },
     )
     assert resp.status_code == 401
 
@@ -121,7 +133,13 @@ async def test_upload_pptx_without_lesson_id_returns_file_path(
     """Upload without lesson_id saves the file but doesn't attach it to any lesson."""
     resp = await client.post(
         "/api/v1/uploads/pptx",
-        files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+        files={
+            "file": (
+                "deck.pptx",
+                sample_pptx_bytes,
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            )
+        },
         cookies=teacher_token,
     )
     assert resp.status_code == 200
@@ -230,9 +248,16 @@ async def test_upload_pptx_with_refresh_token_returns_401(
         str(teacher_user.id), family, sliding_days=14, absolute_expires_at=absolute
     )
     from tests.conftest import _TEST_CSRF
+
     resp = await client.post(
         "/api/v1/uploads/pptx",
-        files={"file": ("deck.pptx", sample_pptx_bytes, "application/vnd.openxmlformats-officedocument.presentationml.presentation")},
+        files={
+            "file": (
+                "deck.pptx",
+                sample_pptx_bytes,
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            )
+        },
         cookies={"access_token": refresh_token, "csrf_token": _TEST_CSRF},
     )
     assert resp.status_code == 401

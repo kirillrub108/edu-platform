@@ -46,9 +46,7 @@ class AttemptStatus(str, enum.Enum):
 class Quiz(Base):
     __tablename__ = "quizzes"
     __mapper_args__ = {"eager_defaults": True}
-    __table_args__ = (
-        UniqueConstraint("lesson_id", name="uq_quizzes_lesson_id"),
-    )
+    __table_args__ = (UniqueConstraint("lesson_id", name="uq_quizzes_lesson_id"),)
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     lesson_id = Column(
@@ -81,10 +79,7 @@ class Quiz(Base):
     # delete) is managed explicitly by services, not by ORM cascades.
     questions = relationship(
         "QuizQuestion",
-        primaryjoin=(
-            "and_(Quiz.id == QuizQuestion.quiz_id,"
-            " QuizQuestion.superseded_at.is_(None))"
-        ),
+        primaryjoin=("and_(Quiz.id == QuizQuestion.quiz_id, QuizQuestion.superseded_at.is_(None))"),
         order_by="QuizQuestion.order",
         viewonly=True,
     )
@@ -106,6 +101,7 @@ class QuizQuestion(Base):
     Attempts reference (id, version) pairs via QuizAttempt.questions_snapshot,
     so historical versions stay queryable forever (no GC in this PR).
     """
+
     __tablename__ = "quiz_questions"
     __mapper_args__ = {"eager_defaults": True}
     __table_args__ = (
@@ -152,7 +148,9 @@ class QuizAttempt(Base):
     __mapper_args__ = {"eager_defaults": True}
     __table_args__ = (
         UniqueConstraint(
-            "quiz_id", "student_id", "attempt_number",
+            "quiz_id",
+            "student_id",
+            "attempt_number",
             name="uq_quiz_attempts_quiz_student_number",
         ),
         Index("ix_quiz_attempts_quiz_student", "quiz_id", "student_id"),
@@ -203,7 +201,8 @@ class QuizAnswer(Base):
     __mapper_args__ = {"eager_defaults": True}
     __table_args__ = (
         UniqueConstraint(
-            "attempt_id", "question_id",
+            "attempt_id",
+            "question_id",
             name="uq_quiz_answers_attempt_question",
         ),
         Index("ix_quiz_answers_attempt_id", "attempt_id"),

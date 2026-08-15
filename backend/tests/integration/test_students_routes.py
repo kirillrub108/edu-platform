@@ -103,7 +103,9 @@ async def test_my_courses_filters_by_student(
     student_user: User,
     student_token: dict[str, str],
 ) -> None:
-    enrolled = await make_course(db_session, owner=teacher_user, is_published=True, title="Enrolled")
+    enrolled = await make_course(
+        db_session, owner=teacher_user, is_published=True, title="Enrolled"
+    )
     _other = await make_course(db_session, owner=teacher_user, is_published=True, title="Other")
     await make_enrollment(db_session, student_user, enrolled)
 
@@ -148,9 +150,7 @@ async def test_preview_unpublished_returns_404(
     db_session: AsyncSession,
     teacher_user: User,
 ) -> None:
-    await make_course(
-        db_session, owner=teacher_user, is_published=False, access_code="DRAFT1"
-    )
+    await make_course(db_session, owner=teacher_user, is_published=False, access_code="DRAFT1")
 
     resp = await client.get("/api/v1/students/courses/preview?code=DRAFT1")
     assert resp.status_code == 404
@@ -185,5 +185,3 @@ async def test_complete_lesson_marks_progress(
     )
     assert row is not None
     assert row.is_completed is True
-
-

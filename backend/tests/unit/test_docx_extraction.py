@@ -72,15 +72,9 @@ def test_billion_laughs_docx_does_not_expand() -> None:
     )
     src = io.BytesIO(base)
     out_buf = io.BytesIO()
-    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(
-        out_buf, "w", zipfile.ZIP_DEFLATED
-    ) as zout:
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out_buf, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
-            data = (
-                bomb_xml
-                if item.filename == "word/document.xml"
-                else zin.read(item.filename)
-            )
+            data = bomb_xml if item.filename == "word/document.xml" else zin.read(item.filename)
             zout.writestr(item, data)
     bomb = out_buf.getvalue()
 

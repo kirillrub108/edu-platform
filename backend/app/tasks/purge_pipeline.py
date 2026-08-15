@@ -57,6 +57,7 @@ _COMMIT_BATCH = 100
 
 # ── File cleanup helpers ──────────────────────────────────────────────────────
 
+
 def _rel_from_url(url: str | None) -> str | None:
     """Extract the storage-relative path from a stored /files/ URL (cover_url,
     video_url are signed absolute URLs). Returns None if not a local file URL."""
@@ -68,7 +69,7 @@ def _rel_from_url(url: str | None) -> str | None:
         return None
     # generate_signed_url percent-encodes the path segment; undo that to get
     # the actual on-disk relative path.
-    return unquote(url[idx + len(marker):].split("?", 1)[0])
+    return unquote(url[idx + len(marker) :].split("?", 1)[0])
 
 
 def _remove_file(rel_path: str | None) -> None:
@@ -99,8 +100,6 @@ def _remove_lesson_dirs(lesson_id) -> None:
 def _purge_assignment_files(session: Session, lesson: Lesson) -> None:
     """Remove attachment files (and their per-submission dirs) for every
     assignment of the lesson, before the row cascade wipes the DB records."""
-    import shutil
-
     submission_ids = (
         session.execute(
             select(AssignmentSubmission.id)
@@ -184,9 +183,7 @@ def _purge_user_files(session: Session, user: User) -> None:
     # relationship cascade), so clean those files first.
     courses = (
         session.execute(
-            select(Course)
-            .where(Course.owner_id == user.id)
-            .execution_options(include_deleted=True)
+            select(Course).where(Course.owner_id == user.id).execution_options(include_deleted=True)
         )
         .scalars()
         .all()
@@ -197,15 +194,14 @@ def _purge_user_files(session: Session, user: User) -> None:
 
 # ── Submission-attachment retention ──────────────────────────────────────────
 
+
 def _purge_expired_submission_attachments(session: Session) -> int:
     """Remove attachment files + rows for submissions graded longer than
     ATTACHMENT_RETENTION_DAYS_AFTER_GRADED ago. The submission (grade, feedback,
     thread) stays; only the stored files and their records go. Idempotent: once a
     row is deleted a re-run finds nothing, and _remove_file tolerates a missing
     file, so cascade-deleted attachments from the soft-delete pass don't error."""
-    cutoff = datetime.now(timezone.utc) - timedelta(
-        days=ATTACHMENT_RETENTION_DAYS_AFTER_GRADED
-    )
+    cutoff = datetime.now(timezone.utc) - timedelta(days=ATTACHMENT_RETENTION_DAYS_AFTER_GRADED)
     rows = (
         session.execute(
             select(AssignmentAttachment)
@@ -244,6 +240,7 @@ def _purge_expired_submission_attachments(session: Session) -> int:
 
 
 # ── Generic purge driver ──────────────────────────────────────────────────────
+
 
 def _purge_model(
     session: Session,
@@ -342,9 +339,7 @@ def _atomic_evict(path: str, is_dir: bool) -> None:
             logger.warning("gc_cache_staging_remove_failed", path=staging, exc_info=True)
 
 
-def _gc_cache(
-    root: str, ttl_days: int, max_bytes: int, *, entry_is_dir: bool
-) -> tuple[int, int]:
+def _gc_cache(root: str, ttl_days: int, max_bytes: int, *, entry_is_dir: bool) -> tuple[int, int]:
     """Evict entries from one content-hash cache: first every entry whose mtime
     is older than ttl_days, then — if the cache still exceeds max_bytes — the
     least-recently-used first until it fits. Recency is the mtime we bump on
@@ -440,6 +435,7 @@ def gc_disk_caches() -> dict[str, int]:
 
 # ── Stale unpublished LessonVideo GC ──────────────────────────────────────────
 
+
 def _evict_lesson_video(session: Session, video: LessonVideo) -> None:
     """Delete a video's stored file (via storage_service — S3-safe) then its row.
     File first so a crash between the two steps leaves an orphan file the next
@@ -456,9 +452,7 @@ def _evict_lesson_video(session: Session, video: LessonVideo) -> None:
             else:
                 logger.warning("gc_video_file_missing", id=str(video.id), path=rel)
         except Exception:
-            logger.warning(
-                "gc_video_file_remove_failed", id=str(video.id), path=rel, exc_info=True
-            )
+            logger.warning("gc_video_file_remove_failed", id=str(video.id), path=rel, exc_info=True)
     session.delete(video)
     session.flush()
 
@@ -473,9 +467,7 @@ def _gc_lesson_videos_session(session: Session) -> int:
     cutoff = datetime.now(timezone.utc) - timedelta(days=LESSON_VIDEO_UNPUBLISHED_TTL_DAYS)
     lesson_ids = (
         session.execute(
-            select(LessonVideo.lesson_id)
-            .where(LessonVideo.is_published.is_(False))
-            .distinct()
+            select(LessonVideo.lesson_id).where(LessonVideo.is_published.is_(False)).distinct()
         )
         .scalars()
         .all()
@@ -504,7 +496,11 @@ def _gc_lesson_videos_session(session: Session) -> int:
                 .all()
             )
             # Never orphan the lesson: with no published version, keep ≥1 unpublished.
-            keep = LESSON_VIDEO_KEEP_UNPUBLISHED if published else max(LESSON_VIDEO_KEEP_UNPUBLISHED, 1)
+            keep = (
+                LESSON_VIDEO_KEEP_UNPUBLISHED
+                if published
+                else max(LESSON_VIDEO_KEEP_UNPUBLISHED, 1)
+            )
             for video in unpublished[keep:]:
                 if video.created_at is not None and video.created_at < cutoff:
                     _evict_lesson_video(session, video)

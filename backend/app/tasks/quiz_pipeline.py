@@ -14,6 +14,7 @@ The thread-pool pattern mirrors `tasks.video_pipeline`: bounded executor +
 `as_completed` + per-future progress callback. `asyncio.run` is used inside
 worker threads to call the async LLM client.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -115,9 +116,7 @@ def generate_quiz_task(
             material = assemble_material_sync(session, lesson_uuid)
             quiz = get_or_create_quiz_sync(session, lesson_uuid)
             quiz_id = quiz.id
-            usage_service.set_usage_context(
-                "quiz_generate", lesson_id=lesson_id, quiz_id=quiz_id
-            )
+            usage_service.set_usage_context("quiz_generate", lesson_id=lesson_id, quiz_id=quiz_id)
 
             _progress("llm", 1, 3)
             generated = asyncio.run(
@@ -227,17 +226,25 @@ def _mark_lesson_progress_if_passed(session: Session, attempt: QuizAttempt) -> N
     if module is None:
         return
 
-    enrollment = session.query(Enrollment).filter(
-        Enrollment.student_id == attempt.student_id,
-        Enrollment.course_id == module.course_id,
-    ).first()
+    enrollment = (
+        session.query(Enrollment)
+        .filter(
+            Enrollment.student_id == attempt.student_id,
+            Enrollment.course_id == module.course_id,
+        )
+        .first()
+    )
     if enrollment is None:
         return
 
-    progress = session.query(LessonProgress).filter(
-        LessonProgress.enrollment_id == enrollment.id,
-        LessonProgress.lesson_id == quiz.lesson_id,
-    ).first()
+    progress = (
+        session.query(LessonProgress)
+        .filter(
+            LessonProgress.enrollment_id == enrollment.id,
+            LessonProgress.lesson_id == quiz.lesson_id,
+        )
+        .first()
+    )
     if progress is None:
         progress = LessonProgress(
             enrollment_id=enrollment.id,
@@ -295,9 +302,7 @@ def grade_attempt_task(self, attempt_id: str) -> dict:
                     max_workers=QUIZ_GRADING_WORKERS, thread_name_prefix="grade"
                 ) as pool:
                     futs = {
-                        pool.submit(
-                            _grade_one_open, ans_id, payload, text, attempt.quiz_id
-                        ): ans_id
+                        pool.submit(_grade_one_open, ans_id, payload, text, attempt.quiz_id): ans_id
                         for ans_id, payload, text in open_jobs
                     }
                     for fut in as_completed(futs):

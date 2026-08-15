@@ -21,6 +21,7 @@ pytestmark = pytest.mark.unit
 
 # ── VideoGenerateRequest ────────────────────────────────────────────────────
 
+
 @pytest.mark.parametrize("voice", ["nova", "shimmer", "coral", "alloy", "onyx", "echo"])
 def test_video_generate_request_accepts_valid_voices(voice: str) -> None:
     req = VideoGenerateRequest(voice=voice)
@@ -65,6 +66,7 @@ def test_user_register_rejects_short_password(password: str) -> None:
 
 # ── CourseCreate ────────────────────────────────────────────────────────────
 
+
 def test_course_create_requires_title() -> None:
     with pytest.raises(ValidationError):
         CourseCreate(description="no title")  # type: ignore[call-arg]
@@ -77,6 +79,7 @@ def test_course_create_rejects_empty_title() -> None:
 
 # ── LessonCreate ────────────────────────────────────────────────────────────
 
+
 def test_lesson_create_defaults() -> None:
     lesson = LessonCreate(title="L", module_id=uuid4())
     assert lesson.content_type.value == "video"
@@ -84,6 +87,7 @@ def test_lesson_create_defaults() -> None:
 
 
 # ── SlideTextUpdate ─────────────────────────────────────────────────────────
+
 
 def test_slide_text_update_accepts_empty_string() -> None:
     """Schema currently has no min_length constraint on edited_text — "" is
@@ -98,6 +102,7 @@ def test_slide_text_update_requires_field() -> None:
 
 
 # ── ScriptUpdateRequest ─────────────────────────────────────────────────────
+
 
 def test_script_update_accepts_long_text() -> None:
     text = "x" * 100_000

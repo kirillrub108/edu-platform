@@ -49,6 +49,7 @@ def _compute_type_counts(n: int, types: list[str]) -> dict[str, int]:
 class LLMOutputError(RuntimeError):
     """Raised when the LLM returns malformed output after the retry budget."""
 
+
 LECTURE_ENHANCEMENT_PROMPT = """\
 Ты — методист и редактор образовательного контента.
 Получаешь черновик текста доклада и делаешь из него профессиональный текст лекции.
@@ -391,9 +392,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             "short_answer": "short-answer (fill-in-the-blank)",
         }
         breakdown = ", ".join(
-            f"{cnt} {_type_labels.get(t, t)}"
-            for t, cnt in type_counts.items()
-            if cnt > 0
+            f"{cnt} {_type_labels.get(t, t)}" for t, cnt in type_counts.items() if cnt > 0
         )
         user = (
             f"Кол-во вопросов: {num_questions} ({breakdown})\n"
@@ -407,9 +406,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             if not isinstance(raw_questions, list) or not raw_questions:
                 raise ValueError("missing or empty 'questions' array")
             if len(raw_questions) != num_questions:
-                raise ValueError(
-                    f"expected {num_questions} questions, got {len(raw_questions)}"
-                )
+                raise ValueError(f"expected {num_questions} questions, got {len(raw_questions)}")
             out: list[dict[str, Any]] = []
             actual_counts: dict[str, int] = {}
             for idx, item in enumerate(raw_questions):
@@ -419,20 +416,20 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
                 if qtype not in types:
                     raise ValueError(f"q{idx}: disallowed type {qtype!r}")
                 payload = _parse_payload_v2(qtype, item, num_options)
-                out.append({
-                    "type": qtype,
-                    "payload": payload,
-                    "weight": "1.0",
-                    "order": idx,
-                })
+                out.append(
+                    {
+                        "type": qtype,
+                        "payload": payload,
+                        "weight": "1.0",
+                        "order": idx,
+                    }
+                )
                 actual_counts[qtype] = actual_counts.get(qtype, 0) + 1
             # Warn if the LLM deviated from the requested distribution.
             for t, want in type_counts.items():
                 got = actual_counts.get(t, 0)
                 if want > 0 and got != want:
-                    logger.warning(
-                        "quiz_type_count_mismatch", q_type=t, requested=want, got=got
-                    )
+                    logger.warning("quiz_type_count_mismatch", q_type=t, requested=want, got=got)
             return out
 
         return await self._chat_json_validated(
@@ -545,18 +542,20 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         expected_correct = options[correct_index].strip().lower()
 
         def _validate(data: dict[str, Any]) -> dict[str, Any]:
-            payload = _parse_payload_v2("single_choice", {
-                "type": "single_choice",
-                "prompt": data.get("question"),
-                "options": data.get("options"),
-                "correct_index": data.get("correct_index"),
-            }, num_options)
+            payload = _parse_payload_v2(
+                "single_choice",
+                {
+                    "type": "single_choice",
+                    "prompt": data.get("question"),
+                    "options": data.get("options"),
+                    "correct_index": data.get("correct_index"),
+                },
+                num_options,
+            )
             if mode == "improve_distractors":
                 got = payload["options"][payload["correct_index"]].strip().lower()
                 if got != expected_correct:
-                    raise ValueError(
-                        "improve_distractors must preserve the correct option text"
-                    )
+                    raise ValueError("improve_distractors must preserve the correct option text")
             return payload
 
         return await self._chat_json_validated(
@@ -593,8 +592,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             for q in questions
         ]
         user = (
-            f"Материал:\n{material}\n\n"
-            f"Вопросы (JSON):\n{json.dumps(payload, ensure_ascii=False)}"
+            f"Материал:\n{material}\n\nВопросы (JSON):\n{json.dumps(payload, ensure_ascii=False)}"
         )
 
         valid_kinds: set[FlagKind] = {"ok", "wrong_answer", "ambiguous", "duplicate"}
@@ -604,9 +602,7 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             if not isinstance(raw_flags, list):
                 raise ValueError("missing 'flags' array")
             if len(raw_flags) != len(questions):
-                raise ValueError(
-                    f"expected {len(questions)} flags, got {len(raw_flags)}"
-                )
+                raise ValueError(f"expected {len(questions)} flags, got {len(raw_flags)}")
             flags: list[QuestionFlag] = []
             for idx, item in enumerate(raw_flags):
                 if not isinstance(item, dict):
@@ -664,7 +660,13 @@ def _parse_payload_v2(qtype: str, item: dict[str, Any], num_options: int) -> dic
         ci = item.get("correct_index")
         if not isinstance(ci, int) or isinstance(ci, bool) or not 0 <= ci < num_options:
             raise ValueError(f"'correct_index' out of range: {ci}")
-        return {"type": qtype, "prompt": prompt, "options": opts, "correct_index": ci, "explanation": ""}
+        return {
+            "type": qtype,
+            "prompt": prompt,
+            "options": opts,
+            "correct_index": ci,
+            "explanation": "",
+        }
 
     if qtype == "multiple_choice":
         opts = _check_options(item.get("options"), num_options)
@@ -679,8 +681,11 @@ def _parse_payload_v2(qtype: str, item: dict[str, Any], num_options: int) -> dic
         if len(seen) == num_options:
             raise ValueError("multiple_choice cannot have all options correct")
         return {
-            "type": qtype, "prompt": prompt, "options": opts,
-            "correct_indices": sorted(seen), "explanation": "",
+            "type": qtype,
+            "prompt": prompt,
+            "options": opts,
+            "correct_indices": sorted(seen),
+            "explanation": "",
         }
 
     if qtype == "true_false":
@@ -695,7 +700,8 @@ def _parse_payload_v2(qtype: str, item: dict[str, Any], num_options: int) -> dic
             raise ValueError("'reference_answer' must be a non-empty string")
         rubric = item.get("rubric") or ""
         return {
-            "type": qtype, "prompt": prompt,
+            "type": qtype,
+            "prompt": prompt,
             "reference_answer": ref.strip(),
             "rubric": str(rubric).strip(),
         }

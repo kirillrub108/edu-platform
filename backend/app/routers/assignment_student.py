@@ -6,6 +6,7 @@ Access is enrollment-scoped. The lesson-listing route reuses require_lesson_acce
 per-assignment routes use the service's published+enrollment resolver, which 404s
 draft assignments (no existence leak) and 403s non-enrolled students.
 """
+
 from __future__ import annotations
 
 from uuid import UUID
@@ -39,9 +40,7 @@ def _read_pair(pair, viewer_id: str) -> AssignmentStudentRead:
     assignment, submission = pair
     read = AssignmentStudentRead.model_validate(assignment)
     if submission is not None:
-        read.my_submission = assignment_service.serialize_submission_student(
-            submission, viewer_id
-        )
+        read.my_submission = assignment_service.serialize_submission_student(submission, viewer_id)
     return read
 
 
@@ -80,9 +79,7 @@ async def get_assignment(
     assignment, enrollment = await assignment_service.get_published_assignment_for_student(
         db, assignment_id, user.id
     )
-    submission = await assignment_service.get_existing_submission(
-        db, assignment.id, enrollment.id
-    )
+    submission = await assignment_service.get_existing_submission(db, assignment.id, enrollment.id)
     read = AssignmentStudentRead.model_validate(assignment)
     if submission is not None:
         read.my_submission = assignment_service.serialize_submission_student(
@@ -107,9 +104,7 @@ async def save_draft(
     assignment, enrollment = await assignment_service.get_published_assignment_for_student(
         db, assignment_id, user.id
     )
-    submission = await assignment_service.get_or_create_submission(
-        db, assignment.id, enrollment.id
-    )
+    submission = await assignment_service.get_or_create_submission(db, assignment.id, enrollment.id)
     submission = await assignment_service.save_draft(db, submission, data.text_content)
     return assignment_service.serialize_submission_student(submission, str(user.id))
 
@@ -127,9 +122,7 @@ async def submit(
     assignment, enrollment = await assignment_service.get_published_assignment_for_student(
         db, assignment_id, user.id
     )
-    submission = await assignment_service.get_or_create_submission(
-        db, assignment.id, enrollment.id
-    )
+    submission = await assignment_service.get_or_create_submission(db, assignment.id, enrollment.id)
     submission = await assignment_service.submit(db, submission, data.text_content)
     return assignment_service.serialize_submission_student(submission, str(user.id))
 
@@ -151,9 +144,7 @@ async def upload_file(
     assignment, enrollment = await assignment_service.get_published_assignment_for_student(
         db, assignment_id, user.id
     )
-    submission = await assignment_service.get_or_create_submission(
-        db, assignment.id, enrollment.id
-    )
+    submission = await assignment_service.get_or_create_submission(db, assignment.id, enrollment.id)
     attachment = await assignment_service.add_attachment(
         db, submission, assignment, file, AttachmentKind.submission
     )

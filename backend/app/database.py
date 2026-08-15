@@ -52,9 +52,7 @@ def _filter_soft_deleted(execute_state: "object") -> None:
         from app.models.user import User
 
         state.statement = state.statement.options(
-            with_loader_criteria(
-                User, lambda cls: cls.deleted_at.is_(None), include_aliases=True
-            ),
+            with_loader_criteria(User, lambda cls: cls.deleted_at.is_(None), include_aliases=True),
             with_loader_criteria(
                 Lesson, lambda cls: cls.deleted_at.is_(None), include_aliases=True
             ),

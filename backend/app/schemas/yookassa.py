@@ -4,6 +4,7 @@ never break parsing; only `id`/`status` are required — `confirmation` and its
 url are optional, since a captured payment carries no confirmation block.
 Domain status mapping (succeeded/canceled) is done by callers over `status`.
 """
+
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict

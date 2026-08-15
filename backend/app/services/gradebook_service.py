@@ -116,9 +116,7 @@ async def get_gradebook(
                 AssignmentSubmission.assignment_id.in_([a.id for a in assignments])
             )
         )
-        submissions_by_key = {
-            (s.enrollment_id, s.assignment_id): s for s in sub_rows.all()
-        }
+        submissions_by_key = {(s.enrollment_id, s.assignment_id): s for s in sub_rows.all()}
 
     student_rows: list[GradebookStudentRow] = []
     for enrollment in enrollments:
@@ -126,12 +124,10 @@ async def get_gradebook(
             p.lesson_id: p for p in enrollment.progress
         }
         cells = [
-            _cell_from_progress(lesson, progress_by_lesson.get(lesson.id))
-            for lesson in lessons
+            _cell_from_progress(lesson, progress_by_lesson.get(lesson.id)) for lesson in lessons
         ]
         assignment_cells = [
-            _assignment_cell(a, submissions_by_key.get((enrollment.id, a.id)))
-            for a in assignments
+            _assignment_cell(a, submissions_by_key.get((enrollment.id, a.id))) for a in assignments
         ]
         student_rows.append(
             GradebookStudentRow(

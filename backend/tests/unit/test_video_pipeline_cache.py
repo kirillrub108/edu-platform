@@ -2,6 +2,7 @@
 
 All tests are pure-unit: no Redis, no Silero, no FFmpeg required.
 """
+
 from __future__ import annotations
 
 import json
@@ -17,6 +18,7 @@ pytestmark = pytest.mark.unit
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
+
 def _make_redis_mock() -> tuple[MagicMock, dict]:
     """Return (mock, backing_store) where the mock behaves like redis.Redis."""
     store: dict[str, str] = {}
@@ -28,6 +30,7 @@ def _make_redis_mock() -> tuple[MagicMock, dict]:
 
 
 # ── _tts_cache_path ───────────────────────────────────────────────────────────
+
 
 def test_tts_cache_path_two_level_structure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -63,9 +66,7 @@ def test_tts_cache_path_different_ssml_produce_different_paths(
     assert p1 != p2
 
 
-def test_tts_cache_path_creates_directory(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_tts_cache_path_creates_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("app.tasks.video_pipeline.settings.STORAGE_PATH", str(tmp_path))
     path = _tts_cache_path("<p>hello</p>", "xenia")
     assert path is not None
@@ -73,6 +74,7 @@ def test_tts_cache_path_creates_directory(
 
 
 # ── checkpoint read / write / delete ─────────────────────────────────────────
+
 
 def test_cp_read_returns_empty_dict_when_key_missing() -> None:
     r, _ = _make_redis_mock()
@@ -126,6 +128,7 @@ def test_cp_delete_swallows_redis_error() -> None:
 
 
 # ── voice-mismatch invalidation (logic only, no Celery) ──────────────────────
+
 
 def test_checkpoint_voice_mismatch_clears_progress() -> None:
     """If checkpoint voice differs from effective_voice, tts_done/segments_done are cleared."""

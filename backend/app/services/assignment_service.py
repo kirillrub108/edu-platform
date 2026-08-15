@@ -5,6 +5,7 @@ parsed server-side. The normalized 0..1 score on a submission is what the
 gradebook reads (see gradebook_service); completion is an optional, best-attempt
 flag on LessonProgress that never touches quiz_score.
 """
+
 from __future__ import annotations
 
 import os
@@ -128,9 +129,7 @@ def _submission_options() -> list:
     ]
 
 
-async def _load_with_options(
-    db: AsyncSession, submission_id: UUID
-) -> AssignmentSubmission | None:
+async def _load_with_options(db: AsyncSession, submission_id: UUID) -> AssignmentSubmission | None:
     return await db.scalar(
         select(AssignmentSubmission)
         .where(AssignmentSubmission.id == submission_id)
@@ -142,9 +141,7 @@ async def _load_with_options(
     )
 
 
-async def get_owned_assignment(
-    db: AsyncSession, assignment_id: UUID, owner_id: UUID
-) -> Assignment:
+async def get_owned_assignment(db: AsyncSession, assignment_id: UUID, owner_id: UUID) -> Assignment:
     assignment = await db.scalar(
         select(Assignment)
         .join(Lesson, Assignment.lesson_id == Lesson.id)
@@ -245,9 +242,7 @@ async def create_assignment(
     return assignment
 
 
-async def update_assignment(
-    db: AsyncSession, assignment: Assignment, updates: dict
-) -> Assignment:
+async def update_assignment(db: AsyncSession, assignment: Assignment, updates: dict) -> Assignment:
     for key, value in updates.items():
         if key in ("max_points",) and value is not None:
             value = Decimal(str(value))
@@ -289,9 +284,7 @@ async def delete_assignment(db: AsyncSession, assignment: Assignment) -> None:
 
 async def list_assignments(db: AsyncSession, lesson_id: UUID) -> list[Assignment]:
     rows = await db.scalars(
-        select(Assignment)
-        .where(Assignment.lesson_id == lesson_id)
-        .order_by(Assignment.created_at)
+        select(Assignment).where(Assignment.lesson_id == lesson_id).order_by(Assignment.created_at)
     )
     return list(rows.all())
 
@@ -354,9 +347,7 @@ async def grade_submission(
     grader_id: UUID,
 ) -> AssignmentSubmission:
     if submission.status == SubmissionStatus.draft:
-        raise HTTPException(
-            status_code=409, detail={"code": "submission_not_submitted"}
-        )
+        raise HTTPException(status_code=409, detail={"code": "submission_not_submitted"})
     max_points = float(assignment.max_points)
     if points_awarded < 0 or points_awarded > max_points:
         raise HTTPException(
@@ -497,9 +488,7 @@ async def submit(
     if text_content is not None:
         submission.text_content = text_content
     has_text = bool((submission.text_content or "").strip())
-    has_files = any(
-        a.kind == AttachmentKind.submission for a in submission.attachments
-    )
+    has_files = any(a.kind == AttachmentKind.submission for a in submission.attachments)
     if not has_text and not has_files:
         raise HTTPException(status_code=422, detail={"code": "empty_submission"})
     submission.status = SubmissionStatus.submitted
@@ -580,8 +569,7 @@ def _enforce_declared_size(
                 "code": "submission_too_large",
                 "max_total_mb": ATTACHMENT_MAX_TOTAL_SIZE_MB,
                 "message": (
-                    f"Суммарный объём сдачи превышает лимит "
-                    f"{ATTACHMENT_MAX_TOTAL_SIZE_MB} МБ."
+                    f"Суммарный объём сдачи превышает лимит {ATTACHMENT_MAX_TOTAL_SIZE_MB} МБ."
                 ),
             },
         )
@@ -678,8 +666,7 @@ async def add_attachment(
                 "code": "submission_too_large",
                 "max_total_mb": ATTACHMENT_MAX_TOTAL_SIZE_MB,
                 "message": (
-                    f"Суммарный объём сдачи превышает лимит "
-                    f"{ATTACHMENT_MAX_TOTAL_SIZE_MB} МБ."
+                    f"Суммарный объём сдачи превышает лимит {ATTACHMENT_MAX_TOTAL_SIZE_MB} МБ."
                 ),
             },
         )
@@ -717,9 +704,7 @@ async def remove_attachment(
 async def add_message(
     db: AsyncSession, submission_id: UUID, author_id: UUID, body: str
 ) -> AssignmentMessage:
-    message = AssignmentMessage(
-        submission_id=submission_id, author_id=author_id, body=body
-    )
+    message = AssignmentMessage(submission_id=submission_id, author_id=author_id, body=body)
     db.add(message)
     await db.commit()
     await db.refresh(message, attribute_names=["author"])

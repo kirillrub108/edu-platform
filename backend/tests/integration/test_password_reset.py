@@ -49,6 +49,7 @@ async def _issue_raw_token(db: Any, user: User) -> str:
 
 # ── POST /auth/forgot-password (anonymous, non-enumerating) ─────────────────
 
+
 async def test_forgot_password_existing_account_sends_email(
     client: AsyncClient, db_session: Any, mock_send_email: Any
 ) -> None:
@@ -75,15 +76,14 @@ async def test_forgot_password_existing_account_sends_email(
 async def test_forgot_password_unknown_email_is_silent(
     client: AsyncClient, mock_send_email: Any
 ) -> None:
-    resp = await client.post(
-        "/api/v1/auth/forgot-password", json={"email": "nobody@example.com"}
-    )
+    resp = await client.post("/api/v1/auth/forgot-password", json={"email": "nobody@example.com"})
     # Same 204 as the existing-account case — no enumeration signal — and no mail.
     assert resp.status_code == 204
     mock_send_email.assert_not_called()
 
 
 # ── POST /auth/reset-password (anonymous, one-time token) ───────────────────
+
 
 async def test_reset_password_success(client: AsyncClient, db_session: Any) -> None:
     user = await _make_user(db_session)
@@ -106,9 +106,7 @@ async def test_reset_password_success(client: AsyncClient, db_session: Any) -> N
     assert row.used_at is not None
 
 
-async def test_reset_password_reused_token_rejected(
-    client: AsyncClient, db_session: Any
-) -> None:
+async def test_reset_password_reused_token_rejected(client: AsyncClient, db_session: Any) -> None:
     user = await _make_user(db_session)
     raw = await _issue_raw_token(db_session, user)
 
@@ -125,9 +123,7 @@ async def test_reset_password_reused_token_rejected(
     assert second.json()["detail"] == "invalid_or_expired"
 
 
-async def test_reset_password_expired_token_rejected(
-    client: AsyncClient, db_session: Any
-) -> None:
+async def test_reset_password_expired_token_rejected(client: AsyncClient, db_session: Any) -> None:
     user = await _make_user(db_session)
     raw = await _issue_raw_token(db_session, user)
 
@@ -174,6 +170,7 @@ async def test_reset_password_revokes_all_sessions(db_session: Any) -> None:
 
 
 # ── POST /auth/change-password (authenticated + CSRF) ───────────────────────
+
 
 async def test_change_password_success(
     client: AsyncClient, teacher_user: Any, teacher_token: dict[str, str]

@@ -110,9 +110,7 @@ async def test_grade_points_out_of_range_raises_422(
 async def test_grade_draft_submission_raises_409(
     db_session, teacher_user: User, student_user: User
 ) -> None:
-    _, _, enrollment, assignment = await _scaffold(
-        db_session, teacher_user, student_user
-    )
+    _, _, enrollment, assignment = await _scaffold(db_session, teacher_user, student_user)
     submission = await make_assignment_submission(
         db_session, assignment, enrollment, status=SubmissionStatus.draft
     )
@@ -126,9 +124,7 @@ async def test_grade_draft_submission_raises_409(
 async def test_get_or_create_submission_is_idempotent(
     db_session, teacher_user: User, student_user: User
 ) -> None:
-    _, _, enrollment, assignment = await _scaffold(
-        db_session, teacher_user, student_user
-    )
+    _, _, enrollment, assignment = await _scaffold(db_session, teacher_user, student_user)
     first = await assignment_service.get_or_create_submission(
         db_session, assignment.id, enrollment.id
     )
@@ -147,9 +143,7 @@ async def test_get_or_create_submission_is_idempotent(
 async def test_submit_requires_text_or_files(
     db_session, teacher_user: User, student_user: User
 ) -> None:
-    _, _, enrollment, assignment = await _scaffold(
-        db_session, teacher_user, student_user
-    )
+    _, _, enrollment, assignment = await _scaffold(db_session, teacher_user, student_user)
     submission = await assignment_service.get_or_create_submission(
         db_session, assignment.id, enrollment.id
     )
@@ -162,9 +156,7 @@ async def test_submit_requires_text_or_files(
 async def test_submit_locked_after_returned(
     db_session, teacher_user: User, student_user: User
 ) -> None:
-    _, _, enrollment, assignment = await _scaffold(
-        db_session, teacher_user, student_user
-    )
+    _, _, enrollment, assignment = await _scaffold(db_session, teacher_user, student_user)
     submission = await make_assignment_submission(
         db_session, assignment, enrollment, status=SubmissionStatus.returned
     )
@@ -176,9 +168,7 @@ async def test_submit_locked_after_returned(
 async def test_student_serializer_hides_grade_until_returned(
     db_session, teacher_user: User, student_user: User
 ) -> None:
-    _, _, enrollment, assignment = await _scaffold(
-        db_session, teacher_user, student_user
-    )
+    _, _, enrollment, assignment = await _scaffold(db_session, teacher_user, student_user)
     await make_assignment_submission(
         db_session,
         assignment,

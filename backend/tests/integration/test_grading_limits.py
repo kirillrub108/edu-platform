@@ -8,6 +8,7 @@
 Teacher balances/quotas are untouched here — the cap rides usage_counters,
 the same atomic UPSERT the lifetime trial uses.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -42,9 +43,7 @@ def stub_grade_task(monkeypatch: pytest.MonkeyPatch) -> None:
     still reserves the daily slot before enqueuing — that's what we assert."""
     from app.routers import quiz_student as qs_router
 
-    monkeypatch.setattr(
-        qs_router.grade_attempt_task, "apply_async", lambda *a, **k: _FakeTask()
-    )
+    monkeypatch.setattr(qs_router.grade_attempt_task, "apply_async", lambda *a, **k: _FakeTask())
 
 
 async def _setup_open_quiz(db_session: Any, teacher_user: Any, student_user: Any):
@@ -54,7 +53,9 @@ async def _setup_open_quiz(db_session: Any, teacher_user: Any, student_user: Any
     lesson = await make_lesson(db_session, module)
     quiz = await make_quiz(db_session, lesson, published=True)
     q = await make_quiz_question(
-        db_session, quiz, order=1,
+        db_session,
+        quiz,
+        order=1,
         type=QuestionType.short_answer,
         payload={
             "type": "short_answer",
@@ -71,9 +72,7 @@ async def _submit_open_answer(
     client: Any, lesson_id: Any, qid: Any, token: dict[str, str], text: str
 ):
     """Run one full start → save → submit cycle with an open answer."""
-    start = await client.post(
-        f"/api/v1/students/lessons/{lesson_id}/quiz/attempts", cookies=token
-    )
+    start = await client.post(f"/api/v1/students/lessons/{lesson_id}/quiz/attempts", cookies=token)
     assert start.status_code == 201, start.text
     aid = start.json()["attempt_id"]
     save = await client.put(
@@ -90,7 +89,12 @@ async def _submit_open_answer(
 
 @pytest.mark.asyncio
 async def test_overlong_open_answer_returns_422(
-    client, db_session, teacher_user, student_user, student_token, stub_grade_task,
+    client,
+    db_session,
+    teacher_user,
+    student_user,
+    student_token,
+    stub_grade_task,
 ):
     lesson, _quiz, q = await _setup_open_quiz(db_session, teacher_user, student_user)
     over = "x" * (GRADING_MAX_ANSWER_CHARS + 1)
@@ -104,19 +108,20 @@ async def test_overlong_open_answer_returns_422(
 
 @pytest.mark.asyncio
 async def test_sixth_submission_per_day_returns_429(
-    client, db_session, teacher_user, student_user, student_token, stub_grade_task,
+    client,
+    db_session,
+    teacher_user,
+    student_user,
+    student_token,
+    stub_grade_task,
 ):
     lesson, _quiz, q = await _setup_open_quiz(db_session, teacher_user, student_user)
 
     for i in range(GRADING_MAX_ATTEMPTS_PER_QUIZ_PER_DAY):
-        ok = await _submit_open_answer(
-            client, lesson.id, q.id, student_token, f"answer {i}"
-        )
+        ok = await _submit_open_answer(client, lesson.id, q.id, student_token, f"answer {i}")
         assert ok.status_code == 200, f"submission {i + 1}: {ok.text}"
 
-    sixth = await _submit_open_answer(
-        client, lesson.id, q.id, student_token, "one too many"
-    )
+    sixth = await _submit_open_answer(client, lesson.id, q.id, student_token, "one too many")
     assert sixth.status_code == 429
     detail = sixth.json()["detail"]
     assert detail["code"] == "grading_rate_limited"
@@ -126,7 +131,11 @@ async def test_sixth_submission_per_day_returns_429(
 
 @pytest.mark.asyncio
 async def test_closed_only_submission_does_not_consume_slot(
-    client, db_session, teacher_user, student_user, student_token,
+    client,
+    db_session,
+    teacher_user,
+    student_user,
+    student_token,
 ):
     """A quiz with no open questions grades synchronously and never touches the
     daily grading counter."""
@@ -135,10 +144,14 @@ async def test_closed_only_submission_does_not_consume_slot(
     lesson = await make_lesson(db_session, module)
     quiz = await make_quiz(db_session, lesson, published=True)
     q = await make_quiz_question(
-        db_session, quiz, order=1,
+        db_session,
+        quiz,
+        order=1,
         payload={
-            "type": "single_choice", "prompt": "Q1",
-            "options": ["A", "B"], "correct_index": 0,
+            "type": "single_choice",
+            "prompt": "Q1",
+            "options": ["A", "B"],
+            "correct_index": 0,
         },
     )
     await make_enrollment(db_session, student_user, course)
@@ -169,8 +182,13 @@ async def test_closed_only_submission_does_not_consume_slot(
 
 @pytest.mark.asyncio
 async def test_next_day_resets_the_cap(
-    client, db_session, teacher_user, student_user, student_token,
-    stub_grade_task, monkeypatch,
+    client,
+    db_session,
+    teacher_user,
+    student_user,
+    student_token,
+    stub_grade_task,
+    monkeypatch,
 ):
     lesson, _quiz, q = await _setup_open_quiz(db_session, teacher_user, student_user)
 

@@ -40,13 +40,9 @@ async def test_analyze_enqueues_vision_task_and_persists_id(
     class _Fake:
         id = "vision-task-1"
 
-    monkeypatch.setattr(
-        vp.analyze_presentation_task, "apply_async", lambda *a, **k: _Fake()
-    )
+    monkeypatch.setattr(vp.analyze_presentation_task, "apply_async", lambda *a, **k: _Fake())
 
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson.id}/analyze", cookies=teacher_token
-    )
+    resp = await client.post(f"/api/v1/lessons/{lesson.id}/analyze", cookies=teacher_token)
     assert resp.status_code == 200
     body = resp.json()
     assert body["task_id"] == "vision-task-1"
@@ -70,9 +66,7 @@ async def test_analyze_without_pptx_returns_400(
     module = await make_module(db_session, course)
     lesson = await make_lesson(db_session, module)  # no pptx_path
 
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson.id}/analyze", cookies=teacher_token
-    )
+    resp = await client.post(f"/api/v1/lessons/{lesson.id}/analyze", cookies=teacher_token)
     assert resp.status_code == 400
 
 
@@ -86,9 +80,7 @@ async def test_list_slides_empty(
     module = await make_module(db_session, course)
     lesson = await make_lesson(db_session, module)
 
-    resp = await client.get(
-        f"/api/v1/lessons/{lesson.id}/slides", cookies=teacher_token
-    )
+    resp = await client.get(f"/api/v1/lessons/{lesson.id}/slides", cookies=teacher_token)
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 0
@@ -107,9 +99,7 @@ async def test_list_slides_returns_image_url(
     await make_slide_text(db_session, lesson, slide_number=1)
     await make_slide_text(db_session, lesson, slide_number=2)
 
-    resp = await client.get(
-        f"/api/v1/lessons/{lesson.id}/slides", cookies=teacher_token
-    )
+    resp = await client.get(f"/api/v1/lessons/{lesson.id}/slides", cookies=teacher_token)
     assert resp.status_code == 200
     body = resp.json()
     assert body["total"] == 2
@@ -193,6 +183,7 @@ async def test_other_teacher_cannot_list_slides(
 
     from app.services.auth_service import create_access_token
     from tests.conftest import _TEST_CSRF
+
     token, _, _ = create_access_token(teacher_user)
     resp = await client.get(
         f"/api/v1/lessons/{lesson.id}/slides",
@@ -239,9 +230,7 @@ async def test_cancel_analysis_releases_reserved_credits(
     before = await billing_service.get_balance(db_session, teacher_user.id)
     assert before["reserved"] == amount
 
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson.id}/analysis-cancel", cookies=teacher_token
-    )
+    resp = await client.post(f"/api/v1/lessons/{lesson.id}/analysis-cancel", cookies=teacher_token)
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 

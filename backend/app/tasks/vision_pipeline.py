@@ -54,7 +54,13 @@ def _store_slide_image(lesson_id: str, slide_idx: int, src_png: str) -> str:
     return rel_path
 
 
-@celery_app.task(bind=True, name="analyze_presentation", queue="vision", acks_late=True, reject_on_worker_lost=True)
+@celery_app.task(
+    bind=True,
+    name="analyze_presentation",
+    queue="vision",
+    acks_late=True,
+    reject_on_worker_lost=True,
+)
 def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> dict:
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(task_id=self.request.id, task_name=self.name)
@@ -166,9 +172,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                 # stream (and a cancel settlement) always reflect real progress.
                 nonlocal _spent_now
                 new_spent = (
-                    partial_vision_cost(_estimate, done, total_)
-                    if _billed_via == "credits"
-                    else 0
+                    partial_vision_cost(_estimate, done, total_) if _billed_via == "credits" else 0
                 )
                 if new_spent != _spent_now:
                     _spent_now = new_spent

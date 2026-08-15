@@ -15,9 +15,7 @@ from tests.factories import (
 pytestmark = pytest.mark.integration
 
 
-async def _make_enrolled_lesson(
-    db: AsyncSession, teacher: User, student: User
-):
+async def _make_enrolled_lesson(db: AsyncSession, teacher: User, student: User):
     course, module, lesson = await make_published_course_with_lesson(db, teacher)
     await make_enrollment(db, student, course)
     return course, module, lesson

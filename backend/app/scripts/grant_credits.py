@@ -6,6 +6,7 @@
 Sync-only: uses the psycopg2 SyncSession (same one Celery tasks use) since
 there's no event loop here — never import AsyncSession into this module.
 """
+
 import argparse
 import sys
 from uuid import UUID

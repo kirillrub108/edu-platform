@@ -148,19 +148,16 @@ def _alert_stuck_payments(db: Session, now: datetime) -> int:
     ERROR log (always) + optional admin email, exactly once per payment via
     alerted_at. skip_locked avoids touching a row a webhook is settling right now."""
     cutoff = now - timedelta(minutes=PAYMENT_STUCK_ALERT_MINUTES)
-    stuck = (
-        db.scalars(
-            select(Payment)
-            .where(
-                Payment.status == PaymentStatus.pending,
-                Payment.created_at <= cutoff,
-                Payment.alerted_at.is_(None),
-            )
-            .limit(PAYMENT_STUCK_ALERT_BATCH)
-            .with_for_update(skip_locked=True)
+    stuck = db.scalars(
+        select(Payment)
+        .where(
+            Payment.status == PaymentStatus.pending,
+            Payment.created_at <= cutoff,
+            Payment.alerted_at.is_(None),
         )
-        .all()
-    )
+        .limit(PAYMENT_STUCK_ALERT_BATCH)
+        .with_for_update(skip_locked=True)
+    ).all()
     for payment in stuck:
         age_minutes = int((now - payment.created_at).total_seconds() // 60)
         logger.error(

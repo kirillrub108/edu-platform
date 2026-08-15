@@ -6,8 +6,8 @@ from app.config import settings
 # env-override cap for uncategorised files; these per-type values are tighter.
 # Videos need to outlive a full viewing session; slides only need to cover the
 # duration of an active editor session.
-SIGNED_URL_TTL_VIDEO: int = 1800   # 30 min
-SIGNED_URL_TTL_SLIDE: int = 600    # 10 min
+SIGNED_URL_TTL_VIDEO: int = 1800  # 30 min
+SIGNED_URL_TTL_SLIDE: int = 600  # 10 min
 
 # Video streaming delivery — see the /stream endpoints in routers/lessons.py.
 # The endpoint authorises the request, then delegates the actual byte transfer
@@ -41,8 +41,20 @@ YANDEX_TTS_MAX_CHARS: int = 200  # v3 hard-caps ~250 chars/request; kept under w
 YANDEX_TTS_MAX_RETRIES: int = 3
 YANDEX_TTS_VOICES: frozenset[str] = frozenset(
     {
-        "alena", "filipp", "ermil", "jane", "madirus", "omazh", "zahar",
-        "dasha", "julia", "lera", "masha", "marina", "alexander", "kirill",
+        "alena",
+        "filipp",
+        "ermil",
+        "jane",
+        "madirus",
+        "omazh",
+        "zahar",
+        "dasha",
+        "julia",
+        "lera",
+        "masha",
+        "marina",
+        "alexander",
+        "kirill",
         "anton",
     }
 )
@@ -64,7 +76,15 @@ POLZA_TTS_MAX_RETRIES: int = 3
 # (schemas/lesson.py) and the polza synth fallback both build on this. The
 # frontend dropdown sends one of these names directly — no name translation.
 POLZA_TTS_VOICES: tuple[str, ...] = (
-    "alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer",
+    "alloy",
+    "ash",
+    "coral",
+    "echo",
+    "fable",
+    "nova",
+    "onyx",
+    "sage",
+    "shimmer",
 )
 TTS_CACHE_TTL_DAYS: int = 7
 
@@ -97,8 +117,8 @@ MAX_VIDEO_UPLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
 # The load-bearing guards are the whitelist + ATTACHMENT_MAX_FILES +
 # ATTACHMENT_MAX_TOTAL_SIZE_MB; the per-category caps are secondary (clear
 # messages and keeping a "document" from being gigantic).
-ATTACHMENT_MAX_FILES: int = 10                 # max files per submission (per kind)
-ATTACHMENT_MAX_TOTAL_SIZE_MB: int = 1024       # max combined size of one submission
+ATTACHMENT_MAX_FILES: int = 10  # max files per submission (per kind)
+ATTACHMENT_MAX_TOTAL_SIZE_MB: int = 1024  # max combined size of one submission
 # Per-file ceiling by category (MB): video is generous, documents/images small.
 ATTACHMENT_CATEGORY_MAX_SIZE_MB: dict[str, int] = {
     "document": 50,
@@ -175,13 +195,28 @@ ATTACHMENT_RETENTION_DAYS_AFTER_GRADED: int = 30
 # Extension whitelist (lower-case, no dot) for the teacher-set per-assignment
 # allowed_ext filter — separate from the system attachment whitelist above.
 ASSIGNMENT_ALLOWED_EXTENSIONS: tuple[str, ...] = (
-    "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx",
-    "csv", "txt", "md", "rtf", "odt", "png", "jpg", "jpeg", "gif", "zip",
+    "pdf",
+    "doc",
+    "docx",
+    "ppt",
+    "pptx",
+    "xls",
+    "xlsx",
+    "csv",
+    "txt",
+    "md",
+    "rtf",
+    "odt",
+    "png",
+    "jpg",
+    "jpeg",
+    "gif",
+    "zip",
 )
 ASSIGNMENT_DEFAULT_MAX_POINTS: float = 100.0
 ASSIGNMENT_MAX_PROMPT_CHARS: int = 20000
-ASSIGNMENT_MAX_TEXT_CHARS: int = 50000         # student answer body / teacher feedback
-ASSIGNMENT_MAX_MESSAGE_CHARS: int = 4000       # one private-thread message
+ASSIGNMENT_MAX_TEXT_CHARS: int = 50000  # student answer body / teacher feedback
+ASSIGNMENT_MAX_MESSAGE_CHARS: int = 4000  # one private-thread message
 
 # Soft delete
 # How long a soft-deleted (archived) record lingers before the daily
@@ -198,10 +233,10 @@ SOFT_DELETE_PURGE_DAYS: int = 30
 # apply per cache: hard-TTL evicts anything unused that long, then a size cap
 # trims the least-recently-used until the cache fits. Caches are always local
 # (never S3) and fully reproducible — a deleted entry just forces a re-render.
-CACHE_GC_ENABLED: bool = True                   # kill-switch for the cache GC pass only
-SLIDES_CACHE_TTL_DAYS: int = 30                 # slides_cache/<hash>/ dirs unused this long → evict
-SLIDES_CACHE_MAX_BYTES: int = 5 * 1024**3       # 5 GiB cap (rendered PNGs are large)
-SUMMARIES_CACHE_TTL_DAYS: int = 60              # .txt summaries: LLM-costly to redo → keep longer
+CACHE_GC_ENABLED: bool = True  # kill-switch for the cache GC pass only
+SLIDES_CACHE_TTL_DAYS: int = 30  # slides_cache/<hash>/ dirs unused this long → evict
+SLIDES_CACHE_MAX_BYTES: int = 5 * 1024**3  # 5 GiB cap (rendered PNGs are large)
+SUMMARIES_CACHE_TTL_DAYS: int = 60  # .txt summaries: LLM-costly to redo → keep longer
 SUMMARIES_CACHE_MAX_BYTES: int = 512 * 1024**2  # 512 MiB cap
 
 # LessonVideo GC has its OWN kill-switch (separate from the caches): deleting a
@@ -210,9 +245,9 @@ SUMMARIES_CACHE_MAX_BYTES: int = 512 * 1024**2  # 512 MiB cap
 # that may be the thing keeping storage from filling. NEVER deletes an
 # is_published=True version, and always keeps the newest KEEP_UNPUBLISHED
 # unpublished per lesson (a lesson is never left with zero videos).
-LESSON_VIDEO_GC_ENABLED: bool = True            # kill-switch for the LessonVideo GC pass only
-LESSON_VIDEO_UNPUBLISHED_TTL_DAYS: int = 30     # cold unpublished versions eligible after this
-LESSON_VIDEO_KEEP_UNPUBLISHED: int = 2          # newest N unpublished per lesson always survive
+LESSON_VIDEO_GC_ENABLED: bool = True  # kill-switch for the LessonVideo GC pass only
+LESSON_VIDEO_UNPUBLISHED_TTL_DAYS: int = 30  # cold unpublished versions eligible after this
+LESSON_VIDEO_KEEP_UNPUBLISHED: int = 2  # newest N unpublished per lesson always survive
 
 # Startup reconciliation: lessons stuck in non-terminal status (analyzing /
 # processing) for longer than this window are presumed to have lost their Celery
@@ -232,10 +267,10 @@ STUCK_LESSON_GRACE_MINUTES: int = 120
 # it moves the pool and Silero together; not re-clamping the override is what
 # keeps them exactly equal. Leave it unset only on ~4-core hosts, where the auto
 # value (4) matches the compose fallback (see .env.example).
-_CORE_CAP: int = 12   # ignore cores beyond this when scaling pools
-_PEAK_MULT: int = 3   # guardrail asserted in tests: VIDEO_CONCURRENCY*(TTS+ENCODE)
-                      # stays <= _PEAK_MULT * cores. >1 because TTS/vision threads
-                      # mostly block on Silero/LLM IO, not local CPU.
+_CORE_CAP: int = 12  # ignore cores beyond this when scaling pools
+_PEAK_MULT: int = 3  # guardrail asserted in tests: VIDEO_CONCURRENCY*(TTS+ENCODE)
+# stays <= _PEAK_MULT * cores. >1 because TTS/vision threads
+# mostly block on Silero/LLM IO, not local CPU.
 
 
 def _clamp(value: int, low: int, high: int) -> int:
@@ -251,8 +286,8 @@ def _derive_concurrency(cores: int) -> dict[str, int]:
     """
     c = _clamp(cores, 1, _CORE_CAP)
     return {
-        "TTS_WORKERS": _clamp(c, 2, 6),                 # == Silero NUMBER_OF_THREADS
-        "ENCODE_WORKERS": _clamp(c - 1, 1, 4),          # ffmpeg, CPU-bound
+        "TTS_WORKERS": _clamp(c, 2, 6),  # == Silero NUMBER_OF_THREADS
+        "ENCODE_WORKERS": _clamp(c - 1, 1, 4),  # ffmpeg, CPU-bound
         "VISION_SUMMARY_CONCURRENCY": _clamp(c, 1, 6),  # IO-bound provider calls
         # parallel lessons — 2nd lesson only from 8 cores so peak threads stay
         # under _PEAK_MULT*cores at every core count (verified in the unit test).
@@ -275,10 +310,10 @@ VIDEO_CONCURRENCY: int = settings.VIDEO_CONCURRENCY or _AUTO["VIDEO_CONCURRENCY"
 
 # Segment encoding (still-image slide + narration audio). All segments must use
 # identical params — concatenate_segments joins them with `-c copy` (no re-encode).
-SEGMENT_FPS: int = 5                  # slide is static; 25fps was pure waste
-SEGMENT_AUDIO_BITRATE: str = "96k"    # mono narration doesn't need 192k
+SEGMENT_FPS: int = 5  # slide is static; 25fps was pure waste
+SEGMENT_AUDIO_BITRATE: str = "96k"  # mono narration doesn't need 192k
 SEGMENT_AUDIO_CHANNELS: int = 1
-SEGMENT_KEYFRAME_SECONDS: int = 2     # keyframe every ~2s keeps in-slide seeking smooth
+SEGMENT_KEYFRAME_SECONDS: int = 2  # keyframe every ~2s keeps in-slide seeking smooth
 
 # ── LLM / vision provider request tuning ─────────────────────────────────────
 # Cloud providers (Polza AI, Yandex AI Studio) add network latency and enforce
@@ -324,11 +359,11 @@ GRADING_MAX_ATTEMPTS_PER_QUIZ_PER_DAY: int = 5
 # priced by formula instead — see VIDEO_*_BASE_CREDITS below and
 # billing_service.estimate_video_text/estimate_video_auto.
 CREDIT_WEIGHTS: dict[str, int] = {
-    "vision_analyze": 5,    # vision-анализ PPTX → SlideText (без видео)
-    "slide_regen": 1,       # регенерация одного слайда через vision LLM
-    "quiz_generate": 5,     # AI-генерация квиза (полная цена и при перегенерации)
-    "ai_review": 2,         # AI-review вопросов квиза
-    "quiz_grade": 0,        # AI-проверка квиза — бесплатно (маркетинговый аргумент)
+    "vision_analyze": 5,  # vision-анализ PPTX → SlideText (без видео)
+    "slide_regen": 1,  # регенерация одного слайда через vision LLM
+    "quiz_generate": 5,  # AI-генерация квиза (полная цена и при перегенерации)
+    "ai_review": 2,  # AI-review вопросов квиза
+    "quiz_grade": 0,  # AI-проверка квиза — бесплатно (маркетинговый аргумент)
 }
 
 # Video-generation pricing formula components (polza.ai tariffs of 2026-06-11,
@@ -353,16 +388,16 @@ LLM_RUB_PER_MTOK_COMPLETION: float = 63.5
 # A trial lecture/quiz is consumed instead of credits while slots remain.
 TRIAL_LECTURES: int = 2
 TRIAL_QUIZZES: int = 2
-TRIAL_MAX_SLIDES: int = 20          # cap per trial lecture
+TRIAL_MAX_SLIDES: int = 20  # cap per trial lecture
 TRIAL_MAX_SCRIPT_CHARS: int = 15000  # cap per trial lecture (text mode)
 
 # Tariff plans. Keys match CreditPlan enum values. Free accounts get no welcome
 # credits — the lifetime trial (2 lectures + 2 quizzes) replaces them.
 PLAN_CONFIGS: dict[str, dict[str, int]] = {
-    "free":    {"monthly_allowance": 0,   "onetime_credits": 0,  "price_rub": 0},
-    "starter": {"monthly_allowance": 30,  "onetime_credits": 0,  "price_rub": 490},
-    "pro":     {"monthly_allowance": 120, "onetime_credits": 0,  "price_rub": 1490},
-    "school":  {"monthly_allowance": 500, "onetime_credits": 0,  "price_rub": 4990},
+    "free": {"monthly_allowance": 0, "onetime_credits": 0, "price_rub": 0},
+    "starter": {"monthly_allowance": 30, "onetime_credits": 0, "price_rub": 490},
+    "pro": {"monthly_allowance": 120, "onetime_credits": 0, "price_rub": 1490},
+    "school": {"monthly_allowance": 500, "onetime_credits": 0, "price_rub": 4990},
 }
 
 # One-time credit packages purchasable via YooKassa. Keys are package_key in
@@ -378,10 +413,38 @@ PLAN_CONFIGS: dict[str, dict[str, int]] = {
 #   payment_subject — предмет расчёта (service = услуга)
 #   payment_mode    — признак способа расчёта (full_payment = полный расчёт)
 CREDIT_PACKAGES: dict[str, dict[str, str | int]] = {
-    "pack_50":   {"title": "50 кредитов",   "credits": 50,   "price_rub": 190,  "vat_code": 1, "payment_subject": "service", "payment_mode": "full_payment"},  # noqa: E501
-    "pack_200":  {"title": "200 кредитов",  "credits": 200,  "price_rub": 590,  "vat_code": 1, "payment_subject": "service", "payment_mode": "full_payment"},  # noqa: E501
-    "pack_500":  {"title": "500 кредитов",  "credits": 500,  "price_rub": 1290, "vat_code": 1, "payment_subject": "service", "payment_mode": "full_payment"},  # noqa: E501
-    "pack_1200": {"title": "1200 кредитов", "credits": 1200, "price_rub": 2690, "vat_code": 1, "payment_subject": "service", "payment_mode": "full_payment"},  # noqa: E501
+    "pack_50": {
+        "title": "50 кредитов",
+        "credits": 50,
+        "price_rub": 190,
+        "vat_code": 1,
+        "payment_subject": "service",
+        "payment_mode": "full_payment",
+    },  # noqa: E501
+    "pack_200": {
+        "title": "200 кредитов",
+        "credits": 200,
+        "price_rub": 590,
+        "vat_code": 1,
+        "payment_subject": "service",
+        "payment_mode": "full_payment",
+    },  # noqa: E501
+    "pack_500": {
+        "title": "500 кредитов",
+        "credits": 500,
+        "price_rub": 1290,
+        "vat_code": 1,
+        "payment_subject": "service",
+        "payment_mode": "full_payment",
+    },  # noqa: E501
+    "pack_1200": {
+        "title": "1200 кредитов",
+        "credits": 1200,
+        "price_rub": 2690,
+        "vat_code": 1,
+        "payment_subject": "service",
+        "payment_mode": "full_payment",
+    },  # noqa: E501
 }
 
 CREDIT_CARRYOVER_RATIO: float = 0.5  # до 50% месячного объёма переносится на след. месяц
@@ -445,9 +508,9 @@ PAYMENT_TASK_RETRY_MAX_BACKOFF: float = 300.0  # cap a single wait at 5 min
 # payments stuck in `pending` when the webhook 200'd but the settle task never
 # ran (Redis blip) AND the user never polled. Runs on beat in celery_quiz →
 # queue `quiz`. Reuses the SAME settlement path, so it can't double-credit.
-RECONCILE_INTERVAL_MINUTES: int = 15      # beat cadence
-RECONCILE_MIN_AGE_MINUTES: int = 10       # grace: let the task + poll settle first
-RECONCILE_MAX_AGE_HOURS: int = 72         # stop re-querying long-dead payments
+RECONCILE_INTERVAL_MINUTES: int = 15  # beat cadence
+RECONCILE_MIN_AGE_MINUTES: int = 10  # grace: let the task + poll settle first
+RECONCILE_MAX_AGE_HOURS: int = 72  # stop re-querying long-dead payments
 RECONCILE_BATCH_SIZE: int = 100
 # Alert when a payment is STILL pending past this despite reconcile — exactly
 # once per payment (Payment.alerted_at). Email is optional and OFF by default
@@ -465,10 +528,10 @@ PAYMENT_STUCK_ALERT_EMAIL: bool = False
 
 # CreditPlan value → tier. Keys match CreditPlan/PLAN_CONFIGS; unknown → "free".
 PLAN_TIER_MAP: dict[str, str] = {
-    "free":    "free",
+    "free": "free",
     "starter": "paid",
-    "pro":     "paid",
-    "school":  "paid",
+    "pro": "paid",
+    "school": "paid",
 }
 
 # Celery scheduling priority per tier (passed to apply_async(priority=...)).
@@ -479,8 +542,8 @@ PLAN_TIER_MAP: dict[str, str] = {
 # Values must fall inside broker_transport_options["priority_steps"] in
 # app/celery_app.py (currently 0..9).
 TIER_PRIORITY: dict[str, int] = {
-    "free":       9,
-    "paid":       3,
+    "free": 9,
+    "paid": 3,
     "enterprise": 0,
 }
 

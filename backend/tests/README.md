@@ -78,6 +78,7 @@ The convention is **module-attribute monkey-patching**:
 ```python
 from app.services import some_service as mod
 
+
 def test_thing(monkeypatch):
     monkeypatch.setattr(mod.some_service, "external_call", lambda *_a, **_k: "fake")
 ```

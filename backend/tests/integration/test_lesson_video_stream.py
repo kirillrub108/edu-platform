@@ -56,9 +56,7 @@ async def test_stream_non_enrolled_student_403(
 ) -> None:
     _course, _module, lesson = await _published_lesson(db_session, teacher_user)
     # No enrollment created.
-    resp = await client.get(
-        f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token
-    )
+    resp = await client.get(f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token)
     assert resp.status_code == 403
 
 
@@ -69,14 +67,10 @@ async def test_stream_unpublished_lesson_404_for_enrolled(
     student_user: User,
     student_token: dict[str, str],
 ) -> None:
-    course, _module, lesson = await _published_lesson(
-        db_session, teacher_user, is_published=False
-    )
+    course, _module, lesson = await _published_lesson(db_session, teacher_user, is_published=False)
     await make_enrollment(db_session, student_user, course)
     # Draft lesson hides with 404 (never 403) so the draft isn't revealed.
-    resp = await client.get(
-        f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token
-    )
+    resp = await client.get(f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token)
     assert resp.status_code == 404
 
 
@@ -96,11 +90,9 @@ async def test_stream_xaccel_local(
 
     monkeypatch.setattr(settings, "STORAGE_BACKEND", "local")
     monkeypatch.setattr(lessons_mod, "VIDEO_XACCEL_ENABLED", True)
-    monkeypatch.setattr(lessons_mod.storage_service,"exists", lambda rel: True)
+    monkeypatch.setattr(lessons_mod.storage_service, "exists", lambda rel: True)
 
-    resp = await client.get(
-        f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token
-    )
+    resp = await client.get(f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token)
     assert resp.status_code == 200
     # Body-less; nginx serves the bytes from the internal location.
     assert resp.content == b""
@@ -126,9 +118,7 @@ async def test_stream_s3_redirects_to_presigned(
         lessons_mod.storage_service, "presign_stream_url", lambda rel, ttl: presigned
     )
 
-    resp = await client.get(
-        f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token
-    )
+    resp = await client.get(f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token)
     assert resp.status_code == 302
     assert resp.headers["location"] == presigned
     # Bearer URL must not be retained by any shared cache.
@@ -150,9 +140,7 @@ async def test_stream_s3_missing_bucket_500(
     monkeypatch.setattr(settings, "STORAGE_BACKEND", "s3")
     monkeypatch.setattr(settings, "S3_BUCKET_NAME", "")
 
-    resp = await client.get(
-        f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token
-    )
+    resp = await client.get(f"/api/v1/lessons/{lesson.id}/video/stream", cookies=student_token)
     assert resp.status_code == 500
 
 
@@ -234,7 +222,7 @@ async def test_render_draft_visible_to_owner(
 
     monkeypatch.setattr(settings, "STORAGE_BACKEND", "local")
     monkeypatch.setattr(lessons_mod, "VIDEO_XACCEL_ENABLED", True)
-    monkeypatch.setattr(lessons_mod.storage_service,"exists", lambda rel: True)
+    monkeypatch.setattr(lessons_mod.storage_service, "exists", lambda rel: True)
 
     resp = await client.get(
         f"/api/v1/lessons/{lesson.id}/videos/{video.id}/stream",
@@ -254,13 +242,9 @@ async def test_dev_files_route_serves_videos_as_signed_urls(
     # the 302 target for the /stream endpoint, so /files/videos/* stays reachable
     # and is signature-gated exactly like any other asset (bad sig → 403, not a
     # blanket block).
-    video = await client.get(
-        "/files/videos/abc/clip.mp4?uid=1&expires=9999999999&sig=deadbeef"
-    )
+    video = await client.get("/files/videos/abc/clip.mp4?uid=1&expires=9999999999&sig=deadbeef")
     assert video.status_code == 403
-    cover = await client.get(
-        "/files/covers/pic.png?uid=1&expires=9999999999&sig=deadbeef"
-    )
+    cover = await client.get("/files/covers/pic.png?uid=1&expires=9999999999&sig=deadbeef")
     assert cover.status_code == 403
 
 

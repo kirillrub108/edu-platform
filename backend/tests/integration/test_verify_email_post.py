@@ -46,6 +46,7 @@ def _cookies(user: User) -> dict[str, str]:
 
 # ── POST /auth/verify-email ─────────────────────────────────────────────────
 
+
 async def test_verify_email_post_success(client: AsyncClient, db_session: Any) -> None:
     user = await _make_unverified_teacher(db_session)
     token = email_token_service.issue(str(user.id))
@@ -58,9 +59,7 @@ async def test_verify_email_post_success(client: AsyncClient, db_session: Any) -
     assert user.email_verified is True
 
 
-async def test_verify_email_post_token_is_one_time(
-    client: AsyncClient, db_session: Any
-) -> None:
+async def test_verify_email_post_token_is_one_time(client: AsyncClient, db_session: Any) -> None:
     user = await _make_unverified_teacher(db_session)
     token = email_token_service.issue(str(user.id))
 
@@ -79,6 +78,7 @@ async def test_verify_email_post_invalid_token(client: AsyncClient) -> None:
 
 # ── require_verified_email AI gate ──────────────────────────────────────────
 
+
 async def test_unverified_teacher_blocked_from_ai_endpoint(
     client: AsyncClient, db_session: Any
 ) -> None:
@@ -88,9 +88,7 @@ async def test_unverified_teacher_blocked_from_ai_endpoint(
     assert resp.json()["detail"] == "email_not_verified"
 
 
-async def test_ai_gate_opens_after_verification(
-    client: AsyncClient, db_session: Any
-) -> None:
+async def test_ai_gate_opens_after_verification(client: AsyncClient, db_session: Any) -> None:
     user = await _make_unverified_teacher(db_session)
     cookies = _cookies(user)
 

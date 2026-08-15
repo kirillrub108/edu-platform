@@ -1,4 +1,5 @@
 """Open-answer length cap (anti-abuse) — boundary at GRADING_MAX_ANSWER_CHARS."""
+
 from __future__ import annotations
 
 from app.constants import GRADING_MAX_ANSWER_CHARS

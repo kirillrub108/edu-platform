@@ -21,9 +21,7 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize(("module_published", "expected"), [(True, True), (False, False)])
-def test_module_visible_only_when_module_published(
-    module_published: bool, expected: bool
-) -> None:
+def test_module_visible_only_when_module_published(module_published: bool, expected: bool) -> None:
     module = Module(is_published=module_published)
     assert module_visible_to_student(module) is expected
 

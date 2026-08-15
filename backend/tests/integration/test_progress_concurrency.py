@@ -61,9 +61,7 @@ async def test_get_or_create_returns_existing_row(
     db_session: AsyncSession, teacher_user: User, student_user: User
 ) -> None:
     lesson, enrollment = await _scaffold(db_session, teacher_user, student_user)
-    existing = await make_lesson_progress(
-        db_session, enrollment, lesson, is_completed=True
-    )
+    existing = await make_lesson_progress(db_session, enrollment, lesson, is_completed=True)
 
     got = await get_or_create_lesson_progress(
         db_session, enrollment_id=enrollment.id, lesson_id=lesson.id

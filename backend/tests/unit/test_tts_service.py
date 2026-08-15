@@ -40,6 +40,7 @@ def _isolate_tts_chunk_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
 
 # ── _strip_ssml_tags ────────────────────────────────────────────────────────
 
+
 @pytest.mark.parametrize(
     "raw, expected_substr, must_not_contain",
     [
@@ -54,9 +55,7 @@ def _isolate_tts_chunk_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
         ("normal<prosody rate='slow'>term</prosody>end", "normaltermend", "<prosody"),
     ],
 )
-def test_strip_ssml_tags_keeps_text(
-    raw: str, expected_substr: str, must_not_contain: str
-) -> None:
+def test_strip_ssml_tags_keeps_text(raw: str, expected_substr: str, must_not_contain: str) -> None:
     out = _strip_ssml_tags(raw)
     assert expected_substr in out
     assert must_not_contain not in out
@@ -68,6 +67,7 @@ def test_strip_ssml_tags_collapses_multiple_spaces() -> None:
 
 # ── strip_tts_artifacts: CJK leakage ────────────────────────────────────────
 
+
 @pytest.mark.parametrize(
     "contaminated, clean",
     [
@@ -76,9 +76,9 @@ def test_strip_ssml_tags_collapses_multiple_spaces() -> None:
             "а справа мы должны产出 (выдать) уникальный продукт",
             "а справа мы должны (выдать) уникальный продукт",
         ),
-        ("слово ひらがな тут", "слово тут"),          # Hiragana
-        ("слово カタカナ тут", "слово тут"),          # Katakana
-        ("слово 한글 тут", "слово тут"),              # Hangul
+        ("слово ひらがな тут", "слово тут"),  # Hiragana
+        ("слово カタカナ тут", "слово тут"),  # Katakana
+        ("слово 한글 тут", "слово тут"),  # Hangul
         ("конец фразы。 Дальше", "конец фразы Дальше"),  # CJK punctuation
     ],
 )
@@ -89,6 +89,7 @@ def test_strip_tts_artifacts_removes_cjk(contaminated: str, clean: str) -> None:
 
 
 # ── _split_for_tts ──────────────────────────────────────────────────────────
+
 
 def test_split_for_tts_short_text_returns_single_chunk() -> None:
     out = _split_for_tts("Hello world.")
@@ -118,9 +119,8 @@ def test_split_for_tts_does_not_break_words() -> None:
 
 # ── TTSService.synthesize via mocked httpx ─────────────────────────────────
 
-def test_synthesize_writes_wav_file(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+
+def test_synthesize_writes_wav_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     captured_params: dict[str, Any] = {}
 
     # Make a real (silent) WAV body the service can concat.
@@ -184,9 +184,7 @@ def test_synthesize_sanitizes_silero_breaking_chars(
 
     monkeypatch.setattr(tts_mod.httpx, "get", _fake_get)
 
-    tts_service.synthesize(
-        "Упор на R&D, температура < 5 градусов", str(tmp_path / "out.wav")
-    )
+    tts_service.synthesize("Упор на R&D, температура < 5 градусов", str(tmp_path / "out.wav"))
 
     sent = captured_params["INPUT_TEXT"]
     assert "&" not in sent
@@ -195,9 +193,7 @@ def test_synthesize_sanitizes_silero_breaking_chars(
     assert "температура 5 градусов" in sent
 
 
-def test_synthesize_strips_cjk_characters(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_synthesize_strips_cjk_characters(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """LLM (qwen) occasionally leaks CJK ideographs into Russian narration —
     Silero 500s on them ("Invalid XML format"), polza tries to pronounce them."""
     captured_params: dict[str, Any] = {}
@@ -235,16 +231,16 @@ def test_synthesize_strips_cjk_characters(
     assert "  " not in sent
 
 
-def test_synthesize_propagates_http_error(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_synthesize_propagates_http_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     class _Resp:
         status_code = 500
         content = b""
 
         def raise_for_status(self) -> None:
             raise httpx.HTTPStatusError(
-                "boom", request=httpx.Request("GET", "x"), response=None  # type: ignore[arg-type]
+                "boom",
+                request=httpx.Request("GET", "x"),
+                response=None,  # type: ignore[arg-type]
             )
 
     monkeypatch.setattr(tts_mod.httpx, "get", lambda *a, **k: _Resp())
@@ -431,9 +427,7 @@ def test_polza_5xx_retries_then_fails(
 def test_polza_empty_audio_raises(
     polza_provider: None, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr(
-        tts_mod.httpx, "post", lambda *a, **k: _PolzaResp(payload={"audio": ""})
-    )
+    monkeypatch.setattr(tts_mod.httpx, "post", lambda *a, **k: _PolzaResp(payload={"audio": ""}))
 
     with pytest.raises(RuntimeError, match="Polza TTS returned no audio"):
         tts_service.synthesize("Привет", str(tmp_path / "out.wav"))
@@ -542,7 +536,9 @@ def test_polza_long_text_chunks_and_concats(
 
     # Each sentence is distinct (unlike a literal repeat) so the new chunk-level
     # cache in tts_service doesn't dedupe identical chunks within this call.
-    text = "".join(f"Это предложение номер {i}. " for i in range(10))  # ~290 chars → must split at 60
+    text = "".join(
+        f"Это предложение номер {i}. " for i in range(10)
+    )  # ~290 chars → must split at 60
     out_path = tmp_path / "long.wav"
     tts_service.synthesize(text, str(out_path))
 

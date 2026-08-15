@@ -4,6 +4,7 @@ Per-quiz settings, polymorphic question CRUD, publish/unpublish (independent
 of Lesson.status), LLM generation/regeneration/QA, and the manual override
 that re-aggregates the student's attempt score atomically.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -80,9 +81,7 @@ router = APIRouter(prefix="/api/v1/lessons", tags=["quiz-teacher"])
 _OPEN_ENDED_TYPES = {"short_answer", "essay"}
 
 
-async def _load_question(
-    db: AsyncSession, quiz_id: UUID, question_id: UUID
-) -> QuizQuestion:
+async def _load_question(db: AsyncSession, quiz_id: UUID, question_id: UUID) -> QuizQuestion:
     """Load the CURRENT (non-superseded) version of a question. Historical
     versions stay in the table for attempt snapshots but are not addressable
     via the teacher API.
@@ -100,18 +99,14 @@ async def _load_lesson_quiz(db: AsyncSession, lesson: Lesson) -> Quiz:
     the race against parallel first-load requests (uq_quizzes_lesson_id).
     """
     q = await db.scalar(
-        select(Quiz)
-        .where(Quiz.lesson_id == lesson.id)
-        .options(selectinload(Quiz.questions))
+        select(Quiz).where(Quiz.lesson_id == lesson.id).options(selectinload(Quiz.questions))
     )
     if q is not None:
         return q
     await get_or_create_quiz(db, lesson)
     # Re-SELECT with selectinload so the relationship is hydrated for callers.
     q = await db.scalar(
-        select(Quiz)
-        .where(Quiz.lesson_id == lesson.id)
-        .options(selectinload(Quiz.questions))
+        select(Quiz).where(Quiz.lesson_id == lesson.id).options(selectinload(Quiz.questions))
     )
     assert q is not None
     return q
@@ -261,7 +256,10 @@ async def update_question(
 
     if bumps_version:
         new_row = await supersede_with_new_version(
-            db, current, payload=new_payload, weight=weight,
+            db,
+            current,
+            payload=new_payload,
+            weight=weight,
         )
         # Order is a property of the visible row; it doesn't bump the version
         # but we still want to apply it to the new current row.
@@ -579,10 +577,7 @@ async def ai_review(
                 },
             )
 
-        payload = [
-            {"id": r.id, "type": r.type.value, "payload": r.payload}
-            for r in open_ended
-        ]
+        payload = [{"id": r.id, "type": r.type.value, "payload": r.payload} for r in open_ended]
         usage_service.set_usage_context("ai_review", lesson_id=lesson_id, quiz_id=quiz.id)
         try:
             llm_flags = await llm_service.qa_review_quiz(material, payload)
@@ -622,10 +617,14 @@ async def list_attempts(
     )
     out: list[QuizAttemptTeacherRead] = []
     for attempt, student in rows.all():
-        needs_review_count = await db.scalar(
-            select(func.count(QuizAnswer.id))
-            .where(QuizAnswer.attempt_id == attempt.id, QuizAnswer.needs_review.is_(True))
-        ) or 0
+        needs_review_count = (
+            await db.scalar(
+                select(func.count(QuizAnswer.id)).where(
+                    QuizAnswer.attempt_id == attempt.id, QuizAnswer.needs_review.is_(True)
+                )
+            )
+            or 0
+        )
         out.append(
             QuizAttemptTeacherRead(
                 id=attempt.id,

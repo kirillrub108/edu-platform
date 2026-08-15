@@ -8,6 +8,7 @@ failure rolls back only that insert, never the caller's outer transaction;
 we then re-SELECT the now-committed row. Mirrors the get_or_create_quiz idiom
 in quiz_service.
 """
+
 from uuid import UUID
 
 from sqlalchemy import select

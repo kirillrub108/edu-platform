@@ -8,6 +8,7 @@ The key invariant:
   * ok=True  → ans.graded_by_ai = True
   * ok=False → ans.graded_by_ai stays False, ans.needs_review stays True
 """
+
 from __future__ import annotations
 
 import uuid

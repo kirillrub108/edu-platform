@@ -51,7 +51,9 @@ def _postgres() -> Iterator[PostgresContainer]:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.TempPathFactory) -> Iterator[None]:
+def _set_database_url(
+    _postgres: PostgresContainer, tmp_path_factory: pytest.TempPathFactory
+) -> Iterator[None]:
     """Patch env BEFORE app modules are imported anywhere."""
     raw_url = _postgres.get_connection_url()  # postgresql+psycopg2://...
     sync_url = raw_url.replace("postgresql+psycopg2", "postgresql+psycopg2")
@@ -69,9 +71,11 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
     # Force re-read of cached Settings, then rebind the singletons that
     # captured the placeholder URL/path at import time.
     from app.config import get_settings
+
     get_settings.cache_clear()
 
     import app.config as _config_mod
+
     _config_mod.settings = get_settings()
 
     # 1) async engine in app.database
@@ -103,15 +107,18 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
     # vision_pipeline imports SyncSession by name from video_pipeline — keep
     # its local binding in sync too.
     import app.tasks.vision_pipeline as _vis_mod
+
     _vis_mod.SyncSession = _vp_mod.SyncSession
 
     # payment_pipeline also imports SyncSession by name from video_pipeline.
     import app.tasks.payment_pipeline as _pay_mod
+
     _pay_mod.SyncSession = _vp_mod.SyncSession
 
     # 2a) usage_service builds its private sync engine lazily on first record;
     # drop anything cached so it re-reads the rebound settings/URL.
     import app.services.usage_service as _usage_mod
+
     _usage_mod._engine = None
     _usage_mod._SyncSession = None
 
@@ -140,16 +147,22 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
         base_url=_config_mod.settings.BASE_URL,
     )
     # Re-export to other modules that did `from .storage_service import storage_service`
-    import app.tasks.video_pipeline as _vp_mod2
-    import app.tasks.vision_pipeline as _vis_mod2
-    import app.tasks.purge_pipeline as _purge_mod2
     import app.routers.lessons as _lessons_router
     import app.routers.slides as _slides_router
     import app.routers.students as _students_router
     import app.routers.uploads as _uploads_router
+    import app.tasks.purge_pipeline as _purge_mod2
+    import app.tasks.video_pipeline as _vp_mod2
+    import app.tasks.vision_pipeline as _vis_mod2
+
     for _mod in (
-        _vp_mod2, _vis_mod2, _purge_mod2, _lessons_router, _slides_router,
-        _students_router, _uploads_router,
+        _vp_mod2,
+        _vis_mod2,
+        _purge_mod2,
+        _lessons_router,
+        _slides_router,
+        _students_router,
+        _uploads_router,
     ):
         if hasattr(_mod, "storage_service"):
             _mod.storage_service = _storage_mod.storage_service
@@ -158,6 +171,7 @@ def _set_database_url(_postgres: PostgresContainer, tmp_path_factory: pytest.Tem
 
 
 # ── 2. Schema bootstrap ──────────────────────────────────────────────────────
+
 
 @pytest.fixture(scope="session")
 def _alembic_upgraded(_set_database_url: None) -> None:
@@ -179,6 +193,7 @@ def _alembic_upgraded(_set_database_url: None) -> None:
 
 
 # ── 3. Async engine + per-test session with SAVEPOINT rollback ──────────────
+
 
 @pytest_asyncio.fixture(scope="session")
 async def _async_engine(_alembic_upgraded: None) -> AsyncIterator[Any]:
@@ -213,9 +228,7 @@ async def db_session(_async_engine: Any) -> AsyncIterator[Any]:
         await connection.begin()
         await connection.begin_nested()
 
-        session = AsyncSession(
-            bind=connection, expire_on_commit=False, autoflush=False
-        )
+        session = AsyncSession(bind=connection, expire_on_commit=False, autoflush=False)
 
         @event.listens_for(session.sync_session, "after_transaction_end")
         def _end_savepoint(sess, transaction):  # type: ignore[no-redef]
@@ -227,14 +240,13 @@ async def db_session(_async_engine: Any) -> AsyncIterator[Any]:
         try:
             yield session
         finally:
-            event.remove(
-                session.sync_session, "after_transaction_end", _end_savepoint
-            )
+            event.remove(session.sync_session, "after_transaction_end", _end_savepoint)
             await session.close()
             await connection.rollback()
 
 
 # ── 4. FastAPI app + httpx AsyncClient with dependency overrides ────────────
+
 
 @pytest_asyncio.fixture()
 async def app(db_session: Any) -> AsyncIterator[Any]:
@@ -304,6 +316,7 @@ async def client(app: Any) -> AsyncIterator[Any]:
 
 
 # ── 5. User + JWT helpers ────────────────────────────────────────────────────
+
 
 @pytest_asyncio.fixture()
 async def teacher_user(db_session: Any) -> Any:
@@ -385,6 +398,7 @@ def mock_send_email(monkeypatch: pytest.MonkeyPatch) -> Any:
     monkeypatch.setattr(email_pipeline.send_email, "delay", m)
     return m
 
+
 def _synthetic_wav(duration_s: float = 1.0, sample_rate: int = 48000) -> bytes:
     """Return WAV bytes — silent, 16-bit mono — that wave / ffprobe can read."""
     buf = io.BytesIO()
@@ -447,9 +461,7 @@ def mock_llm_split(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             chunks = [f"<p>chunk {i + 1}</p>" for i in range(slides_count)]
         return chunks, None
 
-    monkeypatch.setattr(
-        llm_mod.llm_service, "split_and_annotate_ssml", _fake_split
-    )
+    monkeypatch.setattr(llm_mod.llm_service, "split_and_annotate_ssml", _fake_split)
     return state
 
 
@@ -589,6 +601,7 @@ def mock_subprocess(monkeypatch: pytest.MonkeyPatch) -> dict[str, list[list[str]
 # loop itself, so it re-asserts that exact loop as the thread's current loop
 # both before and after each test.
 
+
 @pytest_asyncio.fixture(autouse=True)
 async def _preserve_thread_event_loop() -> AsyncIterator[None]:
     import asyncio
@@ -603,6 +616,7 @@ async def _preserve_thread_event_loop() -> AsyncIterator[None]:
 
 
 # ── 8. Disable rate limit for unit-style fixtures (autouse safety net) ──────
+
 
 @pytest.fixture(autouse=True)
 def _disable_rate_limit() -> Iterator[None]:
@@ -621,6 +635,7 @@ def _disable_rate_limit() -> Iterator[None]:
 
 
 # ── 9. Sample PPTX fixture (session-scope, built once) ──────────────────────
+
 
 @pytest.fixture(scope="session")
 def sample_pptx_bytes() -> bytes:

@@ -28,6 +28,7 @@ class LessonUpdate(BaseModel):
 
 class LessonPartialUpdate(BaseModel):
     """Inline-edit: only title; must be non-empty if provided."""
+
     title: str | None = Field(default=None, min_length=1, max_length=255)
 
 

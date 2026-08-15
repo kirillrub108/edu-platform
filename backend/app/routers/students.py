@@ -91,7 +91,9 @@ async def my_courses(
         .where(Enrollment.student_id == user.id)
         .options(
             selectinload(Enrollment.course).selectinload(Course.owner),
-            selectinload(Enrollment.course).selectinload(Course.modules).selectinload(Module.lessons),
+            selectinload(Enrollment.course)
+            .selectinload(Course.modules)
+            .selectinload(Module.lessons),
             selectinload(Enrollment.progress),
         )
     )
@@ -167,9 +169,7 @@ async def course_details(
     )
     lesson_progress = {
         str(p.lesson_id): StudentLessonProgressRead(
-            effective_score=gradebook_service.compute_effective_score(
-                p.quiz_score, p.manual_score
-            ),
+            effective_score=gradebook_service.compute_effective_score(p.quiz_score, p.manual_score),
             teacher_comment=p.teacher_comment,
             is_completed=p.is_completed,
         )
@@ -225,9 +225,7 @@ async def _get_progress(user: User, lesson_id: UUID, db: AsyncSession) -> Lesson
     if not enrollment:
         raise HTTPException(status_code=403, detail="Not enrolled")
 
-    return await get_or_create_lesson_progress(
-        db, enrollment_id=enrollment.id, lesson_id=lesson_id
-    )
+    return await get_or_create_lesson_progress(db, enrollment_id=enrollment.id, lesson_id=lesson_id)
 
 
 @router.post("/lessons/{lesson_id}/complete")
@@ -261,19 +259,13 @@ async def dashboard(
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> StudentDashboardRead:
-    enrollment_ids = (
-        select(Enrollment.id).where(Enrollment.student_id == user.id).scalar_subquery()
-    )
+    enrollment_ids = select(Enrollment.id).where(Enrollment.student_id == user.id).scalar_subquery()
     course_ids = (
-        select(Enrollment.course_id)
-        .where(Enrollment.student_id == user.id)
-        .scalar_subquery()
+        select(Enrollment.course_id).where(Enrollment.student_id == user.id).scalar_subquery()
     )
 
     enrolled_courses = await db.scalar(
-        select(func.count())
-        .select_from(Enrollment)
-        .where(Enrollment.student_id == user.id)
+        select(func.count()).select_from(Enrollment).where(Enrollment.student_id == user.id)
     )
 
     # "Выполнено заданий" — assignments handed in (anything past the draft stage).
@@ -408,9 +400,7 @@ async def my_results(
             QuizAttempt.student_id == user.id,
             QuizAttempt.status.in_([AttemptStatus.submitted, AttemptStatus.graded]),
         )
-        .order_by(
-            func.coalesce(QuizAttempt.submitted_at, QuizAttempt.started_at).desc()
-        )
+        .order_by(func.coalesce(QuizAttempt.submitted_at, QuizAttempt.started_at).desc())
     )
 
     return [
@@ -487,5 +477,3 @@ async def my_assignments(
             )
         )
     return result
-
-

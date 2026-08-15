@@ -19,6 +19,7 @@ pytestmark = pytest.mark.unit
 
 # ── Template rendering ────────────────────────────────────────────────────────
 
+
 def test_render_verify_email_includes_url_and_name() -> None:
     html = render_template(
         "verify_email.html",
@@ -48,6 +49,7 @@ def test_render_autoescapes_html_in_context() -> None:
 
 # ── Provider selection ────────────────────────────────────────────────────────
 
+
 def test_build_provider_returns_resend_when_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(email_service.settings, "EMAIL_PROVIDER", "resend")
     monkeypatch.setattr(email_service.settings, "RESEND_API_KEY", "re_test_key")
@@ -69,6 +71,7 @@ def test_build_provider_unknown_raises(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # ── Resend provider status mapping ────────────────────────────────────────────
+
 
 class _Resp:
     def __init__(self, status_code: int) -> None:

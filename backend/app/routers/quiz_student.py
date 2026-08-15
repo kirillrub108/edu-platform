@@ -7,6 +7,7 @@ exception is the post-submit result when `show_answers && attempts_allowed == 1`
 — in that case we include the snapshot's full payload as `correct_payload`
 on the answer view.
 """
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -91,9 +92,7 @@ async def _ensure_enrolled(
 
 async def _load_published_quiz(db: AsyncSession, lesson: Lesson) -> Quiz:
     quiz = await db.scalar(
-        select(Quiz)
-        .where(Quiz.lesson_id == lesson.id)
-        .options(selectinload(Quiz.questions))
+        select(Quiz).where(Quiz.lesson_id == lesson.id).options(selectinload(Quiz.questions))
     )
     # Treat draft as nonexistent from the student's POV — same 404 either way
     # so the API doesn't leak quiz existence.
@@ -109,10 +108,7 @@ def _snapshot_questions(quiz: Quiz) -> dict[str, Any]:
     after later edits.
     """
     ordered = sorted(quiz.questions, key=lambda q: (q.order, q.created_at))
-    return build_snapshot([
-        {"id": q.id, "version": q.version, "order": q.order}
-        for q in ordered
-    ])
+    return build_snapshot([{"id": q.id, "version": q.version, "order": q.order} for q in ordered])
 
 
 def _student_questions_from_resolved(
@@ -129,9 +125,7 @@ def _student_questions_from_resolved(
     ]
 
 
-async def _resolve_or_500(
-    db: AsyncSession, snapshot: dict[str, Any]
-) -> list[ResolvedQuestion]:
+async def _resolve_or_500(db: AsyncSession, snapshot: dict[str, Any]) -> list[ResolvedQuestion]:
     try:
         return await resolve_snapshot(db, snapshot)
     except BrokenSnapshotError as exc:
@@ -208,8 +202,11 @@ async def get_my_quiz_attempts(
     quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson.id))
     if quiz is None:
         return MyQuizAttemptsResponse(
-            attempts=[], best_score=None, final_score=None,
-            is_manual=False, is_passed=False,
+            attempts=[],
+            best_score=None,
+            final_score=None,
+            is_manual=False,
+            is_passed=False,
         )
 
     rows = await db.scalars(
@@ -230,8 +227,14 @@ async def get_my_quiz_attempts(
         )
     )
 
-    best_score = float(progress.quiz_score) if progress and progress.quiz_score is not None else None
-    manual = float(progress.manual_override_score) if progress and progress.manual_override_score is not None else None
+    best_score = (
+        float(progress.quiz_score) if progress and progress.quiz_score is not None else None
+    )
+    manual = (
+        float(progress.manual_override_score)
+        if progress and progress.manual_override_score is not None
+        else None
+    )
     final_score = manual if manual is not None else best_score
     is_passed = bool(progress.is_completed) if progress else False
 
@@ -279,12 +282,15 @@ async def get_quiz_for_student(
     )
 
     # Attempts already used.
-    used = await db.scalar(
-        select(func.count(QuizAttempt.id)).where(
-            QuizAttempt.quiz_id == quiz.id,
-            QuizAttempt.student_id == user.id,
+    used = (
+        await db.scalar(
+            select(func.count(QuizAttempt.id)).where(
+                QuizAttempt.quiz_id == quiz.id,
+                QuizAttempt.student_id == user.id,
+            )
         )
-    ) or 0
+        or 0
+    )
 
     return {
         "quiz_id": str(quiz.id),
@@ -333,12 +339,15 @@ async def start_attempt(
         )
 
     # Enforce attempts_allowed.
-    used = await db.scalar(
-        select(func.count(QuizAttempt.id)).where(
-            QuizAttempt.quiz_id == quiz.id,
-            QuizAttempt.student_id == user.id,
+    used = (
+        await db.scalar(
+            select(func.count(QuizAttempt.id)).where(
+                QuizAttempt.quiz_id == quiz.id,
+                QuizAttempt.student_id == user.id,
+            )
         )
-    ) or 0
+        or 0
+    )
     if quiz.attempts_allowed is not None and used >= quiz.attempts_allowed:
         raise HTTPException(status_code=409, detail="No attempts left")
 
@@ -363,9 +372,7 @@ async def start_attempt(
     )
 
 
-async def _load_owned_attempt(
-    db: AsyncSession, user: User, attempt_id: UUID
-) -> QuizAttempt:
+async def _load_owned_attempt(db: AsyncSession, user: User, attempt_id: UUID) -> QuizAttempt:
     attempt = await db.scalar(
         select(QuizAttempt)
         .where(QuizAttempt.id == attempt_id, QuizAttempt.student_id == user.id)
@@ -391,16 +398,12 @@ async def save_attempt_progress(
     # Validate against the pinned pointer set — no DB resolution needed; we
     # only check membership, not payloads.
     from app.services.grading_service import snapshot_pointers
-    valid_ids = {
-        UUID(str(p["question_id"]))
-        for p in snapshot_pointers(attempt.questions_snapshot)
-    }
+
+    valid_ids = {UUID(str(p["question_id"])) for p in snapshot_pointers(attempt.questions_snapshot)}
     by_qid = {a.question_id: a for a in attempt.answers}
     for item in data.answers:
         if item.question_id not in valid_ids:
-            raise HTTPException(
-                status_code=422, detail=f"Unknown question_id: {item.question_id}"
-            )
+            raise HTTPException(status_code=422, detail=f"Unknown question_id: {item.question_id}")
         existing = by_qid.get(item.question_id)
         if existing is None:
             db.add(
@@ -437,9 +440,7 @@ def _reject_overlong_open_answers(
             )
 
 
-async def _reserve_grading_slot(
-    db: AsyncSession, student_id: UUID, quiz_id: UUID
-) -> None:
+async def _reserve_grading_slot(db: AsyncSession, student_id: UUID, quiz_id: UUID) -> None:
     """Atomically take one daily grading slot for (student, quiz); 429 when the
     day's cap is exhausted. A failed reservation is not refunded — a downstream
     LLM failure must not hand the slot back (anti-abuse)."""

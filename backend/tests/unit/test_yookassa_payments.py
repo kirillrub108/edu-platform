@@ -1,9 +1,9 @@
 """Unit tests for the YooKassa payment building blocks (no DB, no network):
 
-  * CREDIT_PACKAGES shape (price/credits/receipt fields per sku)
-  * receipt assembly from per-package attributes
-  * payment_matches anti-fraud gate (amount/currency/paid/status)
-  * webhook source-IP resolution + allowlist
+* CREDIT_PACKAGES shape (price/credits/receipt fields per sku)
+* receipt assembly from per-package attributes
+* payment_matches anti-fraud gate (amount/currency/paid/status)
+* webhook source-IP resolution + allowlist
 """
 
 from __future__ import annotations

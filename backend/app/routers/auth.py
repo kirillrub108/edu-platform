@@ -80,23 +80,29 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
     """Set httpOnly access + refresh cookies and a non-httpOnly CSRF token."""
     kw = {"samesite": settings.COOKIE_SAMESITE, "secure": settings.COOKIE_SECURE}
     response.set_cookie(
-        "access_token", access_token,
-        httponly=True, path="/",
+        "access_token",
+        access_token,
+        httponly=True,
+        path="/",
         max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         **kw,
     )
     # Restrict refresh cookie to the one path that needs it so it is never
     # accidentally forwarded with ordinary API requests.
     response.set_cookie(
-        "refresh_token", refresh_token,
-        httponly=True, path="/api/v1/auth/refresh",
+        "refresh_token",
+        refresh_token,
+        httponly=True,
+        path="/api/v1/auth/refresh",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         **kw,
     )
     # Non-httpOnly so JS can read and forward it as X-CSRF-Token (double-submit).
     response.set_cookie(
-        "csrf_token", secrets.token_hex(32),
-        httponly=False, path="/",
+        "csrf_token",
+        secrets.token_hex(32),
+        httponly=False,
+        path="/",
         max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 86400,
         **kw,
     )
@@ -149,7 +155,9 @@ async def refresh(
     service: AuthService = Depends(get_auth_service),
 ) -> dict:
     if not refresh_token:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token missing"
+        )
     tokens = await service.refresh(refresh_token)
     _set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
     return {}

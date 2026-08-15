@@ -28,9 +28,7 @@ pytestmark = pytest.mark.integration
 _UNKNOWN_TASK = "task-not-in-result-backend"
 
 
-async def _owned_lesson(
-    db: AsyncSession, teacher: User, **lesson_kw: object
-) -> Lesson:
+async def _owned_lesson(db: AsyncSession, teacher: User, **lesson_kw: object) -> Lesson:
     course = await make_course(db, owner=teacher)
     module = await make_module(db, course)
     return await make_lesson(db, module, **lesson_kw)
@@ -68,9 +66,7 @@ async def test_quiz_generation_status_success_from_db(
     teacher_user: User,
     teacher_token: dict[str, str],
 ) -> None:
-    lesson = await _owned_lesson(
-        db_session, teacher_user, status=LessonStatus.published
-    )
+    lesson = await _owned_lesson(db_session, teacher_user, status=LessonStatus.published)
     quiz = await make_quiz(db_session, lesson)  # generation_task_id is None (done)
     await make_quiz_question(db_session, quiz)  # one current question → SUCCESS
 
@@ -88,9 +84,7 @@ async def test_quiz_generation_status_in_progress_uses_result_backend(
     teacher_user: User,
     teacher_token: dict[str, str],
 ) -> None:
-    lesson = await _owned_lesson(
-        db_session, teacher_user, status=LessonStatus.published
-    )
+    lesson = await _owned_lesson(db_session, teacher_user, status=LessonStatus.published)
     # generation_task_id == the polled task → still running → defer to the
     # result backend (empty here → PENDING), not a DB shortcut.
     await make_quiz(db_session, lesson, generation_task_id=_UNKNOWN_TASK)

@@ -89,9 +89,7 @@ def lesson_video_render_stream_path(lesson_id: UUID, video_id: UUID) -> str:
 # endpoint. There it loads a bearer-signed absolute /files URL directly instead —
 # the same model covers use. Prod (nginx or S3) is same-origin and serves the
 # player through /stream (X-Accel / presigned 302).
-_VIDEO_DIRECT_SIGNED: bool = (
-    settings.STORAGE_BACKEND == "local" and not VIDEO_XACCEL_ENABLED
-)
+_VIDEO_DIRECT_SIGNED: bool = settings.STORAGE_BACKEND == "local" and not VIDEO_XACCEL_ENABLED
 
 
 def video_playback_url(
@@ -270,9 +268,7 @@ async def upload_lesson_video(
             raise HTTPException(status_code=400, detail="Пустой файл")
         if file.size > MAX_VIDEO_UPLOAD_BYTES:
             gb = MAX_VIDEO_UPLOAD_BYTES // (1024 * 1024 * 1024)
-            raise HTTPException(
-                status_code=413, detail=f"Файл слишком большой (максимум {gb} ГБ)"
-            )
+            raise HTTPException(status_code=413, detail=f"Файл слишком большой (максимум {gb} ГБ)")
 
     head = await file.read(16)
     await file.seek(0)
@@ -306,9 +302,7 @@ async def _video_estimate(
     if is_auto:
         slides = (
             await db.scalar(
-                select(func.count())
-                .select_from(SlideText)
-                .where(SlideText.lesson_id == lesson.id)
+                select(func.count()).select_from(SlideText).where(SlideText.lesson_id == lesson.id)
             )
             or None
         )
@@ -333,6 +327,7 @@ async def _count_slides_offloop(pptx_path: str) -> int | None:
     treat that as "unknown", which disqualifies the trial, so the failure is
     logged rather than swallowed silently.
     """
+
     def _count() -> int | None:
         with storage_service.local_copy(pptx_path) as local:
             return count_source_slides(local)
@@ -350,9 +345,7 @@ async def _trial_video_available(
     """(trial_state, video slot usable) — free plan, slots left, lecture fits caps."""
     trial = await quota_service.get_trial_state(db, user_id)
     fits = (
-        slides is not None
-        and slides <= TRIAL_MAX_SLIDES
-        and script_chars <= TRIAL_MAX_SCRIPT_CHARS
+        slides is not None and slides <= TRIAL_MAX_SLIDES and script_chars <= TRIAL_MAX_SCRIPT_CHARS
     )
     return trial, plan == "free" and fits and trial["lectures_used"] < trial["lectures_limit"]
 
@@ -427,9 +420,7 @@ async def generate_video(
         db, user.id, quota_service.TRIAL_LECTURE, trial["lectures_limit"]
     ):
         billed_via = "trial"
-    elif not await billing_service.reserve_credits(
-        db, user.id, estimate, billing_ref, operation
-    ):
+    elif not await billing_service.reserve_credits(db, user.id, estimate, billing_ref, operation):
         raise _insufficient_credits_402(balance, estimate, trial)
 
     # Billing state must be committed before apply_async — the worker reads it.
@@ -576,9 +567,7 @@ async def generation_estimate(
     trial, video_trial = await _trial_video_available(
         db, user.id, balance["plan"], slides, script_chars
     )
-    quiz_trial = (
-        balance["plan"] == "free" and trial["quizzes_used"] < trial["quizzes_limit"]
-    )
+    quiz_trial = balance["plan"] == "free" and trial["quizzes_used"] < trial["quizzes_limit"]
     return GenerationEstimateOut(
         video=EstimateVideoOut(
             mode=mode, slides=slides, script_chars=script_chars, credits=credits
@@ -792,52 +781,64 @@ async def quiz_results(
     pass_threshold = quiz.pass_threshold if quiz is not None else None
 
     students = (
-        await db.execute(
-            select(User)
-            .join(Enrollment, Enrollment.student_id == User.id)
-            .where(Enrollment.course_id == course_id)
-            .order_by(User.full_name)
+        (
+            await db.execute(
+                select(User)
+                .join(Enrollment, Enrollment.student_id == User.id)
+                .where(Enrollment.course_id == course_id)
+                .order_by(User.full_name)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     out: list[QuizTeacherResultRow] = []
     for student in students:
         if quiz_id is None:
-            out.append(QuizTeacherResultRow(
-                student_id=student.id,
-                full_name=student.full_name,
-                email=student.email,
-                best_score=None,
-                attempts_count=0,
-                passed=False,
-                last_submitted_at=None,
-            ))
+            out.append(
+                QuizTeacherResultRow(
+                    student_id=student.id,
+                    full_name=student.full_name,
+                    email=student.email,
+                    best_score=None,
+                    attempts_count=0,
+                    passed=False,
+                    last_submitted_at=None,
+                )
+            )
             continue
         # Only count graded attempts toward best_score; submitted-but-pending
         # attempts shouldn't influence a published number.
         attempts = (
-            await db.execute(
-                select(QuizAttempt)
-                .where(
-                    QuizAttempt.quiz_id == quiz_id,
-                    QuizAttempt.student_id == student.id,
+            (
+                await db.execute(
+                    select(QuizAttempt)
+                    .where(
+                        QuizAttempt.quiz_id == quiz_id,
+                        QuizAttempt.student_id == student.id,
+                    )
+                    .order_by(desc(QuizAttempt.submitted_at))
                 )
-                .order_by(desc(QuizAttempt.submitted_at))
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         graded = [a for a in attempts if a.status == AttemptStatus.graded and a.score is not None]
         best = max(graded, key=lambda a: a.score) if graded else None
         last_subm = next((a.submitted_at for a in attempts if a.submitted_at), None)
         passed = bool(best and pass_threshold is not None and best.score >= pass_threshold)
-        out.append(QuizTeacherResultRow(
-            student_id=student.id,
-            full_name=student.full_name,
-            email=student.email,
-            best_score=best.score if best else None,
-            attempts_count=len(attempts),
-            passed=passed,
-            last_submitted_at=last_subm,
-        ))
+        out.append(
+            QuizTeacherResultRow(
+                student_id=student.id,
+                full_name=student.full_name,
+                email=student.email,
+                best_score=best.score if best else None,
+                attempts_count=len(attempts),
+                passed=passed,
+                last_submitted_at=last_subm,
+            )
+        )
     return out
 
 
@@ -960,9 +961,7 @@ def _stream_video_response(relative: str, user_id: str) -> Response:
         url = storage_service.presign_stream_url(relative, S3_PRESIGN_TTL_SECONDS)
         # no-store so no shared/CDN/proxy cache can retain this 302 and hand the
         # presigned URL — a bearer capability for its TTL — to another student.
-        return RedirectResponse(
-            url=url, status_code=302, headers={"Cache-Control": "no-store"}
-        )
+        return RedirectResponse(url=url, status_code=302, headers={"Cache-Control": "no-store"})
 
     if not storage_service.exists(relative):
         raise HTTPException(status_code=404, detail="Video not found")
@@ -978,9 +977,7 @@ def _stream_video_response(relative: str, user_id: str) -> Response:
         )
 
     signed = storage_service.get_url(relative, user_id, expires_in=SIGNED_URL_TTL_VIDEO)
-    return RedirectResponse(
-        url=signed, status_code=302, headers={"Cache-Control": "no-store"}
-    )
+    return RedirectResponse(url=signed, status_code=302, headers={"Cache-Control": "no-store"})
 
 
 @router.get("/{lesson_id}/video/stream")
@@ -1007,9 +1004,7 @@ async def stream_lesson_video_render(
     revealing that an unpublished render exists."""
     user, lesson, is_owner = access
     video = await db.scalar(
-        select(LessonVideo).where(
-            LessonVideo.id == video_id, LessonVideo.lesson_id == lesson.id
-        )
+        select(LessonVideo).where(LessonVideo.id == video_id, LessonVideo.lesson_id == lesson.id)
     )
     if video is None or (not is_owner and not video.is_published):
         raise HTTPException(status_code=404, detail="Video not found")

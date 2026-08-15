@@ -190,9 +190,7 @@ async def test_cancel_video_releases_reserved_credits(
     before = await billing_service.get_balance(db_session, teacher_user.id)
     assert before["reserved"] == amount
 
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson.id}/cancel-video", cookies=teacher_token
-    )
+    resp = await client.post(f"/api/v1/lessons/{lesson.id}/cancel-video", cookies=teacher_token)
     assert resp.status_code == 200
     assert resp.json()["cancelled"] is True
     assert resp.json()["mode"] == "immediate"
@@ -207,9 +205,7 @@ async def test_cancel_video_releases_reserved_credits(
     assert releases[0].ref_id == billing_ref
 
     # Idempotent: a second cancel must not release the hold again.
-    resp2 = await client.post(
-        f"/api/v1/lessons/{lesson.id}/cancel-video", cookies=teacher_token
-    )
+    resp2 = await client.post(f"/api/v1/lessons/{lesson.id}/cancel-video", cookies=teacher_token)
     assert resp2.status_code == 200
     again = await billing_service.get_balance(db_session, teacher_user.id)
     assert again["reserved"] == 0
@@ -257,9 +253,7 @@ async def test_cancel_video_does_not_release_when_already_charged(
     charged = await billing_service.get_balance(db_session, uid)
     assert charged["reserved"] == 0
 
-    resp = await client.post(
-        f"/api/v1/lessons/{lesson.id}/cancel-video", cookies=teacher_token
-    )
+    resp = await client.post(f"/api/v1/lessons/{lesson.id}/cancel-video", cookies=teacher_token)
     assert resp.status_code == 200
 
     after = await billing_service.get_balance(db_session, uid)

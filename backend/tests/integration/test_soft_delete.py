@@ -83,9 +83,7 @@ async def test_restore_moves_course_back_to_its_section(
     course.deleted_at = datetime.now(timezone.utc)
     await db_session.commit()
 
-    resp = await client.patch(
-        f"/api/v1/courses/{course.id}/restore", cookies=teacher_token
-    )
+    resp = await client.patch(f"/api/v1/courses/{course.id}/restore", cookies=teacher_token)
     assert resp.status_code == 200
     body = resp.json()
     assert body["is_archived"] is False
@@ -103,9 +101,7 @@ async def test_restore_non_archived_returns_400(
     teacher_token: dict[str, str],
 ) -> None:
     course = await make_course(db_session, owner=teacher_user)
-    resp = await client.patch(
-        f"/api/v1/courses/{course.id}/restore", cookies=teacher_token
-    )
+    resp = await client.patch(f"/api/v1/courses/{course.id}/restore", cookies=teacher_token)
     assert resp.status_code == 400
 
 
@@ -147,9 +143,7 @@ async def test_archived_course_direct_url_accessible_for_enrolled_student(
     course.deleted_at = datetime.now(timezone.utc)
     await db_session.commit()
 
-    resp = await client.get(
-        f"/api/v1/students/courses/{course.id}", cookies=student_token
-    )
+    resp = await client.get(f"/api/v1/students/courses/{course.id}", cookies=student_token)
     # Enrolled students can still open archived course content.
     assert resp.status_code == 200
 
@@ -277,9 +271,7 @@ def test_purge_removes_files_via_os_remove(
     assert any("purge-test.png" in p for p in removed)
 
 
-def _make_graded_attachment(
-    session: Session, *, graded_days_ago: int | None
-) -> dict[str, object]:
+def _make_graded_attachment(session: Session, *, graded_days_ago: int | None) -> dict[str, object]:
     """Build user→course→…→submission→attachment with a real file on disk.
     graded_days_ago=None leaves the submission ungraded (graded_at NULL)."""
     from app.services.storage_service import storage_service

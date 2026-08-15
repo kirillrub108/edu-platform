@@ -123,7 +123,7 @@ async def verify_file_signature(request: Request) -> Response:
     if not parsed.path.startswith("/files/"):
         raise HTTPException(status_code=403, detail="Forbidden")
 
-    file_path = unquote(parsed.path[len("/files/"):])
+    file_path = unquote(parsed.path[len("/files/") :])
     if file_path.split("/", 1)[0] == "videos":
         # Videos are served only via the authorised /stream endpoint; refuse to
         # validate a signed /files/videos/* URL so the old path can't be replayed.
