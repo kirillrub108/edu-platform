@@ -338,6 +338,8 @@ interface VideoItem {
   video_url: string
   voice: string
   creation_mode: string
+  speed: number | null
+  pitch: number | null
   is_published: boolean
   created_at: string
 }
@@ -661,6 +663,11 @@ watch(lessonId, (newId, oldId) => {
                     {{ formatDate(video.created_at) }}
                   </span>
                   <span class="text-sm text-gray-700">{{ voiceLabel(video.voice) }}</span>
+                  <span v-if="video.speed != null || video.pitch != null" class="text-sm text-gray-500">
+                    <template v-if="video.speed != null">скорость {{ video.speed }}</template>
+                    <template v-if="video.speed != null && video.pitch != null">, </template>
+                    <template v-if="video.pitch != null">тон {{ video.pitch }}</template>
+                  </span>
                   <span class="text-sm text-gray-500">{{ modeHistoryLabels[video.creation_mode] ?? video.creation_mode }}</span>
                   <span
                     v-if="video.is_published"
