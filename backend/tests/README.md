@@ -2,39 +2,54 @@
 
 ## Running (canonical — inside the backend container)
 
-The stack is already brought up via `docker compose up`. Run the suite
-inside the running backend container:
+Every in-container run needs the **host** Docker socket (see below), which the
+default dev stack does not mount — `conftest.py` starts the Postgres
+testcontainer from a `scope="session", autouse=True` fixture, so even
+`tests/unit` pulls it in. Recreate `backend` with the opt-in
+`docker-compose.test.yml` override first — once per session:
 
 ```powershell
+docker compose -f docker-compose.yml -f docker-compose.test.yml up -d backend
+
 # Full suite (127 tests, ~12 s, zero skips) — uses LibreOffice / poppler /
 # ffmpeg baked into the backend image and spins up a sibling Postgres via
 # testcontainers + host Docker socket.
-docker compose exec backend pytest -m "not slow"
-
-# Unit tests only (no DB, no sibling container)
-docker compose exec backend pytest tests/unit -m unit
+docker compose -f docker-compose.yml -f docker-compose.test.yml exec backend pytest -m "not slow"
 
 # Coverage report (excludes the two task pipelines by default — see
 # pyproject.toml [tool.coverage.run])
-docker compose exec backend pytest -m "not slow" --cov=app --cov-report=term-missing
+docker compose -f docker-compose.yml -f docker-compose.test.yml exec backend pytest -m "not slow" --cov=app --cov-report=term-missing
 
 # Including the `slow` tier (real Ollama / Silero — needs those services up)
-docker compose exec backend pytest
+docker compose -f docker-compose.yml -f docker-compose.test.yml exec backend pytest
 ```
+
+```powershell
+# Unit tests only (still needs the override — see the autouse fixture above)
+docker compose -f docker-compose.yml -f docker-compose.test.yml exec backend pytest tests/unit -m unit
+```
+
+`docker compose down backend` (or a plain `docker compose up -d backend`)
+puts the container back on the socket-free, non-root definition afterwards.
 
 This works because `docker-compose.yml` for the `backend` service:
 
 * installs `requirements-dev.txt` in the image (see `backend/Dockerfile`);
-* mounts `/var/run/docker.sock` so `testcontainers` can ask the **host**
-  Docker daemon to start a sibling `postgres:17-alpine` container for the
-  test session — i.e. Docker-outside-of-Docker, not DinD;
-* sets `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal` and
-  `TESTCONTAINERS_RYUK_DISABLED=true` so the test process inside the
-  container can reach the sibling Postgres on the host network, and
-  doesn't wait for the unreachable Ryuk reaper;
 * bind-mounts `./backend/tests` and `./backend/pyproject.toml` into
   `/app/` so editing tests on the host shows up immediately — no rebuild
-  needed unless you change `requirements*.txt` or system packages.
+  needed unless you change `requirements*.txt` or system packages;
+
+…and `docker-compose.test.yml` adds, for the test run only:
+
+* `/var/run/docker.sock`, so `testcontainers` can ask the **host** Docker
+  daemon to start a sibling `postgres:17-alpine` container for the test
+  session — i.e. Docker-outside-of-Docker, not DinD;
+* `user: root` — the socket is `root:root` mode 0660, so the image's default
+  `appuser` (uid 1000) cannot open it;
+* `TESTCONTAINERS_HOST_OVERRIDE=host.docker.internal` and
+  `TESTCONTAINERS_RYUK_DISABLED=true`, so the test process inside the
+  container can reach the sibling Postgres on the host network and doesn't
+  wait for the unreachable Ryuk reaper.
 
 ## Running on the host (Windows / macOS / Linux dev box)
 

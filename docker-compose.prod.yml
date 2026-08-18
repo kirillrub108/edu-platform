@@ -8,11 +8,17 @@
 #   Up:       docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 #   Validate: docker compose -f docker-compose.prod.yml --env-file .env.prod config
 #
-# App containers run as root (image default). The dev compose pins workers to
-# uid 1000 because storage is a host bind-mount; in prod storage is the
-# `app_storage` named volume shared by backend + all workers, so uniform root
-# ownership avoids cross-container permission mismatches. Hardening to a
-# non-root uid is a separate follow-up (needs a Dockerfile chown).
+# App containers run as appuser (uid/gid 1000) — the image's USER, pinned here
+# explicitly on every service built from that image. The shared `app_storage`
+# volume is seeded from the image's /app/storage, which the Dockerfile chowns to
+# appuser, so a freshly created volume is writable by all of them.
+#
+# UPGRADING AN EXISTING DEPLOYMENT: a volume created back when the containers
+# ran as root stays root-owned, and the app can no longer write to it. Run this
+# ONCE on the server, before the first `up` on the new images:
+#
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod \
+#     run --rm --user root backend chown -R 1000:1000 /app/storage
 
 # ── Reusable fragments (x-* are ignored by Compose; anchors are expanded) ─────
 x-logging: &default-logging
@@ -150,6 +156,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    user: "1000:1000"
     profiles: ["migrate"]
     command: alembic upgrade head
     <<: *backend-env
@@ -167,6 +174,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    user: "1000:1000"
     # Production server: gunicorn master + N uvicorn workers, no --reload.
     command: >
       gunicorn app.main:app
@@ -202,6 +210,7 @@ services:
 
   celery_video:
     image: ${BACKEND_IMAGE:-edllm-backend:local}
+    user: "1000:1000"
     command: >
       celery -A app.celery_app worker
       --pool=prefork
@@ -231,6 +240,7 @@ services:
 
   celery_vision:
     image: ${BACKEND_IMAGE:-edllm-backend:local}
+    user: "1000:1000"
     command: >
       celery -A app.celery_app worker
       --pool=prefork
@@ -262,6 +272,7 @@ services:
   # this service, or purge runs twice.
   celery_quiz:
     image: ${BACKEND_IMAGE:-edllm-backend:local}
+    user: "1000:1000"
     command: >
       celery -A app.celery_app worker
       --beat
@@ -292,6 +303,7 @@ services:
 
   celery_email_worker:
     image: ${BACKEND_IMAGE:-edllm-backend:local}
+    user: "1000:1000"
     command: >
       celery -A app.celery_app worker
       --pool=prefork
@@ -435,10 +447,16 @@ services:
 
   flower:
     image: ${BACKEND_IMAGE:-edllm-backend:local}
+    user: "1000:1000"
     command: celery -A app.celery_app flower --port=5555 --url-prefix=/flower
-    env_file:
-      - .env.prod
+    # Flower imports app.celery_app, so it needs exactly what Settings requires
+    # at import time (DATABASE_URL, SECRET_KEY — neither has a default) plus the
+    # broker URL. The rest of .env.prod (LLM/vision/TTS/email/YooKassa keys,
+    # ADMIN_API_TOKEN, S3 credentials) is unused here and deliberately withheld.
     environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY: ${SECRET_KEY}
       ENVIRONMENT: ${ENVIRONMENT:-production}
       APP_VERSION: ${APP_VERSION:-prod}
       SENTRY_DSN: ${SENTRY_DSN:-}

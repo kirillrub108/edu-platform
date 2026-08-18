@@ -72,8 +72,20 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # The COPY line goes here (after pip install, before "COPY . .") so that
 # adding a new font does not invalidate the pip layer cache.
 
-COPY lo-emoji-substitution.xcu /app/lo-emoji-substitution.xcu
+COPY --chown=appuser:appgroup lo-emoji-substitution.xcu /app/lo-emoji-substitution.xcu
 
-COPY . .
+COPY --chown=appuser:appgroup . .
+
+# Drop root. `appuser` (uid/gid 1000) must own everything the app writes at
+# runtime: /app/storage (generated PPTX/PNG/WAV/MP4 + the per-run LibreOffice
+# UserInstallation profile `_lo_profile`) and /app itself, which is $HOME for
+# appuser and the pytest/coverage rootdir in dev. WORKDIR created /app as root,
+# so hand it over explicitly — a non-recursive chown keeps the layer tiny while
+# COPY --chown above already placed the copied tree correctly.
+# In prod /app/storage is what Docker seeds the `app_storage` named volume from
+# on first mount, so this ownership is what the volume inherits.
+RUN mkdir -p /app/storage && chown appuser:appgroup /app /app/storage
+
+USER appuser
 
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

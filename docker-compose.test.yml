@@ -1,0 +1,26 @@
+# Test-only override for the dev stack. NOT active on a plain `docker-compose up`.
+#
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml up -d backend
+#   docker compose -f docker-compose.yml -f docker-compose.test.yml exec backend pytest -m "not slow"
+#
+# Everything here exists for one reason: the integration suite uses
+# `testcontainers` to spin up a sibling Postgres through the HOST Docker daemon
+# (Docker-outside-of-Docker). That needs the daemon socket, which is
+# root-owned 0660 — so the backend also has to drop back to root for the test
+# run. Both concessions are confined to this file so the normal dev stack runs
+# as appuser with no path to the host daemon.
+#
+# On a Linux host this run may leave root-owned files under ./backend/storage;
+# `sudo chown -R 1000:1000 backend/storage` if the non-root stack then complains.
+# (No effect on Windows/macOS bind mounts.)
+services:
+  backend:
+    user: root
+    environment:
+      # testcontainers spawns sibling containers via the host Docker, so their
+      # ports land on the host — not on this container's bridge. Ryuk (the
+      # cleanup reaper) is unreachable in DooD setups, so disable it.
+      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
+      TESTCONTAINERS_RYUK_DISABLED: "true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

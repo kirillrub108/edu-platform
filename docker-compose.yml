@@ -7,8 +7,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    # Infra ports are published on loopback only — reachable from the host
+    # (psql, DB GUI) but not from the LAN. Container-to-container traffic goes
+    # over edu-network and is unaffected.
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
@@ -25,10 +28,12 @@ services:
   redis:
     image: redis:8-alpine
     command: redis-server --requirepass ${REDIS_PASSWORD}
-    env_file:
-      - .env
+    # Only the password (for `redis-cli -a "$REDIS_PASSWORD"` inside the
+    # container); redis has no use for the app's secrets. Mirrors prod.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     networks:
       - edu-network
     logging:
@@ -44,13 +49,6 @@ services:
     env_file:
       - .env
     environment:
-      # When running pytest inside this container, testcontainers spawns
-      # sibling Postgres/Ryuk containers via the host Docker. Their ports
-      # are exposed on the host, not on this container's bridge — so we
-      # tell testcontainers to reach them via host.docker.internal.
-      # Ryuk (the cleanup reaper) is unreachable in DooD setups, disable it.
-      TESTCONTAINERS_HOST_OVERRIDE: host.docker.internal
-      TESTCONTAINERS_RYUK_DISABLED: "true"
       SENTRY_DSN: ${SENTRY_DSN:-}
       ENVIRONMENT: ${ENVIRONMENT:-development}
       APP_VERSION: ${APP_VERSION:-dev}
@@ -63,11 +61,6 @@ services:
       - ./backend/storage:/app/storage
       - ./backend/app:/app/app
       - ./backend/alembic:/app/alembic
-      # Tests use `testcontainers` to spin up a sibling Postgres via the
-      # host's Docker daemon. Mounting the socket lets the test process
-      # inside this container talk to the host Docker. Dev-only — do not
-      # ship this mount to prod.
-      - /var/run/docker.sock:/var/run/docker.sock
       # Bind tests/, conftest, and pyproject so editing tests on the host
       # shows up in the container without rebuilding.
       - ./backend/tests:/app/tests
@@ -248,8 +241,12 @@ services:
 
   prometheus:
     image: prom/prometheus:latest
+    # Prometheus has no authentication here: enabling its own basic auth needs a
+    # --web.config.file with a bcrypt hash, plus matching credentials in the
+    # Grafana datasource provisioning. Not worth it for a dev-only endpoint —
+    # the loopback bind is the access control.
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -269,9 +266,9 @@ services:
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3001:3000"
-    env_file:
-      - .env
+      - "127.0.0.1:3001:3000"
+    # GF_* only — a third-party image has no business holding the app's
+    # provider API keys / SECRET_KEY. Same pattern as prod.
     environment:
       GF_SECURITY_ADMIN_USER: "${GF_SECURITY_ADMIN_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${GF_SECURITY_ADMIN_PASSWORD:-change-me}"
@@ -294,10 +291,15 @@ services:
       dockerfile: Dockerfile
     command: celery -A app.celery_app flower --port=5555
     ports:
-      - "5555:5555"
-    env_file:
-      - .env
+      - "127.0.0.1:5555:5555"
+    # Flower imports app.celery_app, so it needs exactly what Settings requires
+    # at import time (DATABASE_URL, SECRET_KEY — neither has a default) plus the
+    # broker URL. Everything else in .env (LLM/vision/TTS/email/YooKassa keys,
+    # ADMIN_API_TOKEN) is unused here and deliberately not passed.
     environment:
+      DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL}
+      SECRET_KEY: ${SECRET_KEY}
       FLOWER_BASIC_AUTH: "${CELERY_FLOWER_USER:-admin}:${CELERY_FLOWER_PASSWORD:-change-me}"
     depends_on:
       - redis

@@ -31,15 +31,21 @@ docker-compose up --build
 docker-compose exec backend alembic revision --autogenerate -m "describe change"
 docker-compose exec backend alembic upgrade head     # usually unnecessary in dev, see "Migrations"
 
-# Backend tests — run inside the backend image (testcontainers starts a sibling
-# Postgres via the host Docker socket; details in backend/tests/README.md). Suite is
-# split into tests/unit/ (pure-function / service tests) and tests/integration/
-# (route tests using the conftest async client + factories).
-docker-compose exec backend pytest -m "not slow"              # canonical full run
-docker-compose exec backend pytest tests/unit                 # unit only
-docker-compose exec backend pytest tests/integration          # routes only
-docker-compose exec backend pytest tests/unit/test_tts_service.py::test_name   # single
-docker-compose exec backend pytest                            # adds `slow` tier — needs real Ollama/Silero up
+# Backend tests — run inside the backend image. conftest starts a sibling Postgres
+# via testcontainers from a session-scoped autouse fixture, so EVERY run (unit
+# included) needs the host Docker socket. That socket lives in the opt-in
+# docker-compose.test.yml override — the default stack runs socket-free and
+# non-root — so recreate backend with it first. Details in backend/tests/README.md.
+# Suite is split into tests/unit/ (pure-function / service tests) and
+# tests/integration/ (route tests using the conftest async client + factories).
+docker-compose -f docker-compose.yml -f docker-compose.test.yml up -d backend   # once per session
+# then, with `dct` standing in for `docker-compose -f docker-compose.yml -f docker-compose.test.yml`:
+dct exec backend pytest -m "not slow"              # canonical full run
+dct exec backend pytest tests/unit                 # unit only
+dct exec backend pytest tests/integration          # routes only
+dct exec backend pytest tests/unit/test_tts_service.py::test_name   # single
+dct exec backend pytest                            # adds `slow` tier — needs real Ollama/Silero up
+docker-compose up -d backend                       # back to the socket-free stack
 
 # Lint (ruff: rules E, F, I — line length 100, target py313)
 docker-compose exec backend ruff check app
