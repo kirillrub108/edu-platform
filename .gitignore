@@ -36,13 +36,11 @@ backend/storage/*
 #Pylance
 backend/.stubs/
 
-# Alembic
-backend/alembic/versions/*
-!backend/alembic/versions/.gitkeep
-# Exception: the init migration IS committed on purpose so that a clean
-# deploy reproduces the DB schema without a manual autogenerate step.
-!backend/alembic/versions/c2f900c2bf7a_init_schema.py
-!backend/alembic/versions/865f7e4ba3a5_backfill_course_access_codes.py
+# Alembic — migrations ARE committed. Prod applies them with the one-shot
+# `migrate` service (`alembic upgrade head`) and CI builds its test schema the
+# same way, so a migration missing from git = broken deploy and red tests.
+# This used to be an ignore-all + per-file allowlist; every new migration
+# silently stayed out of git until it broke CI.
 
 # Node
 node_modules/
