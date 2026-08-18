@@ -172,7 +172,7 @@ const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScoZQb5VAXVRV2
     <main class="flex-1 min-w-0 px-6 lg:px-10 py-8">
       <!-- Header -->
       <div class="mb-6">
-        <div class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Преподаватель</div>
+        <div class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Автор</div>
         <h1 class="text-2xl font-semibold text-gray-900">Баланс и кредиты</h1>
       </div>
 

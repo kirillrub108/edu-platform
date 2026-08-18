@@ -43,7 +43,7 @@ const send = () => {
             :class="m.author.role === 'teacher'
               ? 'bg-violet-100 text-violet-700'
               : 'bg-gray-100 text-gray-600'"
-          >{{ m.author.role === 'teacher' ? 'преподаватель' : 'студент' }}</span>
+          >{{ m.author.role === 'teacher' ? 'автор' : 'студент' }}</span>
           <span class="ml-auto tabular-nums">{{ formatAssignmentDateTime(m.created_at) }}</span>
         </div>
         <p class="text-sm text-gray-800 whitespace-pre-wrap break-words">{{ m.body }}</p>

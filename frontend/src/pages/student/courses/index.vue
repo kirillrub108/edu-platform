@@ -56,7 +56,7 @@ onMounted(load)
     <form class="mb-6 flex gap-2 max-w-md" @submit.prevent="handleEnroll">
       <input
         v-model="enrollCode"
-        placeholder="Код доступа от преподавателя"
+        placeholder="Код доступа от автора"
         class="flex-1 min-w-0 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-violet-400"
       />
       <button

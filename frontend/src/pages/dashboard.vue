@@ -129,7 +129,7 @@ onMounted(async () => {
     <main class="flex-1 px-6 lg:px-10 py-8">
       <div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div>
-          <div class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Преподаватель</div>
+          <div class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Автор</div>
           <h1 class="text-2xl font-semibold text-gray-900">Мои курсы</h1>
         </div>
         <NuxtLink to="/courses/create">

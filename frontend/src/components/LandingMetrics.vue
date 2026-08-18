@@ -4,7 +4,7 @@
      Icons stroke with currentColor so they follow the panel tone. -->
 <template>
   <div class="banner reveal">
-    <div class="blabel">Создано для преподавателей, методистов и онлайн-школ</div>
+    <div class="blabel">Создано для авторов, методистов и онлайн-школ</div>
     <div class="stats">
       <div class="stat">
         <div class="sic">

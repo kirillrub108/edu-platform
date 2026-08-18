@@ -254,7 +254,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
           <p class="text-sm font-medium mb-2">{{ q.payload.prompt ?? '' }}</p>
 
           <div v-if="answerFor(q.id)?.needs_review" class="text-xs text-amber-600 mb-1">
-            Ожидает ручной проверки преподавателем.
+            Ожидает ручной проверки автором.
           </div>
 
           <!-- show_answers && attempts==1: render the snapshot's correct payload -->
@@ -473,7 +473,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
         <span
           v-if="attemptsData.is_manual"
           class="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full"
-          title="Выставлен преподавателем"
+          title="Выставлен автором"
         >вручную</span>
         <span
           v-if="attemptsData.is_passed"

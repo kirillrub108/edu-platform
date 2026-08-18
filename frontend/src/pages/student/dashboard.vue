@@ -136,7 +136,7 @@ onMounted(() => {
         </div>
         <h3 class="text-lg font-semibold text-gray-900 mb-1">Вы ещё не записаны на курсы</h3>
         <p class="text-gray-500 text-sm mb-5">
-          Введите код доступа от преподавателя, чтобы начать обучение.
+          Введите код доступа от автора, чтобы начать обучение.
         </p>
         <NuxtLink
           to="/student/courses"

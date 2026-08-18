@@ -71,7 +71,7 @@ const confirmDelete = () => {
           v-if="isTeacher"
           class="px-1.5 py-0.5 rounded-md bg-violet-50 text-violet-700 text-[10px] font-medium"
         >
-          Преподаватель
+          Автор
         </span>
         <span class="text-gray-500">{{ relativeTime(comment.created_at) }}</span>
         <span v-if="comment.is_edited" class="text-gray-500">· изменено</span>
