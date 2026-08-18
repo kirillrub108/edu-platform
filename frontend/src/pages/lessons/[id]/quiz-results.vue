@@ -210,7 +210,7 @@ onMounted(load)
               <th class="px-4 py-3 text-center font-medium">Балл</th>
               <th class="px-4 py-3 text-center font-medium">Статус</th>
               <th class="px-4 py-3 text-left font-medium">Дата</th>
-              <th class="px-4 py-3 text-center font-medium w-10" title="Правка учителем">
+              <th class="px-4 py-3 text-center font-medium w-10" title="Правка автором">
                 <Pencil class="w-3.5 h-3.5 mx-auto" />
               </th>
               <th class="px-4 py-3 text-right font-medium">Действия</th>
@@ -248,7 +248,7 @@ onMounted(load)
                   <Pencil
                     v-if="item.edited_by_teacher"
                     class="w-3.5 h-3.5 mx-auto text-violet-500"
-                    title="Балл скорректирован учителем"
+                    title="Балл скорректирован автором"
                   />
                 </td>
                 <td class="px-4 py-3 text-right">

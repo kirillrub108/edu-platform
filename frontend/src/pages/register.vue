@@ -77,7 +77,7 @@ onMounted(restoreScroll)
         </div>
         <p class="mb-5 text-center text-xs text-gray-500">
           <template v-if="role === 'teacher'">Создаёте и публикуете курсы</template>
-          <template v-else>Проходите курсы по ссылке от учителя</template>
+          <template v-else>Проходите курсы по ссылке от автора</template>
         </p>
 
         <form class="space-y-4" @submit.prevent="submit">

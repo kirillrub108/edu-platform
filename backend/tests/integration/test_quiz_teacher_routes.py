@@ -349,3 +349,66 @@ async def test_list_questions_only_returns_current(
     body = r.json()
     assert len(body) == 1
     assert body[0]["payload"]["prompt"] == "v2"
+
+
+# ── Answer-key exposure guard ────────────────────────────────────────────────
+
+
+async def _make_outsider(db_session, role):
+    """A user with no relationship to the fixture teacher's course."""
+    import uuid as _uuid
+
+    from app.models.user import User, UserRole
+    from app.services.auth_service import hash_password
+
+    user = User(
+        email=f"outsider-{_uuid.uuid4().hex[:8]}@example.com",
+        hashed_password=hash_password("outsider-pass-123"),
+        full_name="Outsider",
+        role=UserRole.teacher if role == "teacher" else UserRole.student,
+        is_active=True,
+        email_verified=True,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+    return user
+
+
+def _cookies(user):
+    from app.services.auth_service import create_access_token
+
+    token, _jti, _exp = create_access_token(user)
+    return {"access_token": token, "csrf_token": "test-csrf-fixed-value"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("role", ["teacher", "student"])
+async def test_question_listing_hides_answer_key_from_non_owners(
+    client, db_session, teacher_user, teacher_token, role
+):
+    """GET /lessons/{id}/quiz/questions returns the teacher payload, which carries
+    the answer key (`correct_index`, `reference_answer`, `rubric`, ...). Only the
+    course owner may read it — anyone else gets 404, never the key."""
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+    quiz = await make_quiz(db_session, lesson)
+    await make_quiz_question(db_session, quiz)
+
+    # Owner still sees the key.
+    r = await client.get(f"/api/v1/lessons/{lesson.id}/quiz/questions", cookies=teacher_token)
+    assert r.status_code == 200
+    assert "correct_index" in r.json()[0]["payload"]
+
+    # Any other authenticated user must not. A non-owning teacher gets 404 (the
+    # lesson is never revealed); a student is rejected earlier by the role check
+    # with 403, which leaks nothing since it precedes any lesson lookup.
+    outsider = await _make_outsider(db_session, role)
+    r = await client.get(
+        f"/api/v1/lessons/{lesson.id}/quiz/questions", cookies=_cookies(outsider)
+    )
+    assert r.status_code in (403, 404), (
+        f"{role} outside the course read the quiz answer key: {r.text}"
+    )
+    assert "correct_index" not in r.text

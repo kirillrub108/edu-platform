@@ -29,7 +29,6 @@ from app.constants import (
 )
 from app.database import get_db
 from app.dependencies import (
-    get_current_user,
     get_owned_lesson,
     require_lesson_access,
     require_teacher,
@@ -41,7 +40,7 @@ from app.models.credit import CreditOperation
 from app.models.enrollment import Enrollment
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
-from app.models.quiz import AttemptStatus, Quiz, QuizAttempt, QuizQuestion
+from app.models.quiz import AttemptStatus, Quiz, QuizAttempt
 from app.models.slide_text import SlideText
 from app.models.user import User
 from app.redis_client import get_redis
@@ -60,7 +59,7 @@ from app.schemas.lesson import (
     TaskStatusResponse,
     VideoGenerateRequest,
 )
-from app.schemas.quiz import QuizQuestionTeacherRead, QuizTeacherResultRow
+from app.schemas.quiz import QuizTeacherResultRow
 from app.services import billing_service, quota_service, tier_service
 from app.services.storage_service import storage_service
 from app.services.video_service import count_source_slides
@@ -747,26 +746,6 @@ async def progress_stream(
             await pubsub.aclose()
 
     return EventSourceResponse(generator())
-
-
-@router.get("/{lesson_id}/quiz/questions", response_model=list[QuizQuestionTeacherRead])
-async def get_quiz_questions(
-    lesson_id: UUID,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
-    if not lesson:
-        raise HTTPException(status_code=404, detail="Lesson not found")
-    quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson_id))
-    if quiz is None:
-        return []
-    result = await db.execute(
-        select(QuizQuestion)
-        .where(QuizQuestion.quiz_id == quiz.id, QuizQuestion.superseded_at.is_(None))
-        .order_by(QuizQuestion.order)
-    )
-    return result.scalars().all()
 
 
 @router.get("/{lesson_id}/quiz-results", response_model=list[QuizTeacherResultRow])

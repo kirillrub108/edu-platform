@@ -50,7 +50,15 @@
 35. [LessonVideo: версии вместо перезаписи](#35-lessonvideo-версии-вместо-перезаписи)
 36. [Задания: вложения только хранятся + ретеншн](#36-задания-вложения-только-хранятся--ретеншн)
 37. [Прод-стек: self-contained compose, миграции отдельным шагом, backup-сайдкар](#37-прод-стек-self-contained-compose-миграции-отдельным-шагом-backup-сайдкар)
+38. [Сокращение TTL подписанных URL + 403-resilience плеера](#38-сокращение-ttl-подписанных-url--403-resilience-плеера-known_problems-14-partial)
+39. [Хардненинг ЮKassa-вебхука: IP-allowlist + асинхронное начисление в Celery](#39-хардненинг-юkassa-вебхука-ip-allowlist--асинхронное-начисление-в-celery)
+40. [Reconcile «зависших» платежей + единый путь расчёта](#40-reconcile-зависших-платежей--единый-путь-расчёта)
+41. [Отдача видео: авторизованный `/stream` вместо signed-URL](#41-отдача-видео-авторизованный-stream-x-accel--presigned-вместо-signed-url-known_problems-34)
 42. [Пустой ответ vision-модели — явная ошибка, а не тихий fallback](#42-пустой-ответ-vision-модели--явная-ошибка-а-не-тихий-fallback)
+43. [SpeechKit v3: остаёмся на `containerAudio`](#43-speechkit-v3-остаёмся-на-containeraudio--22050-гц-это-нативная-частота-голосов-2026-08-16)
+44. [`access_code` курса: генерируется сразу при создании, но остаётся nullable](#44-access_code-курса-генерируется-сразу-при-создании-но-остаётся-nullable)
+45. [Переход LLM/Vision/TTS на Yandex AI Studio + SpeechKit v3](#45-переход-llmvisiontts-на-yandex-ai-studio--speechkit-v3-2026-08-12)
+46. [Автодеплой: сборка образов на сервере по SSH, а не registry + pull](#46-автодеплой-сборка-образов-на-сервере-по-ssh-а-не-registry--pull-2026-08-14)
 
 > Между §33 и §34 в теле идут несколько именованных (без номера) ADR — soft-delete, email-верификация,
 > раздача `/files/*` через nginx, приоритет Celery по тарифу, монетизация/ЮКасса. Они актуальны.
@@ -346,7 +354,7 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 
 **Альтернативы:**
 - **Встроить Silero в backend-контейнер** через прямой `torch`-импорт. Отказались — torch + модель ~2GB, утяжелит и замедлит backend-образ.
-- **Yandex SpeechKit** — качественнее, но платный. Поддержка заглушена в коде (`raise NotImplementedError` в `tts_service.py`).
+- **Yandex SpeechKit** — качественнее, но платный. На момент этого решения поддержка была заглушена в коде (`raise NotImplementedError` в `tts_service.py`); с 2026-08-12 реализована полностью через SpeechKit v3 и стала прод-дефолтом — см. §45.
 - **gTTS (Google Text-to-Speech)** — работает, но требует интернет на каждый запрос.
 - **eSpeak** — звучит роботизированно, не подходит для educational.
 
@@ -356,6 +364,12 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 - + Бесплатно для **некоммерческого** использования (русские модели — CC-BY-NC 4.0); для коммерции нужна Silero EE (hello@silero.ai) или лицензированный TTS-провайдер (Polza / Yandex SpeechKit). См. [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md).
 - − Ещё один контейнер.
 - − HTTP overhead на каждый запрос (vs прямой Python-вызов).
+
+> **Обновление (2026-08-12).** Сам контейнер `silero-tts` убран из `docker-compose.yml`/
+> `docker-compose.prod.yml` (см. §45) — код провайдера `TTS_PROVIDER=silero` остался и работает
+> (`tts_service._synthesize_silero`), но требует теперь ручного self-host. Прод переключён на
+> `TTS_PROVIDER=yandex`. `silero/config.py` в репозитории стал мёртвым кодом — раньше это был
+> конфиг смонтированного контейнера, теперь его никто не монтирует (см. [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md)).
 
 ---
 
@@ -1026,7 +1040,7 @@ SyncSession = sessionmaker(bind=sync_engine, expire_on_commit=False)
 - [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md) — последствия некоторых решений (особенно 4, 5, 8, 9).
 - [DATA_FLOW.md](DATA_FLOW.md) — как эти решения работают вместе в конкретных сценариях.
 
-## §N. Переход LLM/Vision/TTS на Yandex AI Studio + SpeechKit v3 (2026-08-12)
+## 45. Переход LLM/Vision/TTS на Yandex AI Studio + SpeechKit v3 (2026-08-12)
 
 Контекст: грант Yandex Cloud 10 000 ₽ на запуск. Текст и vision переключены на
 `https://ai.api.cloud.yandex.net/v1` (OpenAI-совместимый режим, VISION_PROVIDER
@@ -1118,3 +1132,39 @@ AI Studio указывает для `outputAudioSpec` дефолт **22050 Гц*
 падением в 500. Бэкофилл для уже существующих курсов без кода — миграция
 `865f7e4ba3a5` (чистая data-migration, без DDL), с тем же построчным
 retry-on-`IntegrityError` через SAVEPOINT.
+
+---
+
+## 46. Автодеплой: сборка образов на сервере по SSH, а не registry + pull (2026-08-14)
+
+**Контекст:** нужен был реальный CI/CD-деплой на push в `master` (до этого — вручную,
+см. историю §37/раздел 7 DEPLOYMENT.md). Первая версия воркфлоу собирала образы в
+GitHub Actions и пушила их в Yandex Container Registry (`build-and-push`), сервер их
+только вытягивал.
+
+**Решение:** `build-and-push`-джоб убран. `deploy/deploy.sh` собирает `edllm-backend:<sha>`/
+`edllm-frontend:<sha>` **прямо на сервере** (`docker compose ... build`), CI лишь SSH'ится
+и запускает скрипт. Перед миграцией — проверка `alembic current` vs `alembic heads`:
+расходятся → `pg_dump -Fc` через сервис `db_backup`, затем `migrate`; совпадают → апгрейд
+пропускается целиком. После пересоздания контейнеров — локальный smoke-test
+(`/health` + `/docs`, до 12 попыток по 10с); провал → автоматический откат на
+`last_good_sha` (последний успешно задеплоенный sha, без пересборки) и **всегда** красный
+job — даже если откат прошёл успешно, это сигнал, что что-то было не так.
+
+**Альтернативы:**
+- **Registry (YCR) + pull на сервере.** Реализовано, затем отклонено: для масштаба проекта
+  (1 сервер, 1 разработчик) отдельный registry — лишний слой инфраструктуры и лишняя точка
+  отказа (нужны отдельные креды, сеть до YCR с сервера, синхронизация тегов). Сборка на
+  сервере проще и достаточна, пока не появится второй сервер/множественные окружения.
+- **Blue-green / отдельный staging-хост.** Не рассматривалось всерьёз — при одном
+  production-сервере это over-engineering; smoke-test + auto-rollback даёт сопоставимую
+  защиту от битого деплоя при на порядок меньшей сложности.
+
+**Trade-offs:**
+- + Минимум инфраструктуры: ни registry, ни второго хоста, ни лишних кредов, кроме SSH-ключа.
+- + Auto-rollback без пересборки (образ `last_good_sha` уже локальный) — откат быстрый.
+- + Условный дамп бережёт диск и время: дамп снимается только когда реально меняется схема.
+- − Единая точка отказа — сам сервер: пока идёт `docker compose build`, приложение продолжает
+  работать на старых контейнерах, но если сервер недоступен по SSH, деплой невозможен вообще.
+- − `deploy.sh` — bash-скрипт с ручным state-файлом (`~/.edllm-deploy/last_good_sha`), а не
+  декларативный оркестратор — при росте числа серверов не масштабируется без переписывания.

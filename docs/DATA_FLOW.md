@@ -185,7 +185,7 @@
    - `_progress("slides", N, N)`.
 5. **Этап 2 — VLM саммари слайдов** (только если режим manual, `creation_mode != presentation_auto`).
    - `vision_analysis_service.summarize_presentation(image_paths, progress_cb=...)`:
-     - Параллельно (`asyncio.Semaphore(4)`) запрашивает Ollama vision (`qwen2.5vl:7b`).
+     - Параллельно (`asyncio.Semaphore(4)`) запрашивает vision-LLM (дефолт — облачная Polza; локальная альтернатива — Ollama `qwen2.5vl:7b`; см. [DEPLOYMENT.md](DEPLOYMENT.md) §5 «Vision LLM»).
      - Кеш по `sha256(png_bytes)+provider+model` в `storage/summaries_cache/`.
      - Возвращает по 2-4 предложения на каждый слайд — это «alignment hints» для следующего шага.
    - `_progress("summary", k, N)` обновляется по мере готовности.
@@ -198,12 +198,12 @@
    - `_progress("llm", 1, 1)`.
 7. **Этап 4 — TTS + encoding параллельно.**
    - Создаются два thread-pool:
-     - `tts_pool` — 4 worker'а, каждый отправляет HTTP-запрос на Silero (`GET http://silero-tts:9898/process?INPUT_TEXT=...&VOICE=...`).
+     - `tts_pool` — 4 worker'а, каждый отправляет запрос к TTS-провайдеру (`TTS_PROVIDER`: прод-дефолт `yandex` — Yandex SpeechKit v3; `polza`; или self-host `silero`, `GET http://silero-tts:9898/process?INPUT_TEXT=...&VOICE=...` — см. [DEPLOYMENT.md](DEPLOYMENT.md) §5 «TTS»).
      - `enc_pool` — 3 worker'а, каждый запускает FFmpeg `loop image + audio → .mkv segment`.
    - Цепочка через `as_completed`: как только TTS чанка K готов → сразу подаётся в encoding K. Не ждём всех TTS.
    - Внутри TTS:
      - `_strip_ssml_tags` — очистка XML-тегов (заменяет `<br>`, `</p>` пробелом перед удалением).
-     - `_split_for_tts(text, max_chars=800)` — Silero падает на длинных входах; нарезка по предложениям, потом по запятым.
+     - `_split_for_tts(text, max_chars=...)` — все три провайдера рвут на длинных входах (лимит свой: `SILERO_MAX_CHARS`=800, `POLZA_MAX_CHARS`, `YANDEX_TTS_MAX_CHARS`=200); нарезка по предложениям, потом по запятым.
      - Каждый чанк → отдельный HTTP-запрос → WAV → склейка через `wave` модуль (`_concat_wav`).
    - Внутри encoding:
      - `_trim_trailing_silence` — FFmpeg `silenceremove` обрезает хвостовую тишину (порог -40 dB, минимум 0.15s); если получилось <0.1s, используется оригинал.

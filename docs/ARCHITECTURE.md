@@ -28,7 +28,7 @@
 | **Resend + itsdangerous** | транзакционные письма (верификация, «видео готово») через провайдер Resend; подписанные stateless-токены верификации. |
 | **Sentry + Prometheus + structlog** | наблюдаемость: трейсы/ошибки (Sentry), метрики (`prometheus-fastapi-instrumentator` + Celery-сигналы), структурные JSON-логи с `request_id`. |
 | **OpenAI SDK** | универсальный клиент к LLM. Polza AI (облачный дефолт), Ollama и YandexGPT говорят на OpenAI-протоколе → один и тот же код для всех провайдеров; выбор — правкой env. |
-| **Silero TTS** | TTS для русского, **бесплатный только для НЕкоммерческого использования** (русские модели `v5_ru`/`v5_5_ru` — CC-BY-NC 4.0; для коммерции — Silero EE или лицензированный провайдер Polza/Yandex SpeechKit, см. [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md)). Запускается отдельным docker-контейнером (`navatusein/silero-tts-service`) и общается по HTTP. |
+| **TTS: Polza / Yandex SpeechKit v3 / Silero** | `TTS_PROVIDER` выбирает бэкенд (`tts_service.py`). Прод по умолчанию — **Yandex SpeechKit v3** (`.env.prod.example`, дешевле v1, поддержка амплуа/скорости/питча). Самостоятельный **Silero** — бесплатный только для НЕкоммерческого использования (русские модели `v5_ru`/`v5_5_ru` — CC-BY-NC 4.0, см. [THIRD_PARTY_LICENSES.md](../THIRD_PARTY_LICENSES.md)); раньше запускался отдельным docker-контейнером (`navatusein/silero-tts-service`) в compose, с 2026-08-12 контейнер убран из `docker-compose.yml`/`docker-compose.prod.yml` — self-host теперь ручной. См. [DECISIONS.md §15](DECISIONS.md#15-silero-tts-отдельным-контейнером). |
 | **LibreOffice headless** | единственный надёжный способ конвертировать PPTX в PDF без потери шрифтов и эмодзи. Альтернатив на Python нет. |
 | **FFmpeg + poppler (pdftoppm)** | индустриальный стандарт для рендеринга PDF в PNG и склейки кадров с аудио в MP4. |
 
@@ -48,7 +48,7 @@
 ### Инфраструктура
 
 - **docker-compose** (dev) с ~12 сервисами (см. секцию 4); отдельный self-contained **`docker-compose.prod.yml`** для прода (gunicorn, nginx+TLS, one-shot `migrate`, сайдкар `db_backup`, certbot) — см. [DEPLOYMENT.md](DEPLOYMENT.md) §7.
-- Внешняя зависимость — **LLM+vision провайдер**. По умолчанию (`.env.example`) это **Polza AI** (облако, OpenAI-совместимый) и для текста, и для vision. Альтернатива — **Ollama на хосте** (`qwen3` + `qwen2.5vl:7b`) через `host.docker.internal:11434`. Переключение — правка env, кода не трогает (см. §14, [DECISIONS.md](DECISIONS.md)).
+- Внешняя зависимость — **LLM+vision провайдер**. По умолчанию (`.env.example`) это **Polza AI** (облако, OpenAI-совместимый) и для текста, и для vision. Альтернативы — **Ollama на хосте** (`qwen3` + `qwen2.5vl:7b`) через `host.docker.internal:11434`, или **Yandex AI Studio** (`ai.api.cloud.yandex.net`, тоже OpenAI-совместимый эндпоинт — тот же код-путь, что и Ollama/Polza; см. [DECISIONS.md](DECISIONS.md) §45). Переключение — правка env, кода не трогает (см. §14, [DECISIONS.md](DECISIONS.md)).
 - Локальное файловое хранилище в `backend/storage/` (volume). `/files/*` отдаётся **кастомным `files`-роутером с HMAC-подписанными URL** (`signed_url_service.py`), а не голым `StaticFiles`; в проде (`SERVE_STATIC_VIA_NGINX=true`) байты отдаёт nginx, FastAPI лишь верифицирует подпись. Альтернатива хранилища — S3 (`STORAGE_BACKEND=s3`).
 
 ---
@@ -93,9 +93,10 @@
        ▲              │  Внешние вызовы:                        │
        │              │   • LibreOffice (PPTX→PDF)              │
        └──────────────┤   • pdftoppm    (PDF→PNG)               │
-       sync engine    │   • Ollama LLM  (split + SSML)          │
-       (psycopg2)     │   • Ollama Vision (slide → narration)   │
-                      │   • Silero TTS HTTP :9898               │
+       sync engine    │   • LLM (split+SSML): Polza/Yandex/Ollama│
+       (psycopg2)     │   • Vision (narration): то же, OpenAI-совм│
+                      │   • TTS: Polza / Yandex SpeechKit v3 /   │
+                      │     self-host Silero HTTP :9898          │
                       │   • FFmpeg (image+wav → MP4)            │
                       └────────┬────────────────────────────────┘
                                │
@@ -121,7 +122,6 @@
 |---|---|---|---|
 | `postgres` | postgres:17-alpine | 5432 | основная БД |
 | `redis` | redis:8-alpine | 6379 | брокер Celery + result backend + auth-state (с паролем) |
-| `silero-tts` | navatusein/silero-tts-service | 9898 | внешний TTS-сервис, отдельный контейнер |
 | `backend` | (build ./backend) | 8000 | FastAPI с uvicorn `--reload` |
 | `celery_video` | образ backend | — | queue `video`, `-c 2` — PPTX→MP4 пайплайн |
 | `celery_vision` | образ backend | — | queue `vision`, `-c 1` — vision-LLM анализ слайдов |
@@ -133,9 +133,14 @@
 | `flower` | образ backend | 5555 | мониторинг Celery (basic-auth) |
 | `frontend` | (build ./frontend) | 3000 | Nuxt dev server (`nuxt dev --host 0.0.0.0`) |
 
-> **Прод (`docker-compose.prod.yml`, self-contained):** backend через `gunicorn` (uvicorn-воркеры, без `--reload`), фронт через `Dockerfile.prod` (`nuxt build` → node-сервер), one-shot сервис `migrate` (`alembic upgrade head` до роллаута), сайдкар `db_backup` (периодический `pg_dump -Fc`), nginx с TLS + `certbot`. Подробности и порядок деплоя — [DEPLOYMENT.md](DEPLOYMENT.md) §7.
+> **Прод (`docker-compose.prod.yml`, self-contained):** backend через `gunicorn` (uvicorn-воркеры, без `--reload`), фронт через `Dockerfile.prod` (`nuxt build` → node-сервер), one-shot сервис `migrate` (`alembic upgrade head` до роллаута), сайдкар `db_backup` (периодический `pg_dump -Fc`), nginx с TLS + `certbot`, и деплой на push в `master` автоматизирован через GitHub Actions + SSH (`deploy/deploy.sh`: sha-теги, conditional dump, авто-rollback). Подробности и порядок деплоя — [DEPLOYMENT.md](DEPLOYMENT.md) §7.
+>
+> **`silero-tts` больше не сервис compose** (убран 2026-08-12 — некоммерческая лицензия
+> русских моделей Silero). `TTS_PROVIDER=silero` в коде и в `.env.example` остаётся дефолтом,
+> но требует теперь ручного self-host; из коробки работают `TTS_PROVIDER=polza`/`yandex`. См.
+> [DECISIONS.md §15](DECISIONS.md#15-silero-tts-отдельным-контейнером) и [DEPLOYMENT.md](DEPLOYMENT.md) §5 «TTS».
 
-Все в общей сети `edu-network` — общаются по DNS-именам контейнеров (`backend → postgres:5432`, `celery_video → silero-tts:9898`, и т.д.).
+Все в общей сети `edu-network` — общаются по DNS-именам контейнеров (`backend → postgres:5432` и т.д.).
 
 > **Важно про очереди:** каждый воркер слушает свою очередь (`--queues=…`). Новая Celery-задача
 > попадёт к воркеру, только если её зароутить в правильную очередь — иначе её никто не возьмёт.
@@ -304,7 +309,7 @@ frontend/src/
 - **Кеш:** хеш-функция `md5(pptx_bytes) + DPI` → если PPTX уже обрабатывался, кеш в `storage/slides_cache/<hash>/` минует обе стадии (~30 секунд экономии).
 
 ### 8.7 Двойной thread-pool в задаче генерации видео
-- **Решение:** в `tasks/video_pipeline.py` параллельно работают `tts_pool` (4 потока, по запросу к Silero) и `enc_pool` (3 потока, по FFmpeg-процессу). Цепочка: как только TTS слайда K готов, тут же стартует encoding K, не дожидаясь TTS остальных.
+- **Решение:** в `tasks/video_pipeline.py` параллельно работают `tts_pool` (4 потока, по запросу к TTS-провайдеру — Polza/Yandex SpeechKit/self-host Silero) и `enc_pool` (3 потока, по FFmpeg-процессу). Цепочка: как только TTS слайда K готов, тут же стартует encoding K, не дожидаясь TTS остальных.
 - **Почему:** наивный последовательный пайплайн (TTS всех → encode всех) занимает в ~1.5 раза дольше.
 - **Trade-off:** сложный concurrency-код, `as_completed` внутри другого `as_completed` — нетривиально читать.
 
@@ -342,7 +347,7 @@ frontend/src/
 3. **`alembic upgrade head` запускается автоматически** на старте — забыл сгенерировать миграцию = backend не стартует.
 4. **`task_id` хранится в БД** (`analyze_task_id`, `video_task_id`), чтобы фронт мог продолжить poll'ить после refresh страницы.
 5. **`creation_mode` определяет шаги пайплайна** — особенно пропуск VLM-summary в auto-режиме.
-6. **AI-провайдер по умолчанию — облако Polza** (`.env.example`); локальный Ollama — альтернатива, и только тогда модели качаются вручную (`ollama pull ...`).
+6. **AI-провайдер по умолчанию — облако Polza** (`.env.example`); локальный Ollama и Yandex AI Studio — альтернативы (env-правка, код тот же — OpenAI-совместимый клиент), и только для Ollama модели качаются вручную (`ollama pull ...`).
 7. **CORS-порядок middleware** в `main.py` — CORS должен быть зарегистрирован *последним*, чтобы оказаться снаружи `log_and_catch` (см. длинный комментарий в файле).
 8. **`__mapper_args__ = {"eager_defaults": True}`** на моделях с `onupdate=func.now()` — без этого `MissingGreenlet` при сериализации после `UPDATE`.
 
