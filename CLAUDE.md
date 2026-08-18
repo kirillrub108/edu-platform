@@ -146,6 +146,7 @@ Verification + notification email is sent **only** from the `send_email` Celery 
 - **`task_id` is persisted in the DB** (`analyze_task_id`, `video_task_id` on `Lesson`) so the frontend can resume polling after a page refresh. When adding new long-running tasks, follow the same pattern instead of returning the id only in the HTTP response.
 - **Tunables go in `app/constants.py`** — quiz/billing/assignment/email limits, plan & package configs, tier priorities, GC/reconcile knobs. Pipeline pool sizes are auto-derived there from CPU; pin them via env (`TTS_WORKERS` etc. in `config.py`), not inline. Don't hard-code values in services/tasks.
 - **No new top-level docs.** If you need to capture a decision, append to `docs/DECISIONS.md` (or `KNOWN_PROBLEMS.md` for tech debt) rather than creating a new file.
+- **Backend lint is part of Definition of Done.** Before calling a backend task finished, run (from `backend/`, matching the CI `lint` job): `docker-compose exec backend ruff check .` and `docker-compose exec backend ruff format --check .` (or `ruff format .` to auto-fix). Both must be green — don't leave formatting for CI to catch.
 
 ## Provider swaps
 

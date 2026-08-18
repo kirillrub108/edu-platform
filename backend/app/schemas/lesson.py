@@ -113,12 +113,8 @@ class VideoGenerateRequest(BaseModel):
     voice: str = Field(default="nova", pattern=_VOICE_PATTERN)
     # SpeechKit-only hints; ignored when TTS_PROVIDER is silero/polza. None =
     # "leave the provider default alone", which is not the same as 1.0 / 0.
-    speed: float | None = Field(
-        default=None, ge=YANDEX_TTS_SPEED_MIN, le=YANDEX_TTS_SPEED_MAX
-    )
-    pitch: int | None = Field(
-        default=None, ge=YANDEX_TTS_PITCH_MIN, le=YANDEX_TTS_PITCH_MAX
-    )
+    speed: float | None = Field(default=None, ge=YANDEX_TTS_SPEED_MIN, le=YANDEX_TTS_SPEED_MAX)
+    pitch: int | None = Field(default=None, ge=YANDEX_TTS_PITCH_MIN, le=YANDEX_TTS_PITCH_MAX)
 
 
 class TaskStatusResponse(BaseModel):

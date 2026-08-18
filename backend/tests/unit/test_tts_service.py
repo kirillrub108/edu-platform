@@ -78,7 +78,7 @@ def test_strip_ssml_tags_collapses_multiple_spaces() -> None:
         # Pauses carry over instead of being discarded.
         ('a.<break time="500ms"/>b.', "a. sil<[500]> b."),
         ('<break time="0.8s"/>b.', "sil<[800]> b."),
-        ('<break/>b.', "<[medium]> b."),
+        ("<break/>b.", "<[medium]> b."),
         # Paragraph break becomes a long pause.
         ("<p>a.</p><p>b.</p>", "a. <[large]> b."),
         # Emphasis becomes an accent; empty emphasis disappears.
