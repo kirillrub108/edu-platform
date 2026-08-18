@@ -405,9 +405,7 @@ async def test_question_listing_hides_answer_key_from_non_owners(
     # lesson is never revealed); a student is rejected earlier by the role check
     # with 403, which leaks nothing since it precedes any lesson lookup.
     outsider = await _make_outsider(db_session, role)
-    r = await client.get(
-        f"/api/v1/lessons/{lesson.id}/quiz/questions", cookies=_cookies(outsider)
-    )
+    r = await client.get(f"/api/v1/lessons/{lesson.id}/quiz/questions", cookies=_cookies(outsider))
     assert r.status_code in (403, 404), (
         f"{role} outside the course read the quiz answer key: {r.text}"
     )
