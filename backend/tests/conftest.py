@@ -151,6 +151,7 @@ def _set_database_url(
     import app.routers.slides as _slides_router
     import app.routers.students as _students_router
     import app.routers.uploads as _uploads_router
+    import app.services.lesson_material_service as _materials_mod
     import app.tasks.purge_pipeline as _purge_mod2
     import app.tasks.video_pipeline as _vp_mod2
     import app.tasks.vision_pipeline as _vis_mod2
@@ -163,6 +164,7 @@ def _set_database_url(
         _slides_router,
         _students_router,
         _uploads_router,
+        _materials_mod,
     ):
         if hasattr(_mod, "storage_service"):
             _mod.storage_service = _storage_mod.storage_service

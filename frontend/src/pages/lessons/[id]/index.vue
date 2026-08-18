@@ -157,13 +157,14 @@ const lessonStatusForBadge = computed(() => {
 
 // ── Tab state (query-driven) ───────────────────────────────────────────────────
 
-const VALID_TABS = ['lesson', 'quiz', 'assignments'] as const
+const VALID_TABS = ['lesson', 'quiz', 'assignments', 'knowledge'] as const
 type TabId = (typeof VALID_TABS)[number]
 
 const TAB_ITEMS: { id: string; label: string }[] = [
   { id: 'lesson', label: 'Урок' },
   { id: 'quiz', label: 'Тест' },
   { id: 'assignments', label: 'Задания' },
+  { id: 'knowledge', label: 'База знаний' },
 ]
 
 const activeTab = computed<TabId>(() => {
@@ -819,6 +820,17 @@ watch(lessonId, (newId, oldId) => {
           <section class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
             <AssignmentsTeacherPanel :lesson-id="lessonId" />
           </section>
+        </div>
+
+        <!-- База знаний tab panel — v-show keeps its fetched state across switches -->
+        <div
+          v-show="activeTab === 'knowledge'"
+          id="tabpanel-knowledge"
+          role="tabpanel"
+          aria-labelledby="tab-knowledge"
+          class="space-y-6"
+        >
+          <KnowledgePanel :lesson-id="lessonId" />
         </div>
       </div>
 

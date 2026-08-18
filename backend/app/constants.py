@@ -8,6 +8,9 @@ from app.config import settings
 # duration of an active editor session.
 SIGNED_URL_TTL_VIDEO: int = 1800  # 30 min
 SIGNED_URL_TTL_SLIDE: int = 600  # 10 min
+# Knowledge-base material downloads: long enough for a big handout to finish
+# downloading, short enough that a copied link dies quickly.
+SIGNED_URL_TTL_MATERIAL: int = 900  # 15 min
 
 # Video streaming delivery — see the /stream endpoints in routers/lessons.py.
 # The endpoint authorises the request, then delegates the actual byte transfer
@@ -201,6 +204,84 @@ ATTACHMENT_EXTENSION_MIME: dict[str, str] = {
 # submission's grade is finalized (see purge_pipeline). Storage-cost guard — the
 # grade/feedback rows are kept, only the stored files + their records go.
 ATTACHMENT_RETENTION_DAYS_AFTER_GRADED: int = 30
+# ── Lesson knowledge base (materials + notes) ────────────────────────────────
+# Teacher-attached supplementary files. Same "store, never parse" contract as
+# assignment attachments, but with NO retention window: a material lives as long
+# as its lesson (deleted explicitly or by the hard purge of the lesson).
+LESSON_MATERIAL_MAX_FILES: int = 30  # max materials per lesson
+LESSON_MATERIAL_MAX_TOTAL_SIZE_MB: int = 2048  # max combined size per lesson
+# Per-file ceiling by category (MB).
+LESSON_MATERIAL_CATEGORY_MAX_SIZE_MB: dict[str, int] = {
+    "document": 100,
+    "image": 50,
+    "audio": 200,
+    "video": 500,
+    "archive": 200,
+}
+# Whitelist — MIME type → category. Source of truth for what may be attached to
+# the knowledge base; the category drives the per-file size limit above.
+LESSON_MATERIAL_ALLOWED_TYPES: dict[str, str] = {
+    "application/pdf": "document",
+    "application/msword": "document",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "document",
+    "application/vnd.ms-powerpoint": "document",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation": "document",
+    "application/vnd.ms-excel": "document",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "document",
+    "text/plain": "document",
+    "text/markdown": "document",
+    "text/csv": "document",
+    "application/rtf": "document",
+    "application/vnd.oasis.opendocument.text": "document",
+    "image/png": "image",
+    "image/jpeg": "image",
+    "image/webp": "image",
+    "image/gif": "image",
+    "audio/mpeg": "audio",
+    "audio/wav": "audio",
+    "audio/x-wav": "audio",
+    "audio/mp4": "audio",
+    "audio/x-m4a": "audio",
+    "video/mp4": "video",
+    "video/quicktime": "video",
+    "video/webm": "video",
+    "application/zip": "archive",
+    "application/x-zip-compressed": "archive",
+}
+# Extension → MIME fallback when the client omits or forges Content-Type. An
+# extension absent here is rejected outright.
+LESSON_MATERIAL_EXTENSION_MIME: dict[str, str] = {
+    "pdf": "application/pdf",
+    "doc": "application/msword",
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "ppt": "application/vnd.ms-powerpoint",
+    "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "xls": "application/vnd.ms-excel",
+    "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "txt": "text/plain",
+    "md": "text/markdown",
+    "csv": "text/csv",
+    "rtf": "application/rtf",
+    "odt": "application/vnd.oasis.opendocument.text",
+    "png": "image/png",
+    "jpg": "image/jpeg",
+    "jpeg": "image/jpeg",
+    "webp": "image/webp",
+    "gif": "image/gif",
+    "mp3": "audio/mpeg",
+    "wav": "audio/wav",
+    "m4a": "audio/mp4",
+    "mp4": "video/mp4",
+    "mov": "video/quicktime",
+    "webm": "video/webm",
+    "zip": "application/zip",
+}
+# Hand-written markdown notes — length caps enforced by the Pydantic schema.
+LESSON_NOTE_MAX_TITLE_CHARS: int = 255
+LESSON_NOTE_MAX_CONTENT_CHARS: int = 50_000
+LESSON_NOTE_MAX_PER_LESSON: int = 100
+LESSON_MATERIAL_MAX_DESCRIPTION_CHARS: int = 2000
+
 # Extension whitelist (lower-case, no dot) for the teacher-set per-assignment
 # allowed_ext filter — separate from the system attachment whitelist above.
 ASSIGNMENT_ALLOWED_EXTENSIONS: tuple[str, ...] = (

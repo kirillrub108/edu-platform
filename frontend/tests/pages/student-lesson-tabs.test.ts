@@ -4,7 +4,7 @@
  * Same constraint as teacher-lesson-comments.test.ts: there is no component-mount
  * harness here (@vue/test-utils isn't a dependency and npm is banned), so these
  * assert that the view source wires the tab interface up the same way the teacher
- * page does — UiTabs + query-driven ?tab, three accessible tab panels, status
+ * page does — UiTabs + query-driven ?tab, one accessible panel per tab, status
  * badges, and a single repositioned CommentsPanel.
  *
  * The page body lives in components/student/LessonView.vue (shared between the
@@ -34,11 +34,12 @@ describe('student lesson page wrapper', () => {
 describe('student lesson view tabs', () => {
   const source = readFileSync(lessonView, 'utf-8')
 
-  it('renders the shared UiTabs with the three lesson tabs', () => {
+  it('renders the shared UiTabs with every lesson tab', () => {
     expect(source).toContain('<UiTabs')
     expect(source).toMatch(/id: 'lesson', label: 'Урок'/)
     expect(source).toMatch(/id: 'quiz', label: 'Тест'/)
     expect(source).toMatch(/id: 'assignments', label: 'Задания'/)
+    expect(source).toMatch(/id: 'knowledge', label: 'База знаний'/)
   })
 
   it('drives the active tab from the URL query like the teacher page', () => {
@@ -47,17 +48,18 @@ describe('student lesson view tabs', () => {
   })
 
   it('exposes one accessible tab panel per tab', () => {
-    for (const id of ['lesson', 'quiz', 'assignments']) {
+    for (const id of ['lesson', 'quiz', 'assignments', 'knowledge']) {
       expect(source).toContain(`id="tabpanel-${id}"`)
       expect(source).toContain(`aria-labelledby="tab-${id}"`)
     }
-    expect(source.match(/role="tabpanel"/g)?.length).toBe(3)
+    expect(source.match(/role="tabpanel"/g)?.length).toBe(4)
   })
 
   it('keeps the panels mounted across switches with v-show', () => {
     expect(source).toContain("v-show=\"activeTab === 'lesson'\"")
     expect(source).toContain("v-show=\"activeTab === 'quiz'\"")
     expect(source).toContain("v-show=\"activeTab === 'assignments'\"")
+    expect(source).toContain("v-show=\"activeTab === 'knowledge'\"")
   })
 
   it('feeds status badges into the tabs', () => {
@@ -65,6 +67,10 @@ describe('student lesson view tabs', () => {
     expect(source).toContain('quizBadge')
     expect(source).toContain('assignmentBadge')
     expect(source).toMatch(/badge: lessonBadge\.value/)
+  })
+
+  it('renders the knowledge base read-only in the teacher preview', () => {
+    expect(source).toMatch(/<KnowledgePanel[^>]*:lesson-id="lessonId"[^>]*:preview="preview"/)
   })
 
   it('mounts a single CommentsPanel and a mobile drawer toggle', () => {

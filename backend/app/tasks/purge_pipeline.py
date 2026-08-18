@@ -42,6 +42,7 @@ from app.constants import (
 from app.models.assignment import Assignment, AssignmentAttachment, AssignmentSubmission
 from app.models.course import Course
 from app.models.lesson import Lesson, Module
+from app.models.lesson_material import LessonMaterial
 from app.models.lesson_video import LessonVideo
 from app.models.slide_text import SlideText
 from app.models.user import User
@@ -90,7 +91,7 @@ def _remove_file(rel_path: str | None) -> None:
 def _remove_lesson_dirs(lesson_id) -> None:
     """Remove now-empty per-lesson directories left after file deletion."""
 
-    for sub in (f"videos/{lesson_id}", f"lessons/{lesson_id}"):
+    for sub in (f"videos/{lesson_id}", f"lessons/{lesson_id}", f"materials/{lesson_id}"):
         try:
             storage_service.delete_prefix(sub)
         except Exception:
@@ -130,6 +131,23 @@ def _purge_assignment_files(session: Session, lesson: Lesson) -> None:
             logger.warning("purge_prefix_failed", prefix=f"assignments/{sid}", exc_info=True)
 
 
+def _purge_material_files(session: Session, lesson: Lesson) -> None:
+    """Remove knowledge-base material files before the row cascade wipes their
+    records. Works on both backends: paths are storage-relative keys, so
+    storage_service deletes a local file or an S3 object alike."""
+    paths = (
+        session.execute(
+            select(LessonMaterial.file_path)
+            .where(LessonMaterial.lesson_id == lesson.id)
+            .execution_options(include_deleted=True)
+        )
+        .scalars()
+        .all()
+    )
+    for path in paths:
+        _remove_file(path)
+
+
 def _purge_lesson_files(session: Session, lesson: Lesson) -> None:
     _remove_file(_rel_from_url(lesson.video_url))
     _remove_file(lesson.pptx_path)
@@ -156,6 +174,7 @@ def _purge_lesson_files(session: Session, lesson: Lesson) -> None:
     for slide in slides:
         _remove_file(slide.image_path)
     _purge_assignment_files(session, lesson)
+    _purge_material_files(session, lesson)
     _remove_lesson_dirs(lesson.id)
 
 

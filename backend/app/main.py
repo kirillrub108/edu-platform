@@ -33,6 +33,7 @@ from app.routers import (
     courses,
     files,
     gradebook,
+    lesson_materials,
     lessons,
     quiz_student,
     quiz_teacher,
@@ -386,6 +387,7 @@ app.include_router(comments.router)
 app.include_router(billing.router)
 app.include_router(assignment_teacher.router)
 app.include_router(assignment_student.router)
+app.include_router(lesson_materials.router)
 
 
 @app.get("/", tags=["meta"])

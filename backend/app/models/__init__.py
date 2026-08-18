@@ -18,6 +18,7 @@ from app.models.credit import (
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.generation_usage import GenerationUsage
 from app.models.lesson import ContentType, CreationMode, Lesson, LessonStatus, Module
+from app.models.lesson_material import LessonMaterial, LessonNote
 from app.models.lesson_video import LessonVideo
 from app.models.password_reset_token import PasswordResetToken
 from app.models.payment import Payment, PaymentStatus
@@ -49,6 +50,8 @@ __all__ = [
     "QuestionType",
     "AttemptStatus",
     "LessonVideo",
+    "LessonMaterial",
+    "LessonNote",
     "ContentType",
     "LessonStatus",
     "CreationMode",

@@ -144,7 +144,7 @@ def test_remove_file_swallows_a_storage_outage(
     assert fake.deleted == []
 
 
-def test_remove_lesson_dirs_tries_both_prefixes_even_if_one_fails(
+def test_remove_lesson_dirs_tries_every_prefix_even_if_one_fails(
     pp: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     lesson_id = uuid.uuid4()
@@ -153,7 +153,7 @@ def test_remove_lesson_dirs_tries_both_prefixes_even_if_one_fails(
 
     pp._remove_lesson_dirs(lesson_id)
 
-    assert fake.prefixes == [f"lessons/{lesson_id}"]
+    assert fake.prefixes == [f"lessons/{lesson_id}", f"materials/{lesson_id}"]
 
 
 # ── _purge_assignment_files ───────────────────────────────────────────────────
@@ -201,6 +201,7 @@ def test_purge_lesson_files_removes_every_artifact_kind(
         [SimpleNamespace(video_url=f"http://localhost:8000/files/videos/{lesson_id}/v1.mp4")],
         [SimpleNamespace(image_path=f"lessons/{lesson_id}/slides/slide_0001.png")],
         [],  # no assignment submissions
+        [f"materials/{lesson_id}/handout.pdf"],  # knowledge-base materials
     )
 
     pp._purge_lesson_files(session, lesson)
@@ -210,8 +211,42 @@ def test_purge_lesson_files_removes_every_artifact_kind(
         f"lessons/{lesson_id}/source.pptx",
         f"videos/{lesson_id}/v1.mp4",
         f"lessons/{lesson_id}/slides/slide_0001.png",
+        f"materials/{lesson_id}/handout.pdf",
     ]
-    assert storage.prefixes == [f"videos/{lesson_id}", f"lessons/{lesson_id}"]
+    assert storage.prefixes == [
+        f"videos/{lesson_id}",
+        f"lessons/{lesson_id}",
+        f"materials/{lesson_id}",
+    ]
+
+
+def test_purge_material_files_removes_every_material_object(
+    pp: ModuleType, storage: _FakeStorage
+) -> None:
+    """Material paths are storage keys, so the same call deletes a local file or
+    an S3 object — the backend choice never reaches this code."""
+    lesson_id = uuid.uuid4()
+    session = _session_returning([f"materials/{lesson_id}/a.pdf", f"materials/{lesson_id}/b.zip"])
+
+    pp._purge_material_files(session, SimpleNamespace(id=lesson_id))
+
+    assert storage.deleted == [
+        f"materials/{lesson_id}/a.pdf",
+        f"materials/{lesson_id}/b.zip",
+    ]
+
+
+def test_purge_material_files_survives_a_storage_outage(
+    pp: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    lesson_id = uuid.uuid4()
+    fake = _FakeStorage(pp, failing={f"materials/{lesson_id}/a.pdf"})
+    monkeypatch.setattr(pp, "storage_service", fake)
+    session = _session_returning([f"materials/{lesson_id}/a.pdf", f"materials/{lesson_id}/b.zip"])
+
+    pp._purge_material_files(session, SimpleNamespace(id=lesson_id))
+
+    assert fake.deleted == [f"materials/{lesson_id}/b.zip"]
 
 
 # ── _purge_course_files / _purge_user_files ───────────────────────────────────

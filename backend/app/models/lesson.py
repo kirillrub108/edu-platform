@@ -144,3 +144,15 @@ class Lesson(Base):
         back_populates="lesson",
         cascade="all, delete-orphan",
     )
+    materials = relationship(
+        "LessonMaterial",
+        back_populates="lesson",
+        cascade="all, delete-orphan",
+        order_by="LessonMaterial.created_at",
+    )
+    notes = relationship(
+        "LessonNote",
+        back_populates="lesson",
+        cascade="all, delete-orphan",
+        order_by="LessonNote.order",
+    )

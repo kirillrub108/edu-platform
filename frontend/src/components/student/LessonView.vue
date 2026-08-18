@@ -159,7 +159,7 @@ const onQuizPassed = async () => {
 }
 
 // ── Tab state (query-driven, mirrors the teacher lesson page) ──────────────────
-const VALID_TABS = ['lesson', 'quiz', 'assignments'] as const
+const VALID_TABS = ['lesson', 'quiz', 'assignments', 'knowledge'] as const
 type TabId = (typeof VALID_TABS)[number]
 
 const lessonBadge = computed(() =>
@@ -189,6 +189,7 @@ const tabItems = computed(() => [
   { id: 'lesson', label: 'Урок', badge: lessonBadge.value },
   { id: 'quiz', label: 'Тест', badge: quizBadge.value },
   { id: 'assignments', label: 'Задания', badge: assignmentBadge.value },
+  { id: 'knowledge', label: 'База знаний', badge: null },
 ])
 
 const activeTab = computed<TabId>(() => {
@@ -319,6 +320,16 @@ onMounted(loadLesson)
           aria-labelledby="tab-assignments"
         >
           <AssignmentsStudentPanel :lesson-id="lessonId" :preview="preview" />
+        </div>
+
+        <!-- База знаний — конспекты + файлы урока, только чтение для студента -->
+        <div
+          v-show="activeTab === 'knowledge'"
+          id="tabpanel-knowledge"
+          role="tabpanel"
+          aria-labelledby="tab-knowledge"
+        >
+          <KnowledgePanel :lesson-id="lessonId" :preview="preview" />
         </div>
       </div>
 
