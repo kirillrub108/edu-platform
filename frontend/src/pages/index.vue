@@ -60,9 +60,12 @@ onMounted(restoreScroll)
       <LandingSection tone="plain">
         <LandingMetrics />
       </LandingSection>
-      <LandingSection id="pricing" tone="accent">
+      <!-- Pricing hidden until YooKassa billing goes live (payments currently
+           disabled — see LandingFaq "Как устроена оплата?"). Раскомментировать
+           этот блок и пункт "Тарифы" в LandingFooter.vue при подключении оплаты. -->
+      <!-- <LandingSection id="pricing" tone="accent">
         <LandingPricing />
-      </LandingSection>
+      </LandingSection> -->
       <LandingSection id="faq" tone="plain">
         <LandingFaq />
       </LandingSection>

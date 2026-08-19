@@ -17,7 +17,9 @@
         <ul>
           <li><a href="#how">Как это работает</a></li>
           <li><a href="#why">Зачем нужно</a></li>
-          <li><a href="#pricing">Тарифы</a></li>
+          <!-- Раскомментировать вместе с секцией pricing в pages/index.vue
+               при подключении оплаты (YooKassa). -->
+          <!-- <li><a href="#pricing">Тарифы</a></li> -->
         </ul>
       </div>
       <div>
