@@ -8,7 +8,10 @@ Two distinct workflows:
   * `grade_attempt_task` — grades the LLM-flagged open-form answers of a
     submitted attempt in parallel. Closed-form answers were already graded
     deterministically at submit time; this task only fills in short_answer
-    / essay scores, then recomputes the attempt-level score.
+    / essay scores, then recomputes the attempt-level score. Each open answer
+    is metered against the teacher's free monthly allowance and, past it, against
+    their credit balance; an answer that can pay for neither is left as
+    needs_review for manual grading instead of failing the task.
 
 The thread-pool pattern mirrors `tasks.video_pipeline`: bounded executor +
 `as_completed` + per-future progress callback. `asyncio.run` is used inside
@@ -22,15 +25,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import structlog
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
-from app.constants import CREDIT_WEIGHTS, QUIZ_GRADING_WORKERS, QUIZ_TYPE_DISTRIBUTION
+from app.constants import (
+    AI_GRADING_FREE_ANSWERS_PER_MONTH,
+    CREDIT_WEIGHTS,
+    QUIZ_GRADING_WORKERS,
+    QUIZ_TYPE_DISTRIBUTION,
+)
+from app.models.course import Course
+from app.models.credit import CreditOperation
 from app.models.enrollment import Enrollment, LessonProgress
-from app.models.lesson import Lesson
+from app.models.lesson import Lesson, Module
 from app.models.quiz import (
     AttemptStatus,
     Quiz,
@@ -38,7 +49,7 @@ from app.models.quiz import (
     QuizAttempt,
 )
 from app.services import usage_service
-from app.services.billing_service import sync_finalize_generation
+from app.services.billing_service import sync_finalize_generation, sync_reserve_credits
 from app.services.grading_service import (
     aggregate_score,
     is_open_type,
@@ -53,7 +64,13 @@ from app.services.quiz_service import (
     replace_questions_sync,
     resolve_snapshot_sync,
 )
-from app.services.quota_service import TRIAL_QUIZ, sync_release_slot
+from app.services.quota_service import (
+    AI_GRADING,
+    TRIAL_QUIZ,
+    sync_release_slot,
+    sync_try_consume_slot,
+    utc_month_key,
+)
 from app.tasks.video_pipeline import SyncSession, _publish
 
 logger = structlog.get_logger()
@@ -175,7 +192,8 @@ def _grade_one_open(
     feedback, ok) — ok=False signals LLM failure (router treats as needs_review).
     """
     # Pool thread — usage context must be set here (ContextVars don't cross
-    # threads). Grading is free for the user but still journaled for margin.
+    # threads). The caller already authorized this answer (free slot or credit
+    # hold); the journal entry tracks provider margin either way.
     usage_service.set_usage_context("quiz_grade", quiz_id=quiz_id)
     try:
         score, feedback = asyncio.run(llm_service.grade_open_answer(payload, response_text))
@@ -183,6 +201,95 @@ def _grade_one_open(
     except Exception as exc:
         logger.warning("grade_attempt_llm_failed", answer_id=str(answer_id), error=str(exc))
         return answer_id, 0.0, f"Автоматическая проверка не удалась: {exc}", False
+
+
+# ── Metering: free monthly allowance, then credits, then manual review ───────
+
+# Feedback left on an answer the LLM was never allowed to see, so the teacher
+# understands why it is waiting in their manual-review queue.
+_DEFERRED_FEEDBACK = (
+    "Автоматическая проверка недоступна: исчерпан бесплатный лимит и не хватает "
+    "кредитов. Ответ ожидает ручной проверки преподавателем."
+)
+
+
+def _resolve_grading_owner(session: Session, quiz_id: UUID) -> UUID | None:
+    """The teacher account billed for grading: quiz → lesson → module → course."""
+    return session.scalar(
+        select(Course.owner_id)
+        .join(Module, Module.course_id == Course.id)
+        .join(Lesson, Lesson.module_id == Module.id)
+        .join(Quiz, Quiz.lesson_id == Lesson.id)
+        .where(Quiz.id == quiz_id)
+    )
+
+
+def _authorize_grading(
+    session: Session, owner_id: UUID, answer_ids: list[UUID]
+) -> tuple[dict[UUID, str | None], list[UUID]]:
+    """Decide, per open answer, whether the LLM may be called.
+
+    Runs on the task's MAIN thread on purpose: the psycopg2 Session is not
+    thread-safe, so metering must never happen inside the grading pool. Two
+    tiers, in order:
+
+      1. a free monthly slot — one atomic UPSERT, so two workers grading
+         different students' attempts against the same teacher's counter can
+         never oversell it (the loser simply falls through to tier 2);
+      2. otherwise a credit hold, settled by _settle_grading once the LLM
+         result is known.
+
+    An answer that gets neither is returned in the `deferred` list and keeps
+    needs_review=True. Returns ({answer_id: billing_ref | None}, deferred) where
+    a None ref means "covered by the free allowance, nothing to settle".
+    """
+    period = utc_month_key()
+    cost = CREDIT_WEIGHTS["quiz_grade_overage"]
+    grants: dict[UUID, str | None] = {}
+    deferred: list[UUID] = []
+
+    for answer_id in answer_ids:
+        try:
+            if sync_try_consume_slot(
+                session, owner_id, AI_GRADING, AI_GRADING_FREE_ANSWERS_PER_MONTH, period
+            ):
+                grants[answer_id] = None
+                continue
+            # Must fit CreditTransaction.ref_id (String(64)): 11 + 36 + 1 + 8 = 56.
+            billing_ref = f"quiz-grade:{answer_id}:{uuid4().hex[:8]}"
+            if sync_reserve_credits(
+                session, owner_id, cost, billing_ref, CreditOperation.QUIZ_GRADE
+            ):
+                grants[answer_id] = billing_ref
+                continue
+            deferred.append(answer_id)
+        except Exception:
+            # A metering failure must degrade one answer, never the whole task:
+            # the rest of the snapshot still gets graded normally.
+            session.rollback()
+            logger.exception("grade_authorize_failed", answer_id=str(answer_id))
+            deferred.append(answer_id)
+
+    if deferred:
+        logger.info(
+            "grade_answers_deferred_to_manual",
+            owner_id=str(owner_id),
+            deferred=len(deferred),
+            granted=len(grants),
+        )
+    return grants, deferred
+
+
+def _settle_grading(session: Session, owner_id: UUID, billing_ref: str, success: bool) -> None:
+    """Convert one grading hold into a charge (LLM ran) or release it (LLM
+    failed). Idempotent via sync_finalize_generation; never raises."""
+    cost = CREDIT_WEIGHTS["quiz_grade_overage"]
+    try:
+        sync_finalize_generation(
+            session, owner_id, billing_ref, cost, cost if success else 0, "QUIZ_GRADE"
+        )
+    except Exception:
+        logger.exception("grade_settle_failed", billing_ref=billing_ref)
 
 
 def _recompute_attempt(session: Session, attempt: QuizAttempt) -> None:
@@ -296,17 +403,42 @@ def grade_attempt_task(self, attempt_id: str) -> dict:
             total = len(open_jobs)
             _progress("grading", 0, total or 1)
 
-            if open_jobs:
-                done = 0
+            # Metering happens before the pool and settlement after the final
+            # commit, so no credit write ever shares a transaction with the
+            # answer mutations below (sync_finalize_generation may rollback).
+            grants: dict[UUID, str | None] = {}
+            owner_id = _resolve_grading_owner(session, attempt.quiz_id) if open_jobs else None
+            if open_jobs and owner_id is None:
+                # Orphaned quiz (no resolvable course owner) — a data-integrity
+                # edge, not a business case. Grade for free rather than push the
+                # student's answers into a manual queue nobody owns.
+                logger.warning("grade_owner_unresolved", attempt_id=attempt_id)
+                grants = {ans_id: None for ans_id, _p, _t in open_jobs}
+            elif open_jobs and owner_id is not None:
+                grants, deferred = _authorize_grading(
+                    session, owner_id, [ans_id for ans_id, _p, _t in open_jobs]
+                )
+                for ans_id in deferred:
+                    ans = session.get(QuizAnswer, ans_id)
+                    if ans is not None:
+                        # needs_review stays True — the teacher grades it by hand.
+                        ans.llm_feedback = _DEFERRED_FEEDBACK
+                session.flush()
+
+            billable = [job for job in open_jobs if job[0] in grants]
+            graded_ok: dict[UUID, bool] = {}
+            done = len(open_jobs) - len(billable)
+            if billable:
                 with ThreadPoolExecutor(
                     max_workers=QUIZ_GRADING_WORKERS, thread_name_prefix="grade"
                 ) as pool:
                     futs = {
                         pool.submit(_grade_one_open, ans_id, payload, text, attempt.quiz_id): ans_id
-                        for ans_id, payload, text in open_jobs
+                        for ans_id, payload, text in billable
                     }
                     for fut in as_completed(futs):
                         ans_id, score, feedback, ok = fut.result()
+                        graded_ok[ans_id] = ok
                         ans = session.get(QuizAnswer, ans_id)
                         if ans is None:
                             continue
@@ -331,6 +463,15 @@ def grade_attempt_task(self, attempt_id: str) -> dict:
             attempt.grading_task_id = None
             _mark_lesson_progress_if_passed(session, attempt)
             session.commit()
+
+            # Settle the paid holds last: charge the answers the LLM actually
+            # graded, release the ones it failed on. Each call is idempotent and
+            # swallows its own errors, so billing can never undo the grading.
+            if owner_id is not None:
+                for ans_id, billing_ref in grants.items():
+                    if billing_ref is not None:
+                        ok = graded_ok.get(ans_id, False)
+                        _settle_grading(session, owner_id, billing_ref, ok)
 
             return {
                 "status": "ok",

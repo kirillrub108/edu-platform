@@ -46,6 +46,7 @@ from app.schemas.assignment import (
     SubmissionStudentRead,
     SubmissionTeacherRead,
 )
+from app.services import retention_service
 from app.services.file_validation_service import validate_upload
 from app.services.grading_service import aggregate_score
 from app.services.storage_service import UploadTooLargeError, storage_service
@@ -113,6 +114,8 @@ def serialize_submission_teacher(
         score=float(submission.score) if submission.score is not None else None,
         feedback=submission.feedback,
         graded_at=submission.graded_at,
+        attachments_expire_at=retention_service.effective_deadline(submission),
+        retention_extension_credits=retention_service.extension_price(submission),
         attachments=[serialize_attachment(a, viewer_id) for a in submission.attachments],
         messages=_messages(submission),
     )
@@ -311,8 +314,14 @@ async def submission_counts(
 
 async def list_submissions(
     db: AsyncSession, assignment_id: UUID
-) -> tuple[list[AssignmentSubmission], dict[UUID, int]]:
-    """Submissions with student loaded + a {submission_id: attachment_count} map."""
+) -> tuple[list[AssignmentSubmission], dict[UUID, int], dict[UUID, int]]:
+    """Submissions with student loaded, plus {submission_id: attachment_count}
+    and {submission_id: total_bytes} maps.
+
+    The count keeps its original meaning (student-uploaded files only) via a
+    FILTER clause, while the byte sum deliberately spans EVERY kind — the purge
+    deletes feedback files too, so retention pricing must cover them.
+    """
     rows = await db.scalars(
         select(AssignmentSubmission)
         .where(AssignmentSubmission.assignment_id == assignment_id)
@@ -321,18 +330,24 @@ async def list_submissions(
     )
     submissions = list(rows.all())
     counts: dict[UUID, int] = {}
+    sizes: dict[UUID, int] = {}
     ids = [s.id for s in submissions]
     if ids:
-        count_rows = await db.execute(
-            select(AssignmentAttachment.submission_id, func.count(AssignmentAttachment.id))
-            .where(
-                AssignmentAttachment.submission_id.in_(ids),
-                AssignmentAttachment.kind == AttachmentKind.submission,
+        agg_rows = await db.execute(
+            select(
+                AssignmentAttachment.submission_id,
+                func.count(AssignmentAttachment.id).filter(
+                    AssignmentAttachment.kind == AttachmentKind.submission
+                ),
+                func.coalesce(func.sum(AssignmentAttachment.size_bytes), 0),
             )
+            .where(AssignmentAttachment.submission_id.in_(ids))
             .group_by(AssignmentAttachment.submission_id)
         )
-        counts = {sid: c for sid, c in count_rows.all()}
-    return submissions, counts
+        for sid, count, total_bytes in agg_rows.all():
+            counts[sid] = count
+            sizes[sid] = total_bytes
+    return submissions, counts, sizes
 
 
 # ── Teacher: grading ─────────────────────────────────────────────────────────

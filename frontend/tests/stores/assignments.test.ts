@@ -129,3 +129,69 @@ describe('assignmentErrorMessage', () => {
     expect(assignmentErrorMessage({}, 'fallback')).toBe('fallback')
   })
 })
+
+describe('retention extension', () => {
+  const extended = {
+    id: 's1',
+    attachments_expire_at: '2026-12-01T00:00:00Z',
+    retention_extension_credits: 4,
+  }
+
+  it('POSTs to the extend endpoint and returns the updated submission', async () => {
+    const { store } = await loadStore()
+    fetchMock.mockResolvedValueOnce(extended)
+
+    const result = await store.extendRetention('s1')
+
+    expect(fetchMock).toHaveBeenCalledWith('/submissions/s1/extend-retention', { method: 'POST' })
+    expect(result.attachments_expire_at).toBe('2026-12-01T00:00:00Z')
+    expect(result.retention_extension_credits).toBe(4)
+  })
+
+  it('rethrows so the caller can branch on the HTTP status', async () => {
+    const { store } = await loadStore()
+    const err = Object.assign(new Error('conflict'), {
+      response: { status: 409 },
+      data: { detail: { code: 'attachments_already_removed' } },
+    })
+    fetchMock.mockRejectedValueOnce(err)
+
+    await expect(store.extendRetention('s1')).rejects.toMatchObject({
+      response: { status: 409 },
+      data: { detail: { code: 'attachments_already_removed' } },
+    })
+  })
+
+  it('maps the new retention error codes to Russian messages', async () => {
+    const { assignmentErrorMessage } = await loadStore()
+
+    expect(
+      assignmentErrorMessage(
+        { response: { status: 409 }, data: { detail: { code: 'attachments_already_removed' } } },
+        'fallback',
+      ),
+    ).toBe('Файлы уже удалены — продлевать нечего')
+
+    expect(
+      assignmentErrorMessage(
+        { response: { status: 409 }, data: { detail: { code: 'submission_not_graded' } } },
+        'fallback',
+      ),
+    ).toBe('Сначала проверьте работу')
+  })
+
+  it('surfaces a 402 insufficient_credits payload for the top-up CTA', async () => {
+    const { store } = await loadStore()
+    fetchMock.mockRejectedValueOnce(
+      Object.assign(new Error('payment required'), {
+        response: { status: 402 },
+        data: { detail: { code: 'insufficient_credits', required: 12, available: 3 } },
+      }),
+    )
+
+    await expect(store.extendRetention('s1')).rejects.toMatchObject({
+      response: { status: 402 },
+      data: { detail: { code: 'insufficient_credits', required: 12 } },
+    })
+  })
+})

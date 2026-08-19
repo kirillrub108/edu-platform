@@ -32,7 +32,7 @@ from app.schemas.assignment import (
     SubmissionSummaryTeacher,
     SubmissionTeacherRead,
 )
-from app.services import assignment_service
+from app.services import assignment_service, billing_service, retention_service
 
 router = APIRouter(prefix="/api/v1", tags=["assignment-teacher"])
 
@@ -149,7 +149,9 @@ async def list_submissions(
     db: AsyncSession = Depends(get_db),
 ) -> SubmissionListResponse:
     assignment = await assignment_service.get_owned_assignment(db, assignment_id, user.id)
-    submissions, attach_counts = await assignment_service.list_submissions(db, assignment.id)
+    submissions, attach_counts, attach_sizes = await assignment_service.list_submissions(
+        db, assignment.id
+    )
     items = [
         SubmissionSummaryTeacher(
             id=s.id,
@@ -161,6 +163,10 @@ async def list_submissions(
             points_awarded=float(s.points_awarded) if s.points_awarded is not None else None,
             score=float(s.score) if s.score is not None else None,
             attachment_count=attach_counts.get(s.id, 0),
+            attachments_expire_at=retention_service.effective_deadline(s),
+            retention_extension_credits=billing_service.estimate_retention_extension(
+                attach_sizes.get(s.id, 0)
+            ),
         )
         for s in submissions
     ]
@@ -200,6 +206,23 @@ async def reopen_submission(
 ) -> SubmissionTeacherRead:
     submission = await assignment_service.get_owned_submission(db, submission_id, user.id)
     submission = await assignment_service.reopen_submission(db, submission)
+    return assignment_service.serialize_submission_teacher(submission, str(user.id))
+
+
+@router.post("/submissions/{submission_id}/extend-retention", response_model=SubmissionTeacherRead)
+async def extend_submission_retention(
+    submission_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+) -> SubmissionTeacherRead:
+    """Buy one more retention window for this submission's attachment files.
+
+    Extensions stack, so calling it twice buys twice the time; the response
+    always carries the resulting `attachments_expire_at`. Costs credits but
+    triggers no LLM, hence plain `require_teacher` like the rest of this router.
+    """
+    submission = await assignment_service.get_owned_submission(db, submission_id, user.id)
+    await retention_service.extend_retention(db, submission, user.id)
     return assignment_service.serialize_submission_teacher(submission, str(user.id))
 
 

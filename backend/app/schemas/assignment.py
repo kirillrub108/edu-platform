@@ -186,6 +186,12 @@ class SubmissionTeacherRead(BaseModel):
     score: float | None
     feedback: str | None
     graded_at: datetime | None
+    # Effective deletion date of the attachments (base window or a paid
+    # extension); None while the submission is ungraded.
+    attachments_expire_at: datetime | None
+    # Advisory price of one more extension, from the submission's current bytes.
+    # The extend endpoint re-prices authoritatively at charge time.
+    retention_extension_credits: int
     attachments: list[AttachmentRead]
     messages: list[MessageRead]
 
@@ -200,6 +206,10 @@ class SubmissionSummaryTeacher(BaseModel):
     points_awarded: float | None
     score: float | None
     attachment_count: int
+    # Retention of THIS submission's files — drives the "Продлить" control in the
+    # teacher panel, which binds this summary type rather than the detail one.
+    attachments_expire_at: datetime | None
+    retention_extension_credits: int
 
 
 class SubmissionListResponse(BaseModel):

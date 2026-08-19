@@ -204,6 +204,20 @@ ATTACHMENT_EXTENSION_MIME: dict[str, str] = {
 # submission's grade is finalized (see purge_pipeline). Storage-cost guard — the
 # grade/feedback rows are kept, only the stored files + their records go.
 ATTACHMENT_RETENTION_DAYS_AFTER_GRADED: int = 30
+# Paid extension of that window, bought per submission by the teacher (see
+# services/retention_service). Extensions accumulate: each one pushes the
+# deadline this many days past the CURRENT effective deadline, not past `now`.
+RETENTION_EXTENSION_DAYS: int = 90
+# One reminder email is sent this many days before a submission's attachments
+# are due for deletion (see purge_pipeline.notify_expiring_attachments).
+RETENTION_REMINDER_DAYS_BEFORE: int = 7
+# Extension pricing. Retention is a storage cost, so the price scales with the
+# submission's actual bytes rather than being flat — see
+# billing_service.estimate_retention_extension. Any non-empty submission costs
+# at least BASE + 1, which is why CREDIT_WEIGHTS["retention_extend"] (2) stays a
+# truthful shop-window figure for a typical small text submission.
+RETENTION_EXTEND_BASE_CREDITS: int = 1
+RETENTION_MB_PER_CREDIT: int = 100
 # ── Lesson knowledge base (materials + notes) ────────────────────────────────
 # Teacher-attached supplementary files. Same "store, never parse" contract as
 # assignment attachments, but with NO retention window: a material lives as long
@@ -443,6 +457,13 @@ QUIZ_GRADING_WORKERS: int = 4
 # student is a 429. Enforced in routers/quiz_student.submit_attempt.
 GRADING_MAX_ANSWER_CHARS: int = 2000
 GRADING_MAX_ATTEMPTS_PER_QUIZ_PER_DAY: int = 5
+# Free monthly allowance for that LLM grading, counted per TEACHER account and
+# per graded open answer (usage_counters, period_key='YYYY-MM'). Deliberately
+# NOT part of PLAN_CONFIGS: it is a technical floor identical on every plan, not
+# a tariff lever. Answers beyond it are charged CREDIT_WEIGHTS['quiz_grade_overage']
+# from the same balance video generation spends; with no credits left the answer
+# silently falls back to manual review. See tasks/quiz_pipeline._authorize_grading.
+AI_GRADING_FREE_ANSWERS_PER_MONTH: int = 100
 
 # Billing / credits
 # Per-operation credit cost for FLAT-priced operations. Video generation is
@@ -453,7 +474,13 @@ CREDIT_WEIGHTS: dict[str, int] = {
     "slide_regen": 1,  # регенерация одного слайда через vision LLM
     "quiz_generate": 5,  # AI-генерация квиза (полная цена и при перегенерации)
     "ai_review": 2,  # AI-review вопросов квиза
-    "quiz_grade": 0,  # AI-проверка квиза — бесплатно (маркетинговый аргумент)
+    "quiz_grade": 0,  # AI-проверка квиза в пределах месячной квоты — бесплатно
+    # Один открытый ответ сверх AI_GRADING_FREE_ANSWERS_PER_MONTH.
+    "quiz_grade_overage": 1,
+    # Витринная цена продления хранения — типовая мелкая сдача. Фактическое
+    # списание считает estimate_retention_extension от реального объёма файлов
+    # (тот же приём, что quiz_grade: 0 — публичный прайс-лист vs реальный счёт).
+    "retention_extend": 2,
 }
 
 # Video-generation pricing formula components (polza.ai tariffs of 2026-06-11,

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Файлы сдачи скоро будут удалены</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;padding:32px;">
+          <tr>
+            <td>
+              <h1 style="margin:0 0 16px;font-size:22px;">Файлы сдачи скоро будут удалены 🗂️</h1>
+              <p style="margin:0 0 16px;font-size:15px;line-height:1.5;">
+                {% if full_name %}Здравствуйте, {{ full_name }}!{% else %}Здравствуйте!{% endif %}
+                Срок бесплатного хранения файлов, приложенных к сдаче
+                {% if assignment_title %}по заданию <strong>«{{ assignment_title }}»</strong>{% else %}по одному из ваших заданий{% endif %},
+                подходит к концу.
+              </p>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;border-radius:6px;padding:16px;margin:0 0 20px;">
+                <tr>
+                  <td style="font-size:15px;line-height:1.7;">
+                    Будет удалено: <strong>{{ attachment_count }}</strong> файл(ов)<br />
+                    Дата удаления: <strong>{{ expires_at }}</strong>
+                  </td>
+                </tr>
+              </table>
+              <p style="margin:0 0 20px;font-size:15px;line-height:1.5;">
+                Оценка, отзыв и переписка со студентом сохранятся — удаляются только сами файлы.
+                Если они ещё нужны, скачайте их или продлите хранение
+                ещё на <strong>{{ extension_days }}</strong> дней за
+                <strong>{{ extension_credits }}</strong> кредит(ов).
+              </p>
+              <p style="margin:0 0 24px;">
+                <a href="{{ lesson_url }}"
+                   style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:15px;">
+                  Открыть урок
+                </a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.5;">
+                Если кнопка не работает, скопируйте ссылку в браузер:<br />
+                <a href="{{ lesson_url }}" style="color:#2563eb;word-break:break-all;">{{ lesson_url }}</a>
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

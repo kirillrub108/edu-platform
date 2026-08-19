@@ -10,6 +10,7 @@ import {
   Check,
   RefreshCw,
   Info,
+  BrainCircuit,
 } from 'lucide-vue-next'
 import {
   COST_LABELS,
@@ -137,6 +138,15 @@ const trialExhausted = computed(() => {
     t.quizzes_used >= t.quizzes_limit
   )
 })
+// ── Monthly AI-grading allowance ───────────────────────────────────────────────
+const aiGrading = computed(() => balance.value?.ai_grading ?? null)
+const aiQuotaExhausted = computed(() => (aiGrading.value?.remaining ?? 0) <= 0)
+const aiQuotaResetLabel = computed(() => {
+  const iso = aiGrading.value?.resets_at
+  if (!iso) return '—'
+  return new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })
+})
+
 // A paying user no longer needs the trial highlighted — render it muted.
 const hasPurchases = computed(() => payments.value.some(p => p.status === 'succeeded'))
 
@@ -276,6 +286,40 @@ const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScoZQb5VAXVRV2
                   Купить кредиты →
                 </button>
               </template>
+            </div>
+          </section>
+
+          <!-- Monthly free AI-grading allowance. Identical on every plan: a
+               technical floor, not a tariff tier. Overage is charged in credits. -->
+          <section v-if="aiGrading">
+            <div
+              class="rounded-2xl border p-5 shadow-soft"
+              :class="aiQuotaExhausted
+                ? 'bg-white border-gray-100'
+                : 'bg-violet-50/60 border-violet-100'"
+            >
+              <div class="flex items-center gap-2 mb-2">
+                <BrainCircuit
+                  class="w-4 h-4 shrink-0"
+                  :class="aiQuotaExhausted ? 'text-gray-400' : 'text-violet-500'"
+                />
+                <h2 class="text-base font-semibold text-gray-900">AI-проверка ответов</h2>
+              </div>
+
+              <p class="text-sm text-gray-700">
+                Осталось в этом месяце:
+                <span class="font-semibold tabular-nums">
+                  {{ aiGrading.remaining }} из {{ aiGrading.limit }}
+                </span>
+              </p>
+              <p v-if="!aiQuotaExhausted" class="text-xs text-gray-500 mt-1">
+                Обновится {{ aiQuotaResetLabel }}. Проверки сверх лимита списываются
+                кредитами; если кредитов нет — ответ уходит на ручную проверку.
+              </p>
+              <p v-else class="text-xs text-gray-500 mt-1">
+                Лимит исчерпан — до {{ aiQuotaResetLabel }} проверки списываются кредитами.
+                Без кредитов ответы уходят на ручную проверку, ошибок у студента не будет.
+              </p>
             </div>
           </section>
 

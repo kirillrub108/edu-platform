@@ -40,6 +40,10 @@ export interface TeacherSubmission extends StudentSubmission {
   student_id: string
   student_name: string | null
   student_email: string
+  /** When this submission's attachments are due for deletion; null while ungraded. */
+  attachments_expire_at: string | null
+  /** Advisory price of one more extension, from the submission's current size. */
+  retention_extension_credits: number
 }
 
 export interface SubmissionSummary {
@@ -52,6 +56,8 @@ export interface SubmissionSummary {
   points_awarded: number | null
   score: number | null
   attachment_count: number
+  attachments_expire_at: string | null
+  retention_extension_credits: number
 }
 
 export interface AssignmentTeacher {
@@ -131,6 +137,8 @@ export const ASSIGNMENT_ERROR_CODES: Record<string, string> = {
   submission_too_large: 'Суммарный объём сдачи слишком большой',
   extension_not_allowed: 'Недопустимый тип файла',
   attachments_disabled: 'Вложения отключены для этого задания',
+  attachments_already_removed: 'Файлы уже удалены — продлевать нечего',
+  submission_not_graded: 'Сначала проверьте работу',
 }
 
 export const useAssignmentsStore = defineStore('assignments', () => {
@@ -254,6 +262,13 @@ export const useAssignmentsStore = defineStore('assignments', () => {
   const reopen = (submissionId: string): Promise<TeacherSubmission> =>
     apiFetch<TeacherSubmission>(`/submissions/${submissionId}/reopen`, { method: 'POST' })
 
+  /** Buy one more retention window for this submission's files. Rethrows so the
+   *  caller can tell 402 (no credits) from 409 (files already purged) apart. */
+  const extendRetention = (submissionId: string): Promise<TeacherSubmission> =>
+    apiFetch<TeacherSubmission>(`/submissions/${submissionId}/extend-retention`, {
+      method: 'POST',
+    })
+
   const postTeacherMessage = (submissionId: string, body: string): Promise<ThreadMessage> =>
     apiFetch<ThreadMessage>(`/submissions/${submissionId}/messages`, {
       method: 'POST',
@@ -343,6 +358,7 @@ export const useAssignmentsStore = defineStore('assignments', () => {
     fetchSubmission,
     grade,
     reopen,
+    extendRetention,
     postTeacherMessage,
     uploadFeedbackFile,
     // student

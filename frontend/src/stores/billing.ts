@@ -7,12 +7,22 @@ export interface TrialState {
   quizzes_limit: number
 }
 
+/** Monthly free allowance of AI-graded open answers (per teacher account).
+ *  Plan-independent; `remaining` is already clamped at zero by the backend. */
+export interface AiGradingQuota {
+  used: number
+  limit: number
+  remaining: number
+  resets_at: string
+}
+
 export interface BalanceState {
   balance: number
   reserved: number
   available: number
   plan: string
   trial?: TrialState | null
+  ai_grading?: AiGradingQuota | null
 }
 
 export interface Transaction {
@@ -80,6 +90,7 @@ export const useBillingStore = defineStore('billing', () => {
   const reserved = computed(() => balance.value?.reserved ?? 0)
   const total = computed(() => balance.value?.balance ?? 0)
   const currentPlan = computed(() => balance.value?.plan ?? 'free')
+  const aiGrading = computed<AiGradingQuota | null>(() => balance.value?.ai_grading ?? null)
 
   const fetchBalance = async () => {
     loadingBalance.value = true
@@ -177,6 +188,7 @@ export const useBillingStore = defineStore('billing', () => {
     reserved,
     total,
     currentPlan,
+    aiGrading,
     fetchBalance,
     fetchTransactions,
     fetchPlans,

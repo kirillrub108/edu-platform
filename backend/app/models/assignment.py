@@ -126,6 +126,13 @@ class AssignmentSubmission(Base):
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Paid retention extension (services/retention_service). NULL = the free base
+    # window applies (graded_at + ATTACHMENT_RETENTION_DAYS_AFTER_GRADED).
+    attachments_retain_until = Column(DateTime(timezone=True), nullable=True)
+    # One-shot guard for the pre-deletion reminder, so the daily beat mails the
+    # teacher once per retention window instead of every night. Reset to NULL by
+    # a paid extension — the new window earns its own reminder.
+    retention_reminder_sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(
         DateTime(timezone=True),

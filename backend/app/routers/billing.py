@@ -24,6 +24,7 @@ from app.limiter import limiter
 from app.models.payment import Payment, PaymentStatus
 from app.models.user import User
 from app.schemas.billing import (
+    AiGradingQuotaOut,
     BalanceOut,
     GrantOut,
     GrantRequest,
@@ -52,7 +53,12 @@ async def get_balance(
 ):
     bal = await billing_service.get_balance(db, user.id)
     trial = await quota_service.get_trial_state(db, user.id)
-    return BalanceOut(**bal, trial=TrialOut(**trial))
+    ai_grading = await quota_service.get_ai_grading_state(db, user.id)
+    return BalanceOut(
+        **bal,
+        trial=TrialOut(**trial),
+        ai_grading=AiGradingQuotaOut(**ai_grading),
+    )
 
 
 @router.get("/transactions", response_model=list[TransactionOut])

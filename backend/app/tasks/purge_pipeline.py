@@ -28,11 +28,11 @@ from sqlalchemy.orm import Session
 from app.celery_app import celery_app
 from app.config import settings
 from app.constants import (
-    ATTACHMENT_RETENTION_DAYS_AFTER_GRADED,
     CACHE_GC_ENABLED,
     LESSON_VIDEO_GC_ENABLED,
     LESSON_VIDEO_KEEP_UNPUBLISHED,
     LESSON_VIDEO_UNPUBLISHED_TTL_DAYS,
+    RETENTION_EXTENSION_DAYS,
     SLIDES_CACHE_MAX_BYTES,
     SLIDES_CACHE_TTL_DAYS,
     SOFT_DELETE_PURGE_DAYS,
@@ -46,6 +46,13 @@ from app.models.lesson_material import LessonMaterial
 from app.models.lesson_video import LessonVideo
 from app.models.slide_text import SlideText
 from app.models.user import User
+from app.services.billing_service import estimate_retention_extension
+from app.services.retention_service import (
+    effective_deadline,
+    expired_attachments_condition,
+    reminder_due_condition,
+    sync_mark_reminder_sent,
+)
 from app.services.storage_service import storage_service
 from app.tasks.video_pipeline import SyncSession
 
@@ -215,12 +222,13 @@ def _purge_user_files(session: Session, user: User) -> None:
 
 
 def _purge_expired_submission_attachments(session: Session) -> int:
-    """Remove attachment files + rows for submissions graded longer than
-    ATTACHMENT_RETENTION_DAYS_AFTER_GRADED ago. The submission (grade, feedback,
-    thread) stays; only the stored files and their records go. Idempotent: once a
-    row is deleted a re-run finds nothing, and _remove_file tolerates a missing
-    file, so cascade-deleted attachments from the soft-delete pass don't error."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=ATTACHMENT_RETENTION_DAYS_AFTER_GRADED)
+    """Remove attachment files + rows for submissions whose EFFECTIVE retention
+    window has elapsed — the free base window, or the later deadline a teacher
+    paid for (retention_service.expired_attachments_condition). The submission
+    (grade, feedback, thread) stays; only the stored files and their records go.
+    Idempotent: once a row is deleted a re-run finds nothing, and _remove_file
+    tolerates a missing file, so cascade-deleted attachments from the soft-delete
+    pass don't error."""
     rows = (
         session.execute(
             select(AssignmentAttachment)
@@ -228,10 +236,7 @@ def _purge_expired_submission_attachments(session: Session) -> int:
                 AssignmentSubmission,
                 AssignmentAttachment.submission_id == AssignmentSubmission.id,
             )
-            .where(
-                AssignmentSubmission.graded_at.isnot(None),
-                AssignmentSubmission.graded_at < cutoff,
-            )
+            .where(expired_attachments_condition(datetime.now(timezone.utc)))
             .execution_options(include_deleted=True)
         )
         .scalars()
@@ -314,6 +319,117 @@ def purge_soft_deleted() -> dict:
         counts["expired_attachments"] = _purge_expired_submission_attachments(session)
     logger.info("purge_soft_deleted_done", **counts)
     return counts
+
+
+# ── Pre-deletion reminder for submission attachments ─────────────────────────
+
+
+def _notify_one(session: Session, submission: AssignmentSubmission) -> bool:
+    """Mail the course owner that one submission's files are about to expire.
+
+    Order matters: the one-shot flag is set first and committed only after the
+    enqueue succeeds, so a broker outage rolls the flag back and tomorrow's run
+    retries instead of silently swallowing the reminder. Returns True when sent.
+    """
+    from app.tasks.email_pipeline import send_email
+
+    deadline = effective_deadline(submission)
+    if deadline is None:
+        return False
+
+    owner = session.scalar(
+        select(User)
+        .join(Course, Course.owner_id == User.id)
+        .join(Module, Module.course_id == Course.id)
+        .join(Lesson, Lesson.module_id == Module.id)
+        .join(Assignment, Assignment.lesson_id == Lesson.id)
+        .where(Assignment.id == submission.assignment_id)
+    )
+    if owner is None or not owner.email:
+        return False
+
+    # Count + bytes in one round-trip: the mail quotes the real extension price,
+    # which scales with the submission's size, not the shop-window figure.
+    row = session.execute(
+        select(
+            func.count(AssignmentAttachment.id),
+            func.coalesce(func.sum(AssignmentAttachment.size_bytes), 0),
+        ).where(AssignmentAttachment.submission_id == submission.id)
+    ).one()
+    attachment_count, total_bytes = int(row[0]), int(row[1])
+    if not attachment_count:
+        # Nothing to warn about; still flag it so the row stops being rescanned.
+        sync_mark_reminder_sent(submission)
+        session.commit()
+        return False
+
+    assignment = session.get(Assignment, submission.assignment_id)
+    sync_mark_reminder_sent(submission)
+    try:
+        send_email.delay(
+            to=owner.email,
+            subject="Файлы сдачи скоро будут удалены — Edllm",
+            template_name="attachments_expiring.html",
+            context={
+                "full_name": owner.full_name or "",
+                "assignment_title": assignment.title if assignment else "",
+                "attachment_count": attachment_count,
+                "expires_at": deadline.strftime("%d.%m.%Y"),
+                "extension_days": RETENTION_EXTENSION_DAYS,
+                "extension_credits": estimate_retention_extension(total_bytes),
+                # Submissions are reviewed inside the lesson page (there is no
+                # per-submission route) — same target as the video-ready mail.
+                "lesson_url": (
+                    f"{settings.FRONTEND_URL}/lessons/{assignment.lesson_id}"
+                    if assignment
+                    else settings.FRONTEND_URL
+                ),
+            },
+        )
+    except Exception:
+        session.rollback()  # flag not persisted → retried on the next run
+        logger.warning(
+            "retention_reminder_enqueue_failed", submission_id=str(submission.id), exc_info=True
+        )
+        return False
+    session.commit()
+    logger.info(
+        "retention_reminder_sent",
+        submission_id=str(submission.id),
+        expires_at=deadline.isoformat(),
+    )
+    return True
+
+
+@celery_app.task(name="notify_expiring_attachments", queue="quiz")
+def notify_expiring_attachments() -> dict[str, int]:
+    """Daily one-shot reminder, RETENTION_REMINDER_DAYS_BEFORE days before a
+    graded submission's attachments are purged. Runs on the same single beat as
+    the purge itself (see app/celery_app.py) — no second beat."""
+    structlog.contextvars.clear_contextvars()
+    sent = 0
+    with SyncSession() as session:
+        rows = (
+            session.execute(
+                select(AssignmentSubmission).where(
+                    reminder_due_condition(datetime.now(timezone.utc))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for submission in rows:
+            try:
+                if _notify_one(session, submission):
+                    sent += 1
+            except Exception:
+                session.rollback()
+                logger.warning(
+                    "retention_reminder_failed", submission_id=str(submission.id), exc_info=True
+                )
+                continue
+    logger.info("notify_expiring_attachments_done", candidates=len(rows), sent=sent)
+    return {"candidates": len(rows), "sent": sent}
 
 
 # ── Disk cache GC (reproducible slides_cache / summaries_cache) ────────────────

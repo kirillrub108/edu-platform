@@ -3,15 +3,21 @@ cancellation cost."""
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from app.constants import (
     AUTO_CHARS_PER_SLIDE,
+    CREDIT_WEIGHTS,
+    RETENTION_EXTEND_BASE_CREDITS,
+    RETENTION_MB_PER_CREDIT,
     TTS_CHARS_PER_CREDIT,
     VIDEO_AUTO_BASE_CREDITS,
     VIDEO_TEXT_BASE_CREDITS,
 )
 from app.services.billing_service import (
+    estimate_retention_extension,
     estimate_video_auto,
     estimate_video_text,
     partial_video_cost,
@@ -108,3 +114,45 @@ def test_partial_never_exceeds_estimate_when_clamped() -> None:
 )
 def test_partial_vision_cost(total_cost: int, done: int, total: int, expected: int) -> None:
     assert partial_vision_cost(total_cost, done, total) == expected
+
+
+# ── Retention extension (priced by attachment bytes) ─────────────────────────
+
+_MB = 1024 * 1024
+
+
+@pytest.mark.parametrize(
+    "total_bytes, expected",
+    [
+        (0, RETENTION_EXTEND_BASE_CREDITS),  # empty → base only (endpoint 409s first)
+        (1, RETENTION_EXTEND_BASE_CREDITS + 1),  # any byte at all costs a whole credit
+        (200 * 1024, RETENTION_EXTEND_BASE_CREDITS + 1),  # 200 KB text submission
+        (RETENTION_MB_PER_CREDIT * _MB, RETENTION_EXTEND_BASE_CREDITS + 1),  # exact boundary
+        (RETENTION_MB_PER_CREDIT * _MB + 1, RETENTION_EXTEND_BASE_CREDITS + 2),  # one byte over
+        # 1 GB (ATTACHMENT_MAX_TOTAL_SIZE_MB): ceil(1024 / 100) = 11 chargeable chunks
+        (1024 * _MB, RETENTION_EXTEND_BASE_CREDITS + math.ceil(1024 / RETENTION_MB_PER_CREDIT)),
+    ],
+)
+def test_estimate_retention_extension(total_bytes: int, expected: int) -> None:
+    assert estimate_retention_extension(total_bytes) == expected
+
+
+def test_retention_price_scales_with_size() -> None:
+    """The whole point of the change: a big submission costs materially more
+    than a small one, instead of both paying the old flat weight."""
+    small = estimate_retention_extension(200 * 1024)  # 200 KB of text
+    large = estimate_retention_extension(1024 * _MB)  # 1 GB of video
+    assert large > small
+    assert large >= small * 4, f"{large} vs {small} — differentiation too weak to matter"
+
+
+def test_retention_price_is_monotonic() -> None:
+    sizes = [0, 1, 50 * _MB, 100 * _MB, 500 * _MB, 1024 * _MB]
+    prices = [estimate_retention_extension(b) for b in sizes]
+    assert prices == sorted(prices)
+
+
+def test_shop_window_weight_matches_a_typical_small_submission() -> None:
+    """CREDIT_WEIGHTS['retention_extend'] stays the advertised reference price,
+    so it must still equal what a small submission actually costs."""
+    assert estimate_retention_extension(200 * 1024) == CREDIT_WEIGHTS["retention_extend"]

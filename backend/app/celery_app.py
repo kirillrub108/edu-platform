@@ -142,6 +142,15 @@ celery_app.conf.update(
             "schedule": crontab(hour=4, minute=30),
             "options": {"queue": "quiz"},
         },
+        # One-shot "your submission files expire soon" mail, RETENTION_REMINDER_
+        # DAYS_BEFORE ahead of the purge. Runs after the 03:00 purge so a
+        # submission that expired overnight is cleaned before it can be mailed
+        # about. Same single beat — see tasks/purge_pipeline.
+        "notify-expiring-attachments-daily": {
+            "task": "notify_expiring_attachments",
+            "schedule": crontab(hour=3, minute=30),
+            "options": {"queue": "quiz"},
+        },
     },
 )
 

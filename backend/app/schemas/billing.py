@@ -15,12 +15,24 @@ class TrialOut(BaseModel):
     quizzes_limit: int
 
 
+class AiGradingQuotaOut(BaseModel):
+    """Monthly free allowance of AI-graded open answers, per teacher account.
+    Plan-independent — a technical floor, not a tariff lever. `remaining` is
+    already clamped at zero by quota_service."""
+
+    used: int
+    limit: int
+    remaining: int
+    resets_at: datetime
+
+
 class BalanceOut(BaseModel):
     balance: int
     reserved: int
     available: int
     plan: str
     trial: TrialOut
+    ai_grading: AiGradingQuotaOut
 
 
 class TransactionOut(BaseModel):

@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { Coins, Sparkles } from 'lucide-vue-next'
+import { BrainCircuit, Coins, Sparkles } from 'lucide-vue-next'
 
 const props = withDefaults(defineProps<{ collapsed?: boolean }>(), { collapsed: false })
 
 const auth = useAuthStore()
 const { user } = storeToRefs(auth)
 const billing = useBillingStore()
-const { available, loadingBalance, balance } = storeToRefs(billing)
+const { available, loadingBalance, balance, aiGrading } = storeToRefs(billing)
 
 const isTeacher = computed(() => user.value?.role === 'teacher')
 
@@ -47,6 +47,19 @@ watch(isTeacher, (val) => {
         <span v-if="loadingBalance && balance === null" class="text-2xl font-semibold">—</span>
         <span v-else class="text-3xl font-semibold tabular-nums leading-none">{{ available }}</span>
         <span class="text-xs opacity-70">кредитов</span>
+      </div>
+      <!-- Monthly free AI-grading allowance. Overage is charged from the same
+           balance above, so the two belong in one card. -->
+      <div
+        v-if="aiGrading"
+        class="mt-2.5 pt-2.5 border-t border-white/20 flex items-center justify-between gap-2"
+      >
+        <span class="text-xs opacity-80 inline-flex items-center gap-1.5">
+          <BrainCircuit class="w-3.5 h-3.5" /> AI-проверки
+        </span>
+        <span class="text-xs font-semibold tabular-nums">
+          {{ aiGrading.remaining }} из {{ aiGrading.limit }}
+        </span>
       </div>
       <div
         class="mt-3 inline-flex items-center gap-1 text-xs font-medium bg-white/15 group-hover:bg-white/25 rounded-lg px-2.5 py-1.5 transition"

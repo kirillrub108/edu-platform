@@ -79,6 +79,54 @@ const onGraded = async () => {
   await store.fetchTeacher(props.lessonId)
 }
 
+// ── Attachment retention ─────────────────────────────────────────────────────
+
+const billing = useBillingStore()
+const extendingId = ref<string | null>(null)
+// Per-submission outcome of the last extend attempt, so one failing row never
+// blanks the whole panel.
+const retentionError = ref<Record<string, string>>({})
+const retentionGone = ref<Record<string, boolean>>({})
+
+const expiryLabel = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: 'numeric' }) : ''
+
+const canExtend = (s: SubmissionSummary) =>
+  s.attachment_count > 0 && !!s.attachments_expire_at && !retentionGone.value[s.id]
+
+const extendRetention = async (s: SubmissionSummary) => {
+  if (extendingId.value) return
+  extendingId.value = s.id
+  retentionError.value = { ...retentionError.value, [s.id]: '' }
+  try {
+    const updated = await store.extendRetention(s.id)
+    // Patch the row in place — no refetch, no page reload.
+    s.attachments_expire_at = updated.attachments_expire_at
+    s.retention_extension_credits = updated.retention_extension_credits
+    // The charge just moved the balance; keep the sidebar widget honest.
+    await billing.refresh()
+  } catch (e: unknown) {
+    const err = e as { response?: { status?: number }; data?: { detail?: { code?: string } } }
+    const status = err?.response?.status
+    if (status === 409 && err?.data?.detail?.code === 'attachments_already_removed') {
+      // Files are already gone — retire the control instead of offering a no-op.
+      retentionGone.value = { ...retentionGone.value, [s.id]: true }
+    } else if (status === 402) {
+      retentionError.value = {
+        ...retentionError.value,
+        [s.id]: 'Не хватает кредитов — пополните баланс',
+      }
+    } else {
+      retentionError.value = {
+        ...retentionError.value,
+        [s.id]: assignmentErrorMessage(e, 'Не удалось продлить хранение'),
+      }
+    }
+  } finally {
+    extendingId.value = null
+  }
+}
+
 watch(
   () => props.lessonId,
   (id) => {
@@ -182,6 +230,34 @@ watch(
                   {{ s.points_awarded }} / {{ a.max_points }}
                 </span>
                 <span v-else class="text-gray-400">—</span>
+              </td>
+              <!-- Attachment retention: when the files go, and how to keep them -->
+              <td class="py-2 px-2 text-center whitespace-nowrap">
+                <template v-if="s.attachment_count > 0 && s.attachments_expire_at">
+                  <div class="text-xs text-gray-500">
+                    Файлы до {{ expiryLabel(s.attachments_expire_at) }}
+                  </div>
+                  <button
+                    v-if="canExtend(s)"
+                    type="button"
+                    class="mt-1 text-xs font-medium text-violet-700 hover:text-violet-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                    :disabled="extendingId === s.id"
+                    @click="extendRetention(s)"
+                  >
+                    {{
+                      extendingId === s.id
+                        ? 'Продлеваем…'
+                        : `Продлить · ${s.retention_extension_credits} кр.`
+                    }}
+                  </button>
+                  <div v-else-if="retentionGone[s.id]" class="mt-1 text-xs text-gray-400">
+                    Файлы уже удалены
+                  </div>
+                  <div v-if="retentionError[s.id]" class="mt-1 text-xs text-rose-600">
+                    {{ retentionError[s.id] }}
+                  </div>
+                </template>
+                <span v-else class="text-xs text-gray-300">—</span>
               </td>
               <td class="py-2 pl-2 text-right">
                 <UiButton size="sm" variant="secondary" @click="reviewId = s.id">

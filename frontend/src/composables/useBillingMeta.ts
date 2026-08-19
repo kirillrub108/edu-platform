@@ -16,6 +16,8 @@ export const OPERATION_LABELS: Record<string, string> = {
   SLIDE_REGEN: 'Регенерация слайда',
   QUIZ_GENERATE: 'Генерация теста',
   AI_REVIEW: 'AI-проверка вопросов',
+  QUIZ_GRADE: 'AI-проверка ответа сверх лимита',
+  RETENTION_EXTEND: 'Продление хранения файлов',
   RESERVE: 'Резервирование',
   RELEASE: 'Возврат резерва',
   EXPIRE: 'Сгорание кредитов',
@@ -28,6 +30,10 @@ export const COST_LABELS: Record<string, string> = {
   quiz_generate: 'Генерация теста',
   ai_review: 'AI-review вопросов',
   quiz_grade: 'AI-проверка теста',
+  quiz_grade_overage: 'AI-проверка ответа сверх месячного лимита',
+  // Reference price for a typical small submission — the actual charge scales
+  // with the submission's size (see backend estimate_retention_extension).
+  retention_extend: 'Продление хранения файлов сдачи (от)',
 }
 
 export function operationLabel(op: string): string {

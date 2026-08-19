@@ -29,6 +29,8 @@ from app.constants import (
     AUTO_CHARS_PER_SLIDE,
     CREDIT_CARRYOVER_RATIO,
     PLAN_CONFIGS,
+    RETENTION_EXTEND_BASE_CREDITS,
+    RETENTION_MB_PER_CREDIT,
     TTS_CHARS_PER_CREDIT,
     VIDEO_AUTO_BASE_CREDITS,
     VIDEO_TEXT_BASE_CREDITS,
@@ -59,6 +61,18 @@ def estimate_video_auto(slides: int) -> int:
         + slides
         + math.ceil(slides * AUTO_CHARS_PER_SLIDE / TTS_CHARS_PER_CREDIT)
     )
+
+
+def estimate_retention_extension(total_attachment_bytes: int) -> int:
+    """COST_RETENTION_EXTEND: 1 + ceil(bytes / 100 MB).
+
+    Priced off raw bytes rather than the rounded MB used in upload errors, so a
+    1 GB video submission costs materially more than a 200 KB text one. Any
+    non-empty submission lands on at least BASE + 1; an empty one is refused
+    before pricing (retention_service returns 409), never charged the bare base.
+    """
+    per_credit = RETENTION_MB_PER_CREDIT * 1024 * 1024
+    return RETENTION_EXTEND_BASE_CREDITS + math.ceil(total_attachment_bytes / per_credit)
 
 
 def partial_video_cost(base_credits: int, processed_slides: int, voiced_chars: int) -> int:
@@ -423,6 +437,41 @@ def sync_claim_billing(db: Session, lesson_id: UUID) -> str | None:
     db.execute(update(Lesson).where(Lesson.id == lesson_id).values(billed_via=None))
     db.commit()
     return billed
+
+
+def sync_reserve_credits(
+    db: Session,
+    user_id: UUID,
+    amount: int,
+    ref_id: str,
+    operation: CreditOperation,
+) -> bool:
+    """Sync mirror of reserve_credits, for holds opened from inside a Celery task.
+
+    Same auth/capture contract: the hold is settled by sync_finalize_generation.
+    Returns False (no raise) when the account cannot cover `amount` — callers in
+    tasks degrade instead of failing. Unlike the async version this does NOT
+    create a missing account: a task always bills an existing owner, and the
+    row-level FOR UPDATE below is what serializes concurrent holds.
+    """
+    account = db.scalar(
+        select(CreditAccount).where(CreditAccount.owner_id == user_id).with_for_update()
+    )
+    if account is None or account.balance - account.reserved < amount:
+        db.rollback()
+        return False
+    account.reserved += amount
+    db.add(
+        CreditTransaction(
+            account_id=account.id,
+            delta=-amount,
+            operation=CreditOperation.RESERVE,
+            ref_id=ref_id,
+            description=f"Reserve for {_to_operation(operation).value}",
+        )
+    )
+    db.commit()
+    return True
 
 
 def sync_finalize_generation(

@@ -125,3 +125,36 @@ describe('useBillingStore', () => {
     expect(result).toEqual(payment)
   })
 })
+
+describe('monthly AI-grading quota', () => {
+  it('exposes ai_grading from /billing/balance via the aiGrading getter', async () => {
+    const store = await loadStore()
+    fetchMock.mockResolvedValueOnce({
+      balance: 40,
+      reserved: 2,
+      available: 38,
+      plan: 'pro',
+      trial: { lectures_used: 2, lectures_limit: 2, quizzes_used: 2, quizzes_limit: 2 },
+      ai_grading: {
+        used: 37,
+        limit: 100,
+        remaining: 63,
+        resets_at: '2026-09-01T00:00:00Z',
+      },
+    })
+
+    await store.fetchBalance()
+
+    expect(store.aiGrading).toEqual({
+      used: 37,
+      limit: 100,
+      remaining: 63,
+      resets_at: '2026-09-01T00:00:00Z',
+    })
+  })
+
+  it('returns null when the balance has not loaded yet', async () => {
+    const store = await loadStore()
+    expect(store.aiGrading).toBeNull()
+  })
+})
