@@ -694,7 +694,7 @@ onMounted(async () => {
     <!-- Tab: Доступ -->
     <section v-else-if="activeTab === 'access'">
       <p v-if="!course.is_published" class="mb-5 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
-        Курс не опубликован — ученики не смогут записаться, пока вы его не опубликуете.
+        Курс не опубликован — студенты не смогут записаться, пока вы его не опубликуете.
       </p>
 
       <p v-if="accessError" class="mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
@@ -703,7 +703,7 @@ onMounted(async () => {
 
       <div v-if="course.access_code" class="space-y-5">
         <div>
-          <p class="text-sm text-gray-600 mb-2">Код доступа — продиктуйте или отправьте ученикам:</p>
+          <p class="text-sm text-gray-600 mb-2">Код доступа — продиктуйте или отправьте студентам:</p>
           <div class="flex gap-2 items-center">
             <div class="flex-1 bg-gray-50 border rounded-xl px-6 py-4 text-3xl font-mono tracking-widest text-center text-gray-800 select-all">
               {{ course.access_code }}
