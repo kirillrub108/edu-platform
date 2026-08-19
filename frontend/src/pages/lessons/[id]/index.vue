@@ -342,6 +342,7 @@ interface VideoItem {
   speed: number | null
   pitch: number | null
   is_published: boolean
+  generation_seconds: number | null
   created_at: string
 }
 
@@ -362,6 +363,9 @@ const formatDate = (iso: string) =>
     day: '2-digit', month: '2-digit', year: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
+
+const formatDuration = (seconds: number) =>
+  `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 
 const loadVideos = async () => {
   try {
@@ -664,6 +668,9 @@ watch(lessonId, (newId, oldId) => {
                     {{ formatDate(video.created_at) }}
                   </span>
                   <span class="text-sm text-gray-700">{{ voiceLabel(video.voice) }}</span>
+                  <span v-if="video.generation_seconds != null" class="text-sm text-gray-500 tabular-nums">
+                    {{ formatDuration(video.generation_seconds) }}
+                  </span>
                   <span v-if="video.speed != null || video.pitch != null" class="text-sm text-gray-500">
                     <template v-if="video.speed != null">скорость {{ video.speed }}</template>
                     <template v-if="video.speed != null && video.pitch != null">, </template>

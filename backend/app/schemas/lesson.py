@@ -50,6 +50,7 @@ class LessonVideoOut(BaseModel):
     speed: float | None = None
     pitch: int | None = None
     is_published: bool
+    generation_seconds: int | None = None
     created_at: datetime
 
 

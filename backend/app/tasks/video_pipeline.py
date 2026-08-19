@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from uuid import UUID, uuid4
 
@@ -264,6 +265,10 @@ def generate_video_lesson(
     work_dir = os.path.join(settings.STORAGE_PATH, "video_jobs", lesson_id)
     slides_cache_dir = os.path.join(settings.STORAGE_PATH, "slides_cache")
     os.makedirs(work_dir, exist_ok=True)
+    # Wall-clock start of this task invocation — a checkpoint-resumed run gets
+    # a fresh call to this function, so this reflects the current run only,
+    # not time accumulated across a prior crashed attempt.
+    _gen_start = time.monotonic()
     _success = False
     _owner_id: UUID | None = None
     _credit_op = "LESSON_REGEN" if is_regen else "LESSON_GENERATE"
@@ -666,6 +671,7 @@ def generate_video_lesson(
                 speed=speed,
                 pitch=pitch,
                 is_published=False,
+                generation_seconds=round(time.monotonic() - _gen_start),
             )
             session.add(new_video)
             video_id = str(video_uuid)

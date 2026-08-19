@@ -23,6 +23,9 @@ class LessonVideo(Base):
     speed = Column(Float, nullable=True)
     pitch = Column(Integer, nullable=True)
     is_published = Column(Boolean, nullable=False, default=False)
+    # Wall-clock time spent generating this version, in seconds. Null for
+    # direct video uploads (/upload-video) — those aren't a generation run.
+    generation_seconds = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     lesson = relationship("Lesson", back_populates="videos")
