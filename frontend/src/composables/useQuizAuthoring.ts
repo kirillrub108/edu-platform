@@ -45,6 +45,64 @@ export interface QuestionFlag {
 
 export type RegenerateMode = 'rephrase' | 'harder' | 'easier' | 'improve_distractors'
 
+/** Subset of QuestionType the LLM generator supports. */
+export type GeneratableQuestionType = Extract<
+  QuestionType,
+  'single_choice' | 'multiple_choice' | 'true_false' | 'short_answer'
+>
+
+/** How many questions of one type to generate. 0 = exclude the type. */
+export interface QuizTypeCount {
+  type: GeneratableQuestionType
+  count: number
+}
+
+export interface QuizGenerationTypeOption {
+  type: GeneratableQuestionType
+  default_count: number
+}
+
+/** Bounds + defaults served from backend constants.py — never restated in the UI. */
+export interface QuizGenerationOptions {
+  types: QuizGenerationTypeOption[]
+  min_per_type: number
+  max_per_type: number
+  min_total: number
+  max_total: number
+  num_options: number
+}
+
+export function totalRequestedQuestions(counts: QuizTypeCount[]): number {
+  return counts.reduce((sum, c) => sum + (Number.isFinite(c.count) ? c.count : 0), 0)
+}
+
+/** Clamp a raw input value to an integer inside the per-type bounds. */
+export function clampTypeCount(value: number, limits: QuizGenerationOptions): number {
+  if (!Number.isFinite(value)) return limits.min_per_type
+  return Math.min(limits.max_per_type, Math.max(limits.min_per_type, Math.round(value)))
+}
+
+/**
+ * Validate the requested per-type counts against the server-served limits.
+ * Returns a user-facing message, or null when the request may be sent.
+ */
+export function generationCountsError(
+  counts: QuizTypeCount[],
+  limits: QuizGenerationOptions | null,
+): string | null {
+  if (!limits) return 'Лимиты генерации не загружены'
+  const outOfRange = counts.some(
+    c => !Number.isInteger(c.count) || c.count < limits.min_per_type || c.count > limits.max_per_type,
+  )
+  if (outOfRange) {
+    return `Количество на тип — целое от ${limits.min_per_type} до ${limits.max_per_type}`
+  }
+  const total = totalRequestedQuestions(counts)
+  if (total < limits.min_total) return 'Укажите хотя бы один вопрос'
+  if (total > limits.max_total) return `Всего не больше ${limits.max_total} вопросов`
+  return null
+}
+
 interface GenerationStatus {
   task_id: string
   status: string
@@ -59,6 +117,7 @@ export function useQuizAuthoring(lessonId: Readonly<Ref<string>>) {
 
   const settings = ref<QuizSettings | null>(null)
   const questions = ref<TeacherQuestion[]>([])
+  const generationOptions = ref<QuizGenerationOptions | null>(null)
   const loading = ref(false)
   const loadError = ref('')
 
@@ -87,12 +146,14 @@ export function useQuizAuthoring(lessonId: Readonly<Ref<string>>) {
     loading.value = true
     loadError.value = ''
     try {
-      const [s, qs] = await Promise.all([
+      const [s, qs, opts] = await Promise.all([
         apiFetch<QuizSettings>(`/lessons/${lessonId.value}/quiz`),
         apiFetch<TeacherQuestion[]>(`/lessons/${lessonId.value}/quiz/questions`),
+        apiFetch<QuizGenerationOptions>(`/lessons/${lessonId.value}/quiz/generation-options`),
       ])
       settings.value = s
       questions.value = qs
+      generationOptions.value = opts
       if (s.generation_task_id && !taskId.value) {
         taskId.value = s.generation_task_id
         generating.value = true
@@ -156,11 +217,12 @@ export function useQuizAuthoring(lessonId: Readonly<Ref<string>>) {
     } catch { /* network glitch — keep polling */ }
   }
 
-  const generate = async (
-    numQuestions?: number,
-    numOptions?: number,
-    types?: QuestionType[],
-  ) => {
+  const generate = async (typeCounts: QuizTypeCount[], numOptions?: number) => {
+    const invalid = generationCountsError(typeCounts, generationOptions.value)
+    if (invalid) {
+      generationError.value = invalid
+      return
+    }
     generationError.value = ''
     flags.value = []
     generating.value = true
@@ -171,9 +233,8 @@ export function useQuizAuthoring(lessonId: Readonly<Ref<string>>) {
         {
           method: 'POST',
           body: {
-            num_questions: numQuestions ?? null,
+            type_counts: typeCounts.filter(c => c.count > 0),
             num_options: numOptions ?? null,
-            types: types ?? null,
           },
         },
       )
@@ -264,7 +325,7 @@ export function useQuizAuthoring(lessonId: Readonly<Ref<string>>) {
   onUnmounted(stopPolling)
 
   return {
-    settings, questions, loading, loadError,
+    settings, questions, generationOptions, loading, loadError,
     isPublished,
     generating, generationStep, generationDone, generationTotal, generationError,
     regenIds, savingIds,

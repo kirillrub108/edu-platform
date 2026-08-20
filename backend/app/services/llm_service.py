@@ -11,39 +11,11 @@ from app.constants import (
     LLM_REQUEST_TIMEOUT_SECONDS,
     QUIZ_LLM_OPEN_MAX_TOKENS,
     QUIZ_LLM_TEMPERATURE,
-    QUIZ_MIN_FOR_DISTRIBUTION,
-    QUIZ_TYPE_DISTRIBUTION,
 )
 from app.schemas.quiz import FlagKind, QuestionFlag, RegenerateMode
 from app.services import usage_service
 
 logger = structlog.get_logger()
-
-
-def _compute_type_counts(n: int, types: list[str]) -> dict[str, int]:
-    """Return how many questions of each type to request.
-
-    If n < QUIZ_MIN_FOR_DISTRIBUTION or types has only one entry, all n go to
-    types[0]. Otherwise uses QUIZ_TYPE_DISTRIBUTION for the known four types,
-    with short_answer absorbing the rounding remainder.
-    """
-    if n < QUIZ_MIN_FOR_DISTRIBUTION or len(types) == 1:
-        return {types[0]: n}
-
-    ordered = ["single_choice", "multiple_choice", "true_false", "short_answer"]
-    active = [t for t in ordered if t in types]
-    if len(active) < 2:
-        return {types[0]: n}
-
-    counts: dict[str, int] = {}
-    for t in active[:-1]:
-        frac = QUIZ_TYPE_DISTRIBUTION.get(t, 0.0)
-        counts[t] = round(n * frac)
-    counts[active[-1]] = n - sum(counts.values())
-    # Clamp negatives from extreme rounding.
-    for t in active:
-        counts[t] = max(0, counts[t])
-    return counts
 
 
 class LLMOutputError(RuntimeError):
@@ -366,11 +338,14 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         self,
         material: str,
         *,
-        num_questions: int,
+        type_counts: dict[str, int],
         num_options: int,
-        types: list[str],
     ) -> list[dict[str, Any]]:
         """Generate a polymorphic quiz strictly grounded in `material`.
+
+        `type_counts` maps question type -> exactly how many to produce; types
+        mapped to 0 (or absent) are not generated and the counts are never
+        redistributed between types.
 
         Returns a list of {type, payload, weight, order} dicts whose payloads
         match the discriminated schema in `schemas.quiz`. Raises LLMOutputError
@@ -380,9 +355,11 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
         beyond what `material` contains — this is the fix for the "ГОСТ Р ИСО
         2150N" / "548NN" hallucinations seen in the v1 generator.
         """
-        if not types:
-            types = ["single_choice"]
-        type_counts = _compute_type_counts(num_questions, types)
+        wanted = {t: c for t, c in type_counts.items() if c > 0}
+        if not wanted:
+            raise ValueError("type_counts must request at least one question")
+        num_questions = sum(wanted.values())
+        types = list(wanted)
 
         # Build a human-readable breakdown line for the prompt.
         _type_labels = {
@@ -391,12 +368,10 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
             "true_false": "true/false",
             "short_answer": "short-answer (fill-in-the-blank)",
         }
-        breakdown = ", ".join(
-            f"{cnt} {_type_labels.get(t, t)}" for t, cnt in type_counts.items() if cnt > 0
-        )
+        breakdown = ", ".join(f"{cnt} {_type_labels.get(t, t)}" for t, cnt in wanted.items())
         user = (
             f"Кол-во вопросов: {num_questions} ({breakdown})\n"
-            f"Разрешённые типы: {', '.join(t for t, c in type_counts.items() if c > 0)}\n"
+            f"Разрешённые типы: {', '.join(types)}\n"
             f"Для multiple/single choice: {num_options} вариантов.\n\n"
             f"Материал:\n{material}"
         )
@@ -425,11 +400,12 @@ Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
                     }
                 )
                 actual_counts[qtype] = actual_counts.get(qtype, 0) + 1
-            # Warn if the LLM deviated from the requested distribution.
-            for t, want in type_counts.items():
+            # Per-type counts are a hard contract: a deviation fails validation so
+            # _chat_json_validated retries instead of silently rebalancing types.
+            for t, want in wanted.items():
                 got = actual_counts.get(t, 0)
-                if want > 0 and got != want:
-                    logger.warning("quiz_type_count_mismatch", q_type=t, requested=want, got=got)
+                if got != want:
+                    raise ValueError(f"expected {want} {t} questions, got {got}")
             return out
 
         return await self._chat_json_validated(

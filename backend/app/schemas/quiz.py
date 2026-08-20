@@ -18,6 +18,13 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.constants import (
+    QUIZ_DEFAULT_TYPE_COUNTS,
+    QUIZ_MAX_QUESTIONS,
+    QUIZ_MAX_QUESTIONS_PER_TYPE,
+    QUIZ_MIN_QUESTIONS,
+    QUIZ_MIN_QUESTIONS_PER_TYPE,
+)
 from app.models.quiz import AttemptStatus, QuestionType, QuizStatus
 
 # ── Teacher-facing payloads (with reference answers) ────────────────────────
@@ -317,10 +324,56 @@ class QuizSettingsUpdate(BaseModel):
 GeneratableType = Literal["single_choice", "multiple_choice", "true_false", "short_answer"]
 
 
+class QuizGenerateTypeCount(BaseModel):
+    """How many questions of one type the teacher wants. 0 = skip the type."""
+
+    type: GeneratableType
+    count: int = Field(ge=QUIZ_MIN_QUESTIONS_PER_TYPE, le=QUIZ_MAX_QUESTIONS_PER_TYPE)
+
+
 class QuizGenerateRequest(BaseModel):
-    num_questions: int | None = Field(default=None, ge=1, le=20)
+    # None = fall back to QUIZ_DEFAULT_TYPE_COUNTS. Counts are taken verbatim:
+    # the generator never redistributes them between types.
+    type_counts: list[QuizGenerateTypeCount] | None = None
     num_options: int | None = Field(default=None, ge=2, le=8)
-    types: list[GeneratableType] | None = None  # None = use QUIZ_TYPE_DISTRIBUTION default mix
+
+    @model_validator(mode="after")
+    def _validate_type_counts(self) -> "QuizGenerateRequest":
+        if self.type_counts is None:
+            return self
+        seen: set[str] = set()
+        for item in self.type_counts:
+            if item.type in seen:
+                raise ValueError(f"duplicate question type: {item.type}")
+            seen.add(item.type)
+        total = sum(item.count for item in self.type_counts)
+        if total < QUIZ_MIN_QUESTIONS:
+            raise ValueError(f"total question count must be at least {QUIZ_MIN_QUESTIONS}")
+        if total > QUIZ_MAX_QUESTIONS:
+            raise ValueError(f"total question count must not exceed {QUIZ_MAX_QUESTIONS}")
+        return self
+
+    def resolved_type_counts(self) -> dict[str, int]:
+        """Requested counts with the zero (excluded) types dropped."""
+        if self.type_counts is None:
+            return {t: c for t, c in QUIZ_DEFAULT_TYPE_COUNTS.items() if c > 0}
+        return {item.type: item.count for item in self.type_counts if item.count > 0}
+
+
+class QuizGenerationTypeOption(BaseModel):
+    type: GeneratableType
+    default_count: int
+
+
+class QuizGenerationOptions(BaseModel):
+    """Bounds + defaults for the generation dialog, straight from constants.py."""
+
+    types: list[QuizGenerationTypeOption]
+    min_per_type: int
+    max_per_type: int
+    min_total: int
+    max_total: int
+    num_options: int
 
 
 class QuizGenerateResponse(BaseModel):

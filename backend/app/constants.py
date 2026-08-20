@@ -441,10 +441,15 @@ VISION_SUMMARY_CONCURRENCY: int = (
 # Quiz
 # default for new quizzes; per-quiz override in Quiz.pass_threshold
 QUIZ_PASS_THRESHOLD: float = 0.6
-QUIZ_NUM_QUESTIONS: int = 5
 QUIZ_NUM_OPTIONS: int = 4
 QUIZ_MIN_QUESTIONS: int = 1
 QUIZ_MAX_QUESTIONS: int = 20
+# AI generation is requested per question type ("N single_choice, M true_false").
+# 0 excludes a type entirely; the total across types stays within
+# QUIZ_MIN_QUESTIONS..QUIZ_MAX_QUESTIONS. Both the request schema and the
+# teacher UI read these bounds — don't restate them anywhere else.
+QUIZ_MIN_QUESTIONS_PER_TYPE: int = 0
+QUIZ_MAX_QUESTIONS_PER_TYPE: int = 10
 QUIZ_DEFAULT_WEIGHT: float = 1.0
 QUIZ_LLM_TEMPERATURE: float = 0.2
 QUIZ_LLM_OPEN_MAX_TOKENS: int = 400
@@ -664,17 +669,15 @@ TIER_PRIORITY: dict[str, int] = {
     "enterprise": 0,
 }
 
-# Default question-type distribution for quiz generation.
-# Keys match the type strings used in generate_quiz_v2 / _parse_payload_v2.
-# Fractions must sum to 1.0; short_answer absorbs rounding remainders.
-QUIZ_TYPE_DISTRIBUTION: dict[str, float] = {
-    "single_choice": 0.50,
-    "multiple_choice": 0.30,
-    "true_false": 0.10,
-    "short_answer": 0.10,
+# Default per-type question counts offered by the generation dialog and used
+# when the request omits type_counts. Key order is the order the UI renders the
+# rows in; keys match the type strings used in generate_quiz_v2.
+QUIZ_DEFAULT_TYPE_COUNTS: dict[str, int] = {
+    "single_choice": 3,
+    "multiple_choice": 1,
+    "true_false": 1,
+    "short_answer": 0,
 }
-# Below this count the distribution is skipped and all questions are single_choice.
-QUIZ_MIN_FOR_DISTRIBUTION: int = 4
 
 # Email
 # Lifetime of the signed email-verification token (itsdangerous max_age).

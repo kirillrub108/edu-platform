@@ -35,8 +35,8 @@ from app.celery_app import celery_app
 from app.constants import (
     AI_GRADING_FREE_ANSWERS_PER_MONTH,
     CREDIT_WEIGHTS,
+    QUIZ_DEFAULT_TYPE_COUNTS,
     QUIZ_GRADING_WORKERS,
-    QUIZ_TYPE_DISTRIBUTION,
 )
 from app.models.course import Course
 from app.models.credit import CreditOperation
@@ -87,9 +87,8 @@ def _clear_generation_task(session: Session, quiz_id: UUID) -> None:
 def generate_quiz_task(
     self,
     lesson_id: str,
-    num_questions: int,
+    type_counts: dict[str, int],
     num_options: int,
-    types: list[str] | None = None,
     billing_ref: str | None = None,
     billed_via: str | None = None,
     owner_id: str | None = None,
@@ -97,7 +96,10 @@ def generate_quiz_task(
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(task_id=self.request.id, task_name=self.name)
     lesson_uuid = UUID(lesson_id)
-    allowed_types = list(types) if types else list(QUIZ_TYPE_DISTRIBUTION.keys())
+    # Requested counts are generated verbatim — types asked for 0 are simply absent.
+    requested_counts = {t: c for t, c in (type_counts or {}).items() if c > 0}
+    if not requested_counts:
+        requested_counts = {t: c for t, c in QUIZ_DEFAULT_TYPE_COUNTS.items() if c > 0}
     estimate = CREDIT_WEIGHTS["quiz_generate"]
     owner_uuid = UUID(owner_id) if owner_id else None
 
@@ -139,9 +141,8 @@ def generate_quiz_task(
             generated = asyncio.run(
                 llm_service.generate_quiz_v2(
                     material,
-                    num_questions=num_questions,
+                    type_counts=requested_counts,
                     num_options=num_options,
-                    types=allowed_types,
                 )
             )
 

@@ -21,11 +21,14 @@ from sqlalchemy.orm import selectinload
 from app.celery_app import celery_app
 from app.constants import (
     CREDIT_WEIGHTS,
+    QUIZ_DEFAULT_TYPE_COUNTS,
     QUIZ_DEFAULT_WEIGHT,
+    QUIZ_MAX_QUESTIONS,
+    QUIZ_MAX_QUESTIONS_PER_TYPE,
+    QUIZ_MIN_QUESTIONS,
+    QUIZ_MIN_QUESTIONS_PER_TYPE,
     QUIZ_NUM_OPTIONS,
-    QUIZ_NUM_QUESTIONS,
     QUIZ_PASS_THRESHOLD,
-    QUIZ_TYPE_DISTRIBUTION,
 )
 from app.database import get_db
 from app.dependencies import get_owned_lesson, require_verified_email
@@ -51,7 +54,9 @@ from app.schemas.quiz import (
     QuizAttemptTeacherRead,
     QuizGenerateRequest,
     QuizGenerateResponse,
+    QuizGenerationOptions,
     QuizGenerationStatus,
+    QuizGenerationTypeOption,
     QuizQuestionCreate,
     QuizQuestionReorder,
     QuizQuestionTeacherRead,
@@ -339,6 +344,29 @@ async def reorder_questions(
 # ── AI: generate / regenerate / qa-review ──────────────────────────────────
 
 
+@router.get(
+    "/{lesson_id}/quiz/generation-options",
+    response_model=QuizGenerationOptions,
+)
+async def quiz_generation_options(
+    lesson_id: UUID,
+    lesson: Lesson = Depends(get_owned_lesson),
+) -> QuizGenerationOptions:
+    """Bounds + defaults for the generation dialog. Read-only, no AI, no credits —
+    it exists so the UI never restates the limits held in constants.py."""
+    return QuizGenerationOptions(
+        types=[
+            QuizGenerationTypeOption(type=t, default_count=c)
+            for t, c in QUIZ_DEFAULT_TYPE_COUNTS.items()
+        ],
+        min_per_type=QUIZ_MIN_QUESTIONS_PER_TYPE,
+        max_per_type=QUIZ_MAX_QUESTIONS_PER_TYPE,
+        min_total=QUIZ_MIN_QUESTIONS,
+        max_total=QUIZ_MAX_QUESTIONS,
+        num_options=QUIZ_NUM_OPTIONS,
+    )
+
+
 @router.post(
     "/{lesson_id}/quiz/generate",
     response_model=QuizGenerateResponse,
@@ -353,9 +381,10 @@ async def generate_quiz(
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ) -> QuizGenerateResponse:
-    num_questions = payload.num_questions or QUIZ_NUM_QUESTIONS
+    type_counts = payload.resolved_type_counts()
     num_options = payload.num_options or QUIZ_NUM_OPTIONS
-    types: list[str] = list(payload.types) if payload.types else list(QUIZ_TYPE_DISTRIBUTION.keys())
+    if not type_counts:
+        raise HTTPException(status_code=422, detail="Выберите хотя бы один тип вопросов")
 
     try:
         await assemble_material(db, lesson)
@@ -405,7 +434,7 @@ async def generate_quiz(
 
     try:
         task = generate_quiz_task.apply_async(
-            args=[str(lesson.id), num_questions, num_options, types],
+            args=[str(lesson.id), type_counts, num_options],
             kwargs={
                 "billing_ref": billing_ref,
                 "billed_via": billed_via,

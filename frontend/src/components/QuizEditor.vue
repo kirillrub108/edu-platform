@@ -7,6 +7,10 @@ import UiButton from './UiButton.vue'
 import QuestionForm from './quiz/QuestionForm.vue'
 import type {
   TeacherQuestion, RegenerateMode, QuestionType,
+  GeneratableQuestionType, QuizTypeCount,
+} from '../composables/useQuizAuthoring'
+import {
+  clampTypeCount, generationCountsError, totalRequestedQuestions,
 } from '../composables/useQuizAuthoring'
 
 interface Props {
@@ -17,7 +21,7 @@ const props = defineProps<Props>()
 const lessonIdRef = computed(() => props.lessonId)
 
 const {
-  settings, questions, loading, loadError,
+  settings, questions, generationOptions, loading, loadError,
   isPublished,
   generating, generationStep, generationDone, generationTotal, generationError,
   regenIds, savingIds,
@@ -114,35 +118,50 @@ const onDelete = async (q: TeacherQuestion) => {
   await deleteQuestion(q)
 }
 
-// Generation modal state
-const GENERATABLE_TYPES: { value: QuestionType; label: string }[] = [
-  { value: 'single_choice',   label: 'Один из' },
-  { value: 'multiple_choice', label: 'Несколько из' },
-  { value: 'true_false',      label: 'Верно/Неверно' },
-  { value: 'short_answer',    label: 'Короткий ответ' },
-]
-
-const showGenModal = ref(false)
-const genNumQuestions = ref(5)
-const genTypes = ref<QuestionType[]>(['single_choice', 'multiple_choice', 'true_false', 'short_answer'])
-
-const toggleGenType = (type: QuestionType) => {
-  const idx = genTypes.value.indexOf(type)
-  if (idx === -1) {
-    genTypes.value.push(type)
-  } else if (genTypes.value.length > 1) {
-    genTypes.value.splice(idx, 1)
-  }
+// Generation modal: one count per type (0 = type excluded). Row order and the
+// min/max bounds come from the backend (constants.py) via generationOptions;
+// only the label for each type lives here.
+const GENERATABLE_TYPE_LABELS: Record<GeneratableQuestionType, string> = {
+  single_choice: 'Один из',
+  multiple_choice: 'Несколько из',
+  true_false: 'Верно/Неверно',
+  short_answer: 'Короткий ответ',
 }
 
-const onGenerate = () => ensureVerified(() => { showGenModal.value = true })
+const showGenModal = ref(false)
+const genCounts = ref<QuizTypeCount[]>([])
+
+const resetGenCounts = () => {
+  genCounts.value = (generationOptions.value?.types ?? []).map(t => ({
+    type: t.type,
+    count: t.default_count,
+  }))
+}
+
+watch(generationOptions, resetGenCounts, { immediate: true })
+
+const genTotal = computed(() => totalRequestedQuestions(genCounts.value))
+const genError = computed(() => generationCountsError(genCounts.value, generationOptions.value))
+
+const setGenCount = (type: GeneratableQuestionType, value: number) => {
+  const limits = generationOptions.value
+  if (!limits) return
+  const row = genCounts.value.find(c => c.type === type)
+  if (row) row.count = clampTypeCount(value, limits)
+}
+
+const onGenerate = () => ensureVerified(() => {
+  resetGenCounts()
+  showGenModal.value = true
+})
 
 const onConfirmGenerate = async () => {
+  if (genError.value) return
   if (questions.value.length > 0) {
     if (!confirm('Существующие вопросы будут заменены. Продолжить?')) return
   }
   showGenModal.value = false
-  await generate(genNumQuestions.value, 4, genTypes.value)
+  await generate(genCounts.value, generationOptions.value?.num_options)
 }
 
 const flagBadge = (kind: string) => {
@@ -411,36 +430,51 @@ onUnmounted(() => {
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
         @click.self="showGenModal = false"
       >
-        <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-5">
+        <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md space-y-4">
           <h3 class="text-base font-semibold text-gray-900">Настройки генерации</h3>
 
-          <label class="flex flex-col gap-1">
-            <span class="text-sm text-gray-600">Количество вопросов</span>
-            <input
-              v-model.number="genNumQuestions"
-              type="number" min="1" max="20"
-              class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm w-24"
-            />
-          </label>
-
           <div class="flex flex-col gap-2">
-            <span class="text-sm text-gray-600">Типы вопросов</span>
-            <div class="flex flex-col gap-1.5">
-              <label
-                v-for="t in GENERATABLE_TYPES"
-                :key="t.value"
-                class="flex items-center gap-2 cursor-pointer text-sm"
-              >
+            <span class="text-sm text-gray-600">Количество вопросов по типам</span>
+            <div
+              v-for="row in genCounts"
+              :key="row.type"
+              class="flex items-center justify-between gap-3"
+            >
+              <span class="text-sm text-gray-700">{{ GENERATABLE_TYPE_LABELS[row.type] }}</span>
+              <div class="flex items-center gap-1">
+                <button
+                  type="button"
+                  class="w-7 h-7 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition disabled:opacity-40"
+                  :disabled="!generationOptions || row.count <= generationOptions.min_per_type"
+                  :aria-label="`Меньше: ${GENERATABLE_TYPE_LABELS[row.type]}`"
+                  @click="setGenCount(row.type, row.count - 1)"
+                >−</button>
                 <input
-                  type="checkbox"
-                  :checked="genTypes.includes(t.value)"
-                  class="accent-violet-600"
-                  @change="toggleGenType(t.value)"
+                  :value="row.count"
+                  type="number"
+                  :min="generationOptions?.min_per_type"
+                  :max="generationOptions?.max_per_type"
+                  step="1"
+                  class="rounded-lg border border-gray-200 px-2 py-1 text-sm w-14 text-center"
+                  :aria-label="GENERATABLE_TYPE_LABELS[row.type]"
+                  @input="setGenCount(row.type, Number(($event.target as HTMLInputElement).value))"
                 />
-                {{ t.label }}
-              </label>
+                <button
+                  type="button"
+                  class="w-7 h-7 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition disabled:opacity-40"
+                  :disabled="!generationOptions || row.count >= generationOptions.max_per_type"
+                  :aria-label="`Больше: ${GENERATABLE_TYPE_LABELS[row.type]}`"
+                  @click="setGenCount(row.type, row.count + 1)"
+                >+</button>
+              </div>
             </div>
           </div>
+
+          <div class="flex items-center justify-between border-t border-gray-100 pt-3">
+            <span class="text-sm text-gray-600">Всего вопросов</span>
+            <span class="text-sm font-semibold text-gray-900">{{ genTotal }}</span>
+          </div>
+          <p v-if="genError" class="text-xs text-rose-600">{{ genError }}</p>
 
           <div class="flex justify-end gap-2 pt-1">
             <button
@@ -451,7 +485,7 @@ onUnmounted(() => {
             <button
               type="button"
               class="text-sm px-4 py-1.5 rounded-lg bg-violet-600 text-white hover:bg-violet-700 transition disabled:opacity-50"
-              :disabled="genTypes.length === 0"
+              :disabled="genError !== null"
               @click="onConfirmGenerate"
             >Сгенерировать</button>
           </div>

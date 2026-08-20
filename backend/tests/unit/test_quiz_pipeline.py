@@ -105,9 +105,8 @@ def gen_env(qp: ModuleType, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
 def _run_generate(qp: ModuleType, **overrides: Any) -> dict[str, Any]:
     args: dict[str, Any] = {
         "lesson_id": str(uuid.uuid4()),
-        "num_questions": 5,
+        "type_counts": {"single_choice": 5},
         "num_options": 4,
-        "types": ["single_choice"],
         "billing_ref": "hold-1",
         "billed_via": "credits",
         "owner_id": str(uuid.uuid4()),
@@ -137,19 +136,27 @@ def test_generate_quiz_charges_full_price_and_clears_handle(
 def test_generate_quiz_forwards_requested_shape_to_the_llm(
     qp: ModuleType, gen_env: SimpleNamespace
 ) -> None:
-    _run_generate(qp, num_questions=8, num_options=3, types=["true_false"])
+    _run_generate(qp, type_counts={"true_false": 6, "short_answer": 2}, num_options=3)
 
     assert gen_env.generate_kwargs == {
-        "num_questions": 8,
+        "type_counts": {"true_false": 6, "short_answer": 2},
         "num_options": 3,
-        "types": ["true_false"],
     }
 
 
-def test_generate_quiz_defaults_types_when_none(qp: ModuleType, gen_env: SimpleNamespace) -> None:
-    _run_generate(qp, types=None)
+def test_generate_quiz_drops_zero_count_types(qp: ModuleType, gen_env: SimpleNamespace) -> None:
+    """A type the teacher zeroed out never reaches the LLM."""
+    _run_generate(qp, type_counts={"single_choice": 2, "essay": 0})
 
-    assert gen_env.generate_kwargs["types"] == list(qp.QUIZ_TYPE_DISTRIBUTION.keys())
+    assert gen_env.generate_kwargs["type_counts"] == {"single_choice": 2}
+
+
+def test_generate_quiz_defaults_counts_when_empty(qp: ModuleType, gen_env: SimpleNamespace) -> None:
+    _run_generate(qp, type_counts={})
+
+    assert gen_env.generate_kwargs["type_counts"] == {
+        t: c for t, c in qp.QUIZ_DEFAULT_TYPE_COUNTS.items() if c > 0
+    }
 
 
 def test_generate_quiz_publishes_progress_steps(qp: ModuleType, gen_env: SimpleNamespace) -> None:

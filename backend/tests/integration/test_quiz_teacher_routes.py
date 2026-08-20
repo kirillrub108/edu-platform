@@ -312,7 +312,7 @@ async def test_first_load_does_not_trigger_lazy_relationship(
     r = await client.post(
         f"/api/v1/lessons/{lesson.id}/quiz/generate",
         cookies=teacher_token,
-        json={"num_questions": 1, "num_options": 2, "types": ["single_choice"]},
+        json={"type_counts": [{"type": "single_choice", "count": 1}], "num_options": 2},
     )
     # Lesson has no material → 409, but the important assertion is "not 500".
     assert r.status_code != 500, r.text

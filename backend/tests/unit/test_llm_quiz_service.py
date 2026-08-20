@@ -2,7 +2,7 @@
 
 Everything here stubs `llm_service.client`, so no network is touched. The
 subject under test is what the service does with what the model returned:
-payload validation (`_parse_payload_v2`), the requested type distribution,
+payload validation (`_parse_payload_v2`), the exact per-type counts,
 the one-shot retry in `_chat_json_validated`, and the anti-hallucination
 guards (ids come from our input, not from the model's echo).
 """
@@ -19,11 +19,9 @@ import pytest
 from app.constants import (
     QUIZ_LLM_OPEN_MAX_TOKENS,
     QUIZ_LLM_TEMPERATURE,
-    QUIZ_MIN_FOR_DISTRIBUTION,
 )
 from app.services.llm_service import (
     LLMOutputError,
-    _compute_type_counts,
     _parse_payload_v2,
     llm_service,
 )
@@ -75,40 +73,6 @@ _SINGLE = _q("single_choice", options=["a", "b", "c"], correct_index=1)
 _MULTI = _q("multiple_choice", options=["a", "b", "c"], correct_indices=[0, 2])
 _TF = _q("true_false", correct=True)
 _SHORT = _q("short_answer", reference_answer="ответ", rubric="критерий")
-
-
-# ── _compute_type_counts ──────────────────────────────────────────────────────
-
-
-def test_type_counts_below_threshold_all_go_to_first_type() -> None:
-    n = QUIZ_MIN_FOR_DISTRIBUTION - 1
-    counts = _compute_type_counts(n, ["single_choice", "true_false"])
-    assert counts == {"single_choice": n}
-
-
-def test_type_counts_single_type_takes_everything() -> None:
-    assert _compute_type_counts(10, ["true_false"]) == {"true_false": 10}
-
-
-def test_type_counts_distribute_and_sum_to_n() -> None:
-    types = ["single_choice", "multiple_choice", "true_false", "short_answer"]
-    counts = _compute_type_counts(10, types)
-    assert sum(counts.values()) == 10
-    assert counts["single_choice"] == 5
-    assert counts["multiple_choice"] == 3
-    # short_answer is last in `ordered`, so it absorbs the rounding remainder.
-    assert counts["short_answer"] == 10 - 5 - 3 - counts["true_false"]
-
-
-def test_type_counts_unknown_types_fall_back_to_first() -> None:
-    """Only the four `ordered` types participate; anything else degrades."""
-    assert _compute_type_counts(10, ["essay", "matching"]) == {"essay": 10}
-
-
-def test_type_counts_never_negative() -> None:
-    counts = _compute_type_counts(4, ["single_choice", "multiple_choice", "short_answer"])
-    assert all(c >= 0 for c in counts.values())
-    assert sum(counts.values()) == 4
 
 
 # ── _parse_payload_v2 / _check_options ────────────────────────────────────────
@@ -224,9 +188,13 @@ async def test_generate_quiz_returns_ordered_weighted_questions(
 
     out = await llm_service.generate_quiz_v2(
         "Материал лекции про энтропию",
-        num_questions=4,
+        type_counts={
+            "single_choice": 1,
+            "multiple_choice": 1,
+            "true_false": 1,
+            "short_answer": 1,
+        },
         num_options=3,
-        types=["single_choice", "multiple_choice", "true_false", "short_answer"],
     )
 
     assert [q["type"] for q in out] == [
@@ -248,7 +216,7 @@ async def test_generate_quiz_retries_once_then_succeeds(
     client = stub_llm("<think>oops</think>not json", json.dumps({"questions": [_SINGLE]}))
 
     out = await llm_service.generate_quiz_v2(
-        "Материал", num_questions=1, num_options=3, types=["single_choice"]
+        "Материал", type_counts={"single_choice": 1}, num_options=3
     )
 
     assert len(out) == 1
@@ -263,7 +231,7 @@ async def test_generate_quiz_raises_when_count_mismatches(
 
     with pytest.raises(LLMOutputError, match="expected 3 questions, got 2"):
         await llm_service.generate_quiz_v2(
-            "Материал", num_questions=3, num_options=3, types=["single_choice"]
+            "Материал", type_counts={"single_choice": 3}, num_options=3
         )
     assert len(client.calls) == 2  # retry budget spent, then give up
 
@@ -275,7 +243,7 @@ async def test_generate_quiz_rejects_disallowed_type(
 
     with pytest.raises(LLMOutputError, match="disallowed type"):
         await llm_service.generate_quiz_v2(
-            "Материал", num_questions=1, num_options=3, types=["single_choice"]
+            "Материал", type_counts={"single_choice": 1}, num_options=3
         )
 
 
@@ -286,7 +254,7 @@ async def test_generate_quiz_rejects_non_object_question(
 
     with pytest.raises(LLMOutputError, match="not an object"):
         await llm_service.generate_quiz_v2(
-            "Материал", num_questions=1, num_options=3, types=["single_choice"]
+            "Материал", type_counts={"single_choice": 1}, num_options=3
         )
 
 
@@ -298,19 +266,51 @@ async def test_generate_quiz_rejects_missing_questions_array(
 
     with pytest.raises(LLMOutputError, match="questions"):
         await llm_service.generate_quiz_v2(
-            "Материал", num_questions=1, num_options=3, types=["single_choice"]
+            "Материал", type_counts={"single_choice": 1}, num_options=3
         )
 
 
-async def test_generate_quiz_empty_types_defaults_to_single_choice(
+async def test_generate_quiz_rejects_an_all_zero_request(
     stub_llm: Callable[..., _RecordingClient],
 ) -> None:
     client = stub_llm(json.dumps({"questions": [_SINGLE]}))
 
-    out = await llm_service.generate_quiz_v2("Материал", num_questions=1, num_options=3, types=[])
+    with pytest.raises(ValueError, match="at least one question"):
+        await llm_service.generate_quiz_v2(
+            "Материал", type_counts={"single_choice": 0}, num_options=3
+        )
+    assert client.calls == []
 
-    assert out[0]["type"] == "single_choice"
-    assert "single_choice" in client.user_message()
+
+async def test_generate_quiz_enforces_the_exact_per_type_counts(
+    stub_llm: Callable[..., _RecordingClient],
+) -> None:
+    """The requested mix is a contract: 2 single + 1 true_false must not come
+    back as 3 single_choice, and the counts are never rebalanced."""
+    client = stub_llm(json.dumps({"questions": [_SINGLE, _SINGLE, _SINGLE]}))
+
+    with pytest.raises(LLMOutputError, match="expected 2 single_choice questions, got 3"):
+        await llm_service.generate_quiz_v2(
+            "Материал",
+            type_counts={"single_choice": 2, "true_false": 1},
+            num_options=3,
+        )
+    assert len(client.calls) == 2
+
+
+async def test_generate_quiz_skips_zero_count_types_in_the_prompt(
+    stub_llm: Callable[..., _RecordingClient],
+) -> None:
+    client = stub_llm(json.dumps({"questions": [_SINGLE]}))
+
+    out = await llm_service.generate_quiz_v2(
+        "Материал",
+        type_counts={"single_choice": 1, "true_false": 0},
+        num_options=3,
+    )
+
+    assert [q["type"] for q in out] == ["single_choice"]
+    assert "true_false" not in client.user_message()
 
 
 # ── grade_open_answer ─────────────────────────────────────────────────────────
