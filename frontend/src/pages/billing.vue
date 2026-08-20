@@ -52,19 +52,22 @@ const payError = ref('')
 // Mandatory consent before any purchase can be initiated.
 const acceptedPurchaseTerms = ref(false)
 
-const buyPack = async (key: string) => {
-  if (buyingKey.value || !acceptedPurchaseTerms.value) return
-  buyingKey.value = key
-  payError.value = ''
-  const r = await billing.createPayment(key)
-  if (r) {
-    // Keep the loading state — we're leaving for the YooKassa checkout page.
-    window.location.href = r.confirmation_url
-    return
-  }
-  payError.value = billing.error ?? 'Не удалось создать платёж'
-  buyingKey.value = null
-}
+const { ensureVerified } = useAiGuard()
+
+const buyPack = (key: string) =>
+  ensureVerified(async () => {
+    if (buyingKey.value || !acceptedPurchaseTerms.value) return
+    buyingKey.value = key
+    payError.value = ''
+    const r = await billing.createPayment(key)
+    if (r) {
+      // Keep the loading state — we're leaving for the YooKassa checkout page.
+      window.location.href = r.confirmation_url
+      return
+    }
+    payError.value = billing.error ?? 'Не удалось создать платёж'
+    buyingKey.value = null
+  })
 
 // ── Return from YooKassa (?payment_id=...) ─────────────────────────────────────
 
