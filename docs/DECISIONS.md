@@ -1369,3 +1369,39 @@ insufficient_credits` на первой же попытке. Сам `reserve_cre
   таблицы/квоты.
 - − Нет верхнего предела на число LLM-вызовов кроме рейт-лимита 5/мин — если это
   окажется недостаточным анти-абьюзом, квоту придётся добавить отдельно.
+
+## 50. Загрузки (`uploads.py`) переведены с `require_verified_teacher` на `require_teacher` (2026-08-20)
+
+**Контекст:** `require_verified_teacher` задуман как гейт именно для *AI-операций*
+(см. докстринг в `dependencies.py` и `AI_GATED_ENDPOINTS`), но исторически на него
+также навесили четыре чисто контентных эндпоинта в `routers/uploads.py` —
+`POST /pptx`, `POST /script`, `POST /video`, `POST /cover`. Ни один из них не
+вызывает LLM/vision/TTS: это просто сохранение файла на диск (и, для `/script`,
+локальная экстракция текста без сети). При этом ни один из них не входит в
+`AI_GATED_ENDPOINTS` — то есть даже guard-тест `test_ai_gating_guard.py` не считал
+их AI-операциями, и сам факт email-гейта на них был расхождением между кодом и
+задуманной семантикой. `routers/courses.py` (создание/изменение курса, модулей) и
+`routers/lessons.py` (создание урока) на момент проверки уже сидели на
+`require_teacher` — там расхождения не было, менять было нечего.
+
+**Решение:** заменить `Depends(require_verified_teacher)` на
+`Depends(require_teacher)` во всех четырёх upload-роутах. `require_verified_teacher`
+остаётся как есть и продолжает гейтить `POST /lessons/{id}/analyze`
+(`routers/slides.py`) и `POST /lessons/{id}/generate-video` (`routers/lessons.py`) —
+единственные два места, где он реально закрывает LLM/vision/TTS вызов.
+
+**Альтернативы:**
+- **Добавить uploads-эндпоинты в `AI_GATED_ENDPOINTS` вместо смены зависимости.**
+  Отклонено: это узаконило бы неверную предпосылку, что загрузка файла — AI-операция,
+  и лишь усложнило бы guard-тест без изменения продуктового смысла.
+- **Завести отдельный `require_teacher_no_email_check` алиас.** Отклонено:
+  `require_teacher` уже делает ровно то, что нужно (роль teacher, без проверки
+  email) — плодить синоним не по Simplicity First.
+
+**Trade-offs:**
+- + Неверифицированный email преподавателя больше не блокирует загрузку PPTX/скрипта/
+  видео/обложки — блокируются только реальные AI-запросы (analyze, generate-video
+  и уже существующие `require_verified_email`-эндпоинты).
+- + Код и `AI_GATED_ENDPOINTS` теперь согласованы: всё, что сидит на
+  `require_verified_teacher`/`require_verified_email`, действительно AI-операция.
+- − Не найдено.
