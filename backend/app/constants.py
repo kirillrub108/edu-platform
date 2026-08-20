@@ -478,7 +478,8 @@ CREDIT_WEIGHTS: dict[str, int] = {
     "vision_analyze": 5,  # vision-анализ PPTX → SlideText (без видео)
     "slide_regen": 1,  # регенерация одного слайда через vision LLM
     "quiz_generate": 5,  # AI-генерация квиза (полная цена и при перегенерации)
-    "ai_review": 2,  # AI-review вопросов квиза
+    # AI-review вопросов квиза — teacher QA pass, always free (see quiz_teacher.ai_review).
+    "ai_review": 0,
     "quiz_grade": 0,  # AI-проверка квиза в пределах месячной квоты — бесплатно
     # Один открытый ответ сверх AI_GRADING_FREE_ANSWERS_PER_MONTH.
     "quiz_grade_overage": 1,

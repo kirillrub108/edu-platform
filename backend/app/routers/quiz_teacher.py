@@ -589,37 +589,19 @@ async def ai_review(
         except EmptyMaterialError as exc:
             raise HTTPException(status_code=409, detail=str(exc))
 
-        # Charged only when the LLM is actually called (structured-only quizzes
-        # are reviewed deterministically for free). No trial — credits only.
-        amount = CREDIT_WEIGHTS["ai_review"]
-        billing_ref = f"ai-review:{quiz.id}:{uuid4().hex[:12]}"
-        if not await billing_service.reserve_credits(
-            db, user.id, amount, billing_ref, CreditOperation.AI_REVIEW
-        ):
-            balance = await billing_service.get_balance(db, user.id)
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "insufficient_credits",
-                    "required": amount,
-                    "available": balance["available"],
-                },
-            )
-
+        # Always free, deliberately not routed through billing_service: this is
+        # the teacher's own QA pass over their own quiz before publishing, not a
+        # student-facing generation. Free-plan accounts get 0 onetime credits
+        # (PLAN_CONFIGS) with no trial for this op, so reserving credits here
+        # would 402 every free-plan teacher on their first review. Abuse is
+        # bounded by the @limiter.limit above, not by balance.
         payload = [{"id": r.id, "type": r.type.value, "payload": r.payload} for r in open_ended]
         usage_service.set_usage_context("ai_review", lesson_id=lesson_id, quiz_id=quiz.id)
         try:
             llm_flags = await llm_service.qa_review_quiz(material, payload)
         except LLMOutputError as exc:
-            await billing_service.release_credits(db, user.id, amount, billing_ref)
             logger.warning("quiz_qa_review_llm_error", error=str(exc))
             raise HTTPException(status_code=502, detail=f"LLM returned invalid output: {exc}")
-        except Exception:
-            await billing_service.release_credits(db, user.id, amount, billing_ref)
-            raise
-        await billing_service.charge_credits(
-            db, user.id, amount, billing_ref, CreditOperation.AI_REVIEW
-        )
         open_ended_by_id = {f.question_id: f for f in llm_flags}
 
     return [structured.get(r.id) or open_ended_by_id[r.id] for r in rows]

@@ -182,4 +182,4 @@ async def test_estimate_endpoint_reports_trial_state(
     assert body["plan"] == "free"
     assert body["available"] == 0
     assert body["quiz_credits"] == 5
-    assert body["ai_review_credits"] == 2
+    assert body["ai_review_credits"] == 0
