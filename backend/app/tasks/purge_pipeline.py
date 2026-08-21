@@ -5,6 +5,14 @@ SOFT_DELETE_PURGE_DAYS, together with their files in storage. Runs on the
 `quiz` queue (served by the celery_quiz worker) and is triggered by Celery beat
 (see app/celery_app.py).
 
+One carve-out: an archived Course with at least one Enrollment is NEVER purged,
+no matter how old `deleted_at` is (`_course_purge_guard`). Archiving is a
+teacher-side action that does not revoke access for an already-enrolled student,
+so deleting the row — which cascades to modules, lessons, enrollments,
+lesson_progress, quiz attempts and submissions — would silently take away that
+student's own record. Only never-enrolled archived courses are purged, on the
+usual timing.
+
 Sync-only: like every task here it uses the psycopg2 `SyncSession`, never an
 AsyncSession. Because the global soft-delete filter (app/database.py) also
 applies to sync sessions, every SELECT in this module opts out with
@@ -18,7 +26,7 @@ import os
 import shutil
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Callable
+from typing import Callable, cast
 from urllib.parse import unquote
 
 import structlog
@@ -41,6 +49,7 @@ from app.constants import (
 )
 from app.models.assignment import Assignment, AssignmentAttachment, AssignmentSubmission
 from app.models.course import Course
+from app.models.enrollment import Enrollment
 from app.models.lesson import Lesson, Module
 from app.models.lesson_material import LessonMaterial
 from app.models.lesson_video import LessonVideo
@@ -263,6 +272,62 @@ def _purge_expired_submission_attachments(session: Session) -> int:
     return removed
 
 
+# ── Course purge eligibility ──────────────────────────────────────────────────
+
+
+def _course_purge_guard(cutoff: datetime) -> Callable[[Session, object], bool]:
+    """Build the veto `_purge_model` applies to each candidate Course.
+
+    Two things are re-checked here rather than trusted from the scan above,
+    because both can change between the scan and the DELETE:
+
+    * **Enrollments.** A course anybody is enrolled in is retained forever — see
+      the module docstring. Counted under the row lock, so the answer is the one
+      that holds at DELETE time.
+    * **Still archived, still old enough.** A teacher may have restored (or
+      re-archived) the course since the scan; the predicate is repeated in SQL so
+      such a row simply stops matching.
+
+    The `FOR UPDATE SKIP LOCKED` is what closes the enroll/purge race: inserting
+    an `enrollments` row takes a `FOR KEY SHARE` lock on its parent course, which
+    conflicts with `FOR UPDATE`. So either we take the lock first (a concurrent
+    enroll then blocks until our DELETE commits) or the enroller holds it and we
+    skip the course this run — by the next run its enrollment is committed and
+    visible, and the course is retained for good. Skipping is always safe: purge
+    is idempotent and re-scans daily.
+    """
+
+    def guard(session: Session, obj: object) -> bool:
+        course = cast(Course, obj)
+        locked = session.execute(
+            select(Course.id)
+            .where(
+                Course.id == course.id,
+                Course.deleted_at.isnot(None),
+                Course.deleted_at < cutoff,
+            )
+            .with_for_update(skip_locked=True)
+            .execution_options(include_deleted=True)
+        ).one_or_none()
+        if locked is None:
+            logger.info("purge_course_skipped", id=str(course.id), reason="locked_or_restored")
+            return False
+        enrollments = (
+            session.scalar(
+                select(func.count())
+                .select_from(Enrollment)
+                .where(Enrollment.course_id == course.id)
+            )
+            or 0
+        )
+        if enrollments:
+            logger.info("purge_course_retained", id=str(course.id), enrollments=int(enrollments))
+            return False
+        return True
+
+    return guard
+
+
 # ── Generic purge driver ──────────────────────────────────────────────────────
 
 
@@ -271,7 +336,13 @@ def _purge_model(
     model: type,
     cutoff: datetime,
     file_cleanup: Callable[[Session, object], None],
+    guard: Callable[[Session, object], bool] | None = None,
 ) -> int:
+    """Hard-delete every soft-deleted row of `model` older than `cutoff`.
+
+    `guard`, when given, is re-evaluated for each row inside the same
+    transaction as its DELETE and vetoes the deletion by returning False.
+    """
     rows = (
         session.execute(
             select(model)
@@ -284,6 +355,8 @@ def _purge_model(
     purged = 0
     for obj in rows:
         try:
+            if guard is not None and not guard(session, obj):
+                continue
             file_cleanup(session, obj)
             session.delete(obj)
             session.flush()
@@ -312,7 +385,9 @@ def purge_soft_deleted() -> dict:
     with SyncSession() as session:
         # Order: courses, then standalone lessons, then users. Lessons under an
         # already-purged course are gone via cascade and simply won't reappear.
-        counts["courses"] = _purge_model(session, Course, cutoff, _purge_course_files)
+        counts["courses"] = _purge_model(
+            session, Course, cutoff, _purge_course_files, guard=_course_purge_guard(cutoff)
+        )
         counts["lessons"] = _purge_model(session, Lesson, cutoff, _purge_lesson_files)
         counts["users"] = _purge_model(session, User, cutoff, _purge_user_files)
         # Retention sweep for graded submissions (independent of soft-delete).

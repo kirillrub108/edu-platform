@@ -148,6 +148,51 @@ async def test_archived_course_direct_url_accessible_for_enrolled_student(
     assert resp.status_code == 200
 
 
+async def test_enroll_into_an_archived_course_returns_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_token: dict[str, str],
+) -> None:
+    """Archive closes the course to NEW enrollments even while it is still
+    published — the two flags are independent levers. 404, not 400/403, so the
+    API never reveals that an archived course exists."""
+    course = await make_course(db_session, owner=teacher_user, is_published=True)
+    course.deleted_at = datetime.now(timezone.utc)
+    await db_session.commit()
+
+    resp = await client.post(
+        "/api/v1/students/enroll", json={"course_id": str(course.id)}, cookies=student_token
+    )
+    assert resp.status_code == 404
+
+
+async def test_grouped_hides_the_purge_countdown_for_an_enrolled_archived_course(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+    student_user: User,
+) -> None:
+    """An archived course with enrollments is retained forever, so the teacher
+    must not be shown a deletion countdown for it."""
+    empty = await make_course(db_session, owner=teacher_user)
+    enrolled = await make_course(db_session, owner=teacher_user, is_published=True)
+    await make_enrollment(db_session, student_user, enrolled)
+    now = datetime.now(timezone.utc)
+    empty.deleted_at = now
+    enrolled.deleted_at = now
+    await db_session.commit()
+
+    resp = await client.get("/api/v1/courses/grouped", cookies=teacher_token)
+    assert resp.status_code == 200
+    archived = {c["id"]: c for c in resp.json()["archived"]}
+
+    assert archived[str(empty.id)]["days_until_purge"] is not None
+    assert archived[str(enrolled.id)]["enrollment_count"] == 1
+    assert archived[str(enrolled.id)]["days_until_purge"] is None
+
+
 async def test_soft_delete_user_blocks_auth_and_anonymizes(
     client: AsyncClient,
     db_session: AsyncSession,
@@ -238,6 +283,59 @@ def test_purge_only_removes_records_older_than_threshold(sync_session: Session) 
     )
     assert old_id not in remaining
     assert recent_id in remaining
+
+
+def test_purge_never_removes_an_archived_course_with_enrollments(
+    sync_session: Session,
+) -> None:
+    """Archiving is teacher-side and does not revoke access, so a course anybody
+    is enrolled in is retained indefinitely — a hard delete would cascade away
+    the student's own enrollment, progress, attempts and submissions. A course
+    with zero enrollments still purges on the usual timing."""
+    from app.tasks.purge_pipeline import purge_soft_deleted
+
+    teacher = _make_user(sync_session)
+    student = _make_user(sync_session)
+    long_ago = datetime.now(timezone.utc) - timedelta(days=400)
+    enrolled = Course(title="enrolled", owner_id=teacher.id, deleted_at=long_ago)
+    empty = Course(title="empty", owner_id=teacher.id, deleted_at=long_ago)
+    sync_session.add_all([enrolled, empty])
+    sync_session.commit()
+    sync_session.add(Enrollment(student_id=student.id, course_id=enrolled.id))
+    sync_session.commit()
+    enrolled_id, empty_id = enrolled.id, empty.id
+
+    purge_soft_deleted()
+
+    sync_session.expire_all()
+    remaining = (
+        sync_session.execute(
+            select(Course.id)
+            .where(Course.owner_id == teacher.id)
+            .execution_options(include_deleted=True)
+        )
+        .scalars()
+        .all()
+    )
+    assert enrolled_id in remaining
+    assert empty_id not in remaining
+    # The enrollment itself (and everything cascading off it) survives too.
+    assert (
+        sync_session.scalar(select(Enrollment.id).where(Enrollment.course_id == enrolled_id))
+        is not None
+    )
+
+    # Idempotent: a second run keeps retaining it rather than catching up.
+    purge_soft_deleted()
+    sync_session.expire_all()
+    assert (
+        sync_session.scalar(
+            select(Course.id)
+            .where(Course.id == enrolled_id)
+            .execution_options(include_deleted=True)
+        )
+        is not None
+    )
 
 
 def test_purge_removes_stored_files(sync_session: Session) -> None:

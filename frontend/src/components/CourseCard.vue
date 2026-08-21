@@ -49,6 +49,8 @@ const lessonsLabel = computed(() => {
   return 'уроков'
 })
 
+// days_until_purge is null when the course is archived but has enrollments —
+// purge retains those forever, so the card shows a plain 'в архиве' badge.
 const purgeLabel = computed(() => {
   const d = props.course.days_until_purge
   if (d == null) return 'в архиве'
@@ -65,8 +67,10 @@ const onArchive = () => {
   if (
     typeof window !== 'undefined'
     && !window.confirm(
-      'Отправить курс в архив? Студенты потеряют доступ, а через 30 дней он будет '
-      + 'удалён безвозвратно. Восстановить можно в любой момент до удаления.',
+      'Отправить курс в архив? Он пропадёт из активного списка и закроется для новых '
+      + 'записей, но уже записанные студенты сохранят доступ к материалам. '
+      + 'Безвозвратно удаляется только курс, на который никто не записан — через 30 дней. '
+      + 'Восстановить можно в любой момент.',
     )
   ) return
   emit('archive', props.course.id)

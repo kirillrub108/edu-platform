@@ -114,11 +114,25 @@ async def list_courses_grouped(
             selectinload(Course.modules).selectinload(Module.lessons),
         )
     )
+    # One aggregate for every owned course: `days_until_purge` is suppressed for
+    # archived courses that have enrollments (purge retains those forever), so
+    # the archive section needs real counts, not the schema default of 0.
+    enrollment_counts = dict(
+        (
+            await db.execute(
+                select(Enrollment.course_id, func.count(Enrollment.id))
+                .join(Course, Enrollment.course_id == Course.id)
+                .where(Course.owner_id == user.id)
+                .group_by(Enrollment.course_id)
+            )
+        ).all()
+    )
     published: list[tuple[datetime, CourseOut]] = []
     drafts: list[tuple[datetime, CourseOut]] = []
     archived: list[tuple[datetime, CourseOut]] = []
     for course in result.all():
         course.lessons_count = sum(len(m.lessons) for m in course.modules)
+        course.enrollment_count = enrollment_counts.get(course.id, 0)
         out = _course_out(course, str(user.id))
         if course.deleted_at is not None:
             archived.append((course.deleted_at, out))
@@ -238,9 +252,13 @@ async def delete_course(
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ):
-    """Soft delete (archive): the course is hidden from students and physically
-    removed by the purge task after SOFT_DELETE_PURGE_DAYS. Idempotency guard:
-    409 if already archived."""
+    """Soft delete (archive): a teacher-side action that pulls the course out of
+    the active list and closes it to NEW enrollments. It does NOT revoke access
+    for students who are already enrolled — they keep the course exactly as
+    before (module/lesson `is_published` stays the only content-visibility
+    lever). The purge task physically removes the course after
+    SOFT_DELETE_PURGE_DAYS only when nobody is enrolled; with any enrollment it
+    is kept indefinitely. Idempotency guard: 409 if already archived."""
     course = await _get_owned_course(course_id, user, db)
     if course.deleted_at is not None:
         raise HTTPException(status_code=409, detail="Course already archived")

@@ -58,11 +58,13 @@ async def enroll(
     elif data.access_code:
         course = await db.scalar(select(Course).where(Course.access_code == data.access_code))
 
-    if not course:
-        raise HTTPException(status_code=404, detail="Course not available")
-    if course.deleted_at is not None:
-        raise HTTPException(status_code=400, detail="Course is not available")
-    if not course.is_published:
+    # Archive (`deleted_at`) and unpublish (`is_published`) are independent
+    # levers and either one closes the course to NEW enrollments — a course can
+    # be archived while still published, so both are checked. Both answer 404,
+    # never 400/403, so the API doesn't reveal that an archived or draft course
+    # exists. Neither affects a student who is ALREADY enrolled: see
+    # services/visibility_service.py.
+    if not course or course.deleted_at is not None or not course.is_published:
         raise HTTPException(status_code=404, detail="Course not available")
 
     existing = await db.scalar(

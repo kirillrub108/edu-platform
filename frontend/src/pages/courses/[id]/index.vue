@@ -105,6 +105,16 @@ const load = async () => {
   }
 }
 
+// Archiving never revokes access for already-enrolled students; it only hides
+// the course from the active list and blocks new enrollments. A course with
+// enrollments is also never purged, so the 30-day notice applies to empty
+// courses only. Mirrors backend CourseOut.days_until_purge.
+const archiveWarning = computed(() =>
+  (course.value?.enrollment_count ?? 0) > 0
+    ? 'В архив? Записанные студенты сохранят доступ, новых записей не будет. Курс не удаляется.'
+    : 'В архив? Новых записей не будет, через 30 дней курс будет удалён.',
+)
+
 const togglePublish = async () => {
   // Unpublishing a course with enrolled students no longer revokes their access
   // (it only closes the catalog/new-enroll gate) — warn before doing so. Same
@@ -480,7 +490,7 @@ onMounted(async () => {
             </UiButton>
             <template v-else>
               <span class="text-xs text-amber-600 self-center max-w-44 text-right leading-tight">
-                В архив? Студенты потеряют доступ, через 30 дней курс будет удалён.
+                {{ archiveWarning }}
               </span>
               <UiButton variant="danger" size="sm" class="whitespace-nowrap flex-shrink-0" :loading="archivingCourse" @click="archiveCourse">
                 В архив

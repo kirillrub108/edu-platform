@@ -667,9 +667,9 @@ watch(lessonId, (newId, oldId) => {
                   <span class="text-sm text-gray-500 w-36 shrink-0 tabular-nums">
                     {{ formatDate(video.created_at) }}
                   </span>
-                  <span class="text-sm text-gray-700">{{ voiceLabel(video.voice) }}</span>
+                  <span class="text-sm text-gray-700">голос {{ voiceLabel(video.voice) }}</span>
                   <span v-if="video.generation_seconds != null" class="text-sm text-gray-500 tabular-nums">
-                    {{ formatDuration(video.generation_seconds) }}
+                    время генерации {{ formatDuration(video.generation_seconds) }}
                   </span>
                   <span v-if="video.speed != null || video.pitch != null" class="text-sm text-gray-500">
                     <template v-if="video.speed != null">скорость {{ video.speed }}</template>

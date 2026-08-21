@@ -87,8 +87,15 @@ class CourseOut(BaseModel):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def days_until_purge(self) -> int | None:
-        """Whole days left before purge; None if not archived, clamped at 0."""
-        if self.deleted_at is None:
+        """Whole days left before purge, clamped at 0.
+
+        None when the course is not archived — and also when anybody is enrolled:
+        purge retains an archived course with at least one enrollment forever
+        (app/tasks/purge_pipeline.py), so there is no countdown to show. Callers
+        that surface this MUST populate `enrollment_count`, or the UI promises a
+        deletion that will never happen.
+        """
+        if self.deleted_at is None or self.enrollment_count > 0:
             return None
         deleted = self.deleted_at
         if deleted.tzinfo is None:
