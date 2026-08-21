@@ -271,7 +271,8 @@ const hint = computed(() => {
         <UiButton
           v-if="!latestPublished"
           variant="primary"
-          size="sm"
+          size="md"
+          class="!px-4 !py-2"
           :loading="publishing"
           type="button"
           @click="emit('publish')"
@@ -282,7 +283,7 @@ const hint = computed(() => {
           v-else
           class="text-xs bg-violet-100 text-violet-700 px-2.5 py-1 rounded-full font-medium"
         >Опубликовано</span>
-        <UiButton variant="secondary" size="sm" type="button" @click="emit('viewHistory')">
+        <UiButton variant="secondary" size="md" class="!px-4 !py-2" type="button" @click="emit('viewHistory')">
           Все генерации →
         </UiButton>
         <a
