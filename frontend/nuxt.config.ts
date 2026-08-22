@@ -4,7 +4,11 @@ export default defineNuxtConfig({
   modules: ['@nuxtjs/tailwindcss', '@pinia/nuxt'],
   // Hybrid rendering: SSG for landing, CSR for everything else
   routeRules: {
-    '/': { prerender: true },
+    // ssr: true is required here — without it, '/' would inherit ssr: false
+    // from the '/**' wildcard rule below, and prerender would only emit an
+    // empty SPA shell (no useSeoMeta output in the static HTML, which is why
+    // Yandex/search bots saw no <meta description>).
+    '/': { prerender: true, ssr: true },
     '/**': { ssr: false },
   },
   runtimeConfig: {
