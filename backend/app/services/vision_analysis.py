@@ -2,6 +2,7 @@ import asyncio
 import base64
 import hashlib
 import os
+import re
 from typing import Any
 
 import httpx
@@ -79,8 +80,13 @@ VISION_SYSTEM_PROMPT = """\
 6. КОНТЕКСТ КУРСА: Учитывай название курса и позицию слайда.
    Обеспечивай логический переход от предыдущих тем.
 
-7. ТОЛЬКО ТЕКСТ ОЗВУЧКИ: Не добавляй метаданные, заголовки, нумерацию.
-   Выведи только сам текст, который будет озвучен.
+7. ТОЛЬКО ТЕКСТ ОЗВУЧКИ: Выведи ИСКЛЮЧИТЕЛЬНО сам текст, который будет прочитан
+   вслух — и ничего больше.
+   - Никаких рассуждений, пояснений или комментариев до или после текста.
+   - Никаких служебных меток-заголовков вида «Текст озвучки:», «Озвучка:»,
+     «Script:», «Voiceover:» и подобных.
+   - Не оборачивай текст в кавычки любого вида.
+   - Не добавляй метаданные, нумерацию, markdown-разметку.
 
 Язык вывода: русский (если на слайде не указан другой язык явно).
 """
@@ -147,6 +153,53 @@ def _summarise_for_context(text: str, max_chars: int = 280) -> str:
     return cleaned[: max_chars - 1].rstrip() + "…"
 
 
+# Matches a label header only at the start of a line (not mid-sentence), so
+# "в этом тексте мы..." never matches — the label word(s) must be immediately
+# followed by ':'/'-'/'—'/'–'.
+_NARRATION_LABEL_RE = re.compile(
+    r"(?im)^[ \t]*(?:текст\s+озвучки|озвучка|script|voiceover)[ \t]*[:\-–—][ \t]*"
+)
+
+_QUOTE_PAIRS = (
+    ("«", "»"),
+    ("“", "”"),  # “ ”
+    ('"', '"'),
+    ("'", "'"),
+    ("‘", "’"),  # ‘ ’
+)
+
+
+def _sanitize_narration_text(raw_text: str, *, slide_number: int, lesson_id: Any = None) -> str:
+    """Strip LLM chatter from a raw narration response before it is stored.
+
+    Despite VISION_SYSTEM_PROMPT forbidding it, models sometimes still prepend
+    a label header ("Текст озвучки:", "Script:", ...) or wrap the whole
+    narration in quotes. If stripping empties the text, keep the raw text
+    instead of silently saving blank narration.
+    """
+    text = raw_text
+    matches = list(_NARRATION_LABEL_RE.finditer(text))
+    if matches:
+        text = text[matches[-1].end() :]
+    text = text.strip()
+
+    if len(text) >= 2:
+        for opener, closer in _QUOTE_PAIRS:
+            if text[0] == opener and text[-1] == closer:
+                text = text[1:-1].strip()
+                break
+
+    if not text:
+        logger.warning(
+            "vision_narration_sanitize_emptied",
+            slide_number=slide_number,
+            lesson_id=lesson_id,
+        )
+        return raw_text
+
+    return text
+
+
 class AnalysisCancelled(Exception):
     """Raised by analyze_presentation when its cancel_check fires; carries the
     number of slides fully processed before the stop."""
@@ -183,6 +236,7 @@ class VisionAnalysisService:
         total_slides: int,
         course_title: str,
         previous_context: str = "",
+        lesson_id: Any = None,
     ) -> str:
         """Return narration text for one slide."""
         user_content = _build_user_content(
@@ -194,8 +248,10 @@ class VisionAnalysisService:
         )
 
         if self.provider == "ollama":
-            return await self._call_ollama(user_content)
-        return await self._call_yandex(user_content)
+            text = await self._call_ollama(user_content)
+        else:
+            text = await self._call_yandex(user_content)
+        return _sanitize_narration_text(text, slide_number=slide_number, lesson_id=lesson_id)
 
     async def analyze_presentation(
         self,
@@ -203,6 +259,7 @@ class VisionAnalysisService:
         course_title: str,
         progress_cb: Any = None,
         cancel_check: Any = None,
+        lesson_id: Any = None,
     ) -> list[str]:
         """Analyse all slides sequentially with accumulated context.
 
@@ -226,6 +283,7 @@ class VisionAnalysisService:
                     total_slides=total,
                     course_title=course_title,
                     previous_context=previous_context,
+                    lesson_id=lesson_id,
                 )
             except Exception:
                 logger.exception("vision_analysis_failed", slide=slide_number)

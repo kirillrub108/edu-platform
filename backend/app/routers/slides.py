@@ -343,6 +343,7 @@ async def regenerate_slide_text(
             total_slides=total,
             course_title=lesson.title or "",
             previous_context=previous_context,
+            lesson_id=lesson_id,
         )
         text = await llm_service.refine_slide_narration(vision_text, model=settings.REGEN_LLM_MODEL)
     except Exception as exc:

@@ -188,6 +188,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                     course_title,
                     progress_cb=_on_progress,
                     cancel_check=lambda: _cancel_requested(session, lesson_uuid),
+                    lesson_id=lesson_id,
                 )
             )
 

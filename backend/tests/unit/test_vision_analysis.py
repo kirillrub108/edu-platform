@@ -10,7 +10,7 @@ import pytest
 from PIL import Image
 
 from app.services import vision_analysis as vis_mod
-from app.services.vision_analysis import VisionAnalysisService
+from app.services.vision_analysis import VisionAnalysisService, _sanitize_narration_text
 
 pytestmark = pytest.mark.unit
 
@@ -309,3 +309,68 @@ async def test_summarize_presentation_uses_disk_cache(
     assert result_1 == ["summary one"]
     assert result_2 == ["summary one"]
     assert call_count["n"] == 1  # second call served from cache
+
+
+# ── _sanitize_narration_text ────────────────────────────────────────────────
+
+
+def test_sanitize_narration_text_leaves_plain_text_untouched() -> None:
+    text = "Сегодня мы разберём основы алгоритмов сортировки."
+    assert _sanitize_narration_text(text, slide_number=1) == text
+
+
+def test_sanitize_narration_text_strips_label_and_quotes() -> None:
+    raw = 'Текст озвучки:\n"Сегодня мы разберём основы алгоритмов сортировки."'
+    assert (
+        _sanitize_narration_text(raw, slide_number=1)
+        == "Сегодня мы разберём основы алгоритмов сортировки."
+    )
+
+
+def test_sanitize_narration_text_strips_label_without_quotes() -> None:
+    raw = "Script: Сегодня мы разберём основы алгоритмов сортировки."
+    assert (
+        _sanitize_narration_text(raw, slide_number=1)
+        == "Сегодня мы разберём основы алгоритмов сортировки."
+    )
+
+
+def test_sanitize_narration_text_does_not_match_word_mid_sentence() -> None:
+    """Слово "текст" внутри содержательного предложения не должно матчиться как
+    метка — только явная метка в самом начале строки."""
+    raw = "В этом тексте мы поговорим о том, как устроены нейросети."
+    assert _sanitize_narration_text(raw, slide_number=1) == raw
+
+
+def test_sanitize_narration_text_falls_back_to_raw_when_emptied() -> None:
+    raw = 'Озвучка: ""'
+    assert _sanitize_narration_text(raw, slide_number=3, lesson_id="lesson-1") == raw
+
+
+async def test_analyze_slide_passes_lesson_id_to_sanitizer(
+    monkeypatch: pytest.MonkeyPatch, slide_png: Path
+) -> None:
+    """lesson_id threaded through analyze_slide must reach the sanitizer's
+    warning log, not just slide_number."""
+    svc = VisionAnalysisService()
+    monkeypatch.setattr(svc, "_ollama_client", _stub_ollama_client('Озвучка: ""'))
+
+    captured: dict[str, Any] = {}
+    original = vis_mod._sanitize_narration_text
+
+    def _spy(text: str, *, slide_number: int, lesson_id: Any = None) -> str:
+        captured["slide_number"] = slide_number
+        captured["lesson_id"] = lesson_id
+        return original(text, slide_number=slide_number, lesson_id=lesson_id)
+
+    monkeypatch.setattr(vis_mod, "_sanitize_narration_text", _spy)
+
+    await svc.analyze_slide(
+        slide_image_path=str(slide_png),
+        slide_number=2,
+        total_slides=5,
+        course_title="Course",
+        lesson_id="lesson-42",
+    )
+
+    assert captured == {"slide_number": 2, "lesson_id": "lesson-42"}

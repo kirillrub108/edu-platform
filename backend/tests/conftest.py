@@ -489,6 +489,7 @@ def mock_vision(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         total_slides: int,
         course_title: str,
         previous_context: str = "",
+        lesson_id: Any = None,
     ) -> str:
         state["analyze_calls"] += 1
         if state["analyze_raise"] is not None:
@@ -500,6 +501,7 @@ def mock_vision(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         course_title: str,
         progress_cb: Any = None,
         cancel_check: Any = None,
+        lesson_id: Any = None,
     ) -> list[str]:
         # Mirror the real per-slide-boundary cancellation contract.
         if cancel_check is not None and cancel_check():
