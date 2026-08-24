@@ -28,7 +28,7 @@ const render = new Function('Vue', code)(Vue)
 
 const ICON_PATHS = Object.fromEntries(SOCIAL_LINKS.map((l) => [l.key, 'M0 0']))
 
-function mount(variant: 'compact' | 'cards') {
+function mount(variant: 'compact' | 'cards' | 'menu') {
   const host = document.createElement('div')
   document.body.appendChild(host)
   const app = Vue.createApp({
@@ -69,8 +69,19 @@ describe('SocialLinks', () => {
     expect(host.querySelectorAll('svg[aria-hidden="true"]')).toHaveLength(SOCIAL_LINKS.length)
   })
 
-  it('renders labels only in the cards variant', () => {
+  it('hides labels only in the compact variant', () => {
     expect(mount('compact').querySelectorAll('.social-label')).toHaveLength(0)
-    expect(mount('cards').querySelector('.social-links')?.className).toContain('cards')
+    for (const variant of ['cards', 'menu'] as const) {
+      const host = mount(variant)
+      expect(host.querySelector('.social-links')?.className).toContain(variant)
+      expect(host.querySelectorAll('.social-label')).toHaveLength(SOCIAL_LINKS.length)
+    }
+  })
+
+  it('adds a hover tooltip only where the label is not visible', () => {
+    const titles = (v: 'compact' | 'menu') =>
+      [...mount(v).querySelectorAll('a')].map((a) => a.getAttribute('title'))
+    expect(titles('compact')).toEqual(SOCIAL_LINKS.map((l) => l.label))
+    expect(titles('menu')).toEqual(SOCIAL_LINKS.map(() => null))
   })
 })

@@ -82,6 +82,7 @@ const handleLogout = () => {
           <Bug class="w-3.5 h-3.5" />
           Написать нам
         </SupportContactLink>
+        <SocialLinksMenu />
         <NuxtLink
           v-if="isTeacher"
           to="/billing"
@@ -276,6 +277,13 @@ const handleLogout = () => {
               <Bug class="w-5 h-5 shrink-0" />
               Написать нам
             </SupportContactLink>
+
+            <!-- В шторке дропдаун внутри дропдауна не нужен — ссылки лежат
+                 списком сразу. -->
+            <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
+              Мы в соц. сетях
+            </div>
+            <SocialLinks variant="menu" />
 
             <template v-if="isAuthenticated">
               <button

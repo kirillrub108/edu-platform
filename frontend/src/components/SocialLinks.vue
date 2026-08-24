@@ -8,7 +8,7 @@
 // полагаться не стоит.
 import type { SocialKey } from '~/composables/useSocialLinks'
 
-withDefaults(defineProps<{ variant?: 'compact' | 'cards' }>(), { variant: 'compact' })
+withDefaults(defineProps<{ variant?: 'compact' | 'cards' | 'menu' }>(), { variant: 'compact' })
 
 const links = SOCIAL_LINKS
 
@@ -33,13 +33,14 @@ const ICON_PATHS: Record<SocialKey, string> = {
         :href="link.href"
         :style="{ '--brand': link.brandColor }"
         :aria-label="link.label"
+        :title="variant === 'compact' ? link.label : undefined"
         target="_blank"
         rel="noopener noreferrer"
       >
         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
           <path :d="ICON_PATHS[link.key]" fill="currentColor" fill-rule="evenodd" />
         </svg>
-        <span v-if="variant === 'cards'" class="social-label">{{ link.label }}</span>
+        <span v-if="variant !== 'compact'" class="social-label">{{ link.label }}</span>
       </a>
     </li>
   </ul>
@@ -129,6 +130,37 @@ const ICON_PATHS: Record<SocialKey, string> = {
   width: 26px;
   height: 26px;
 }
+/* Вертикальный список для выпадающего меню в шапке. Заливка на hover — лёгкий
+   тон бренда, а не сплошной цвет: в белом дропдауне сплошная заливка выглядит
+   тяжело, и на светлых брендах (Habr, Rutube) белый текст на ней нечитаем. */
+.social-links.menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.social-links.menu .social-link {
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: transparent;
+  border-color: transparent;
+}
+.social-links.menu .social-link:hover {
+  background: color-mix(in srgb, var(--brand) 12%, transparent);
+  border-color: transparent;
+  color: inherit;
+}
+/* Цветом бренда красится только иконка — подпись остаётся тёмной,
+   иначе на светлых брендах контраст падает ниже AA. */
+.social-links.menu .social-link:hover svg {
+  color: var(--brand);
+}
+.social-links.menu .social-link svg {
+  width: 20px;
+  height: 20px;
+}
+
 .social-links .social-label {
   font-size: 13px;
   font-weight: 600;
