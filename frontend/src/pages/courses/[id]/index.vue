@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Trash2, Archive, Eye } from 'lucide-vue-next'
+import { Trash2, Archive, Eye, Send, Undo2 } from 'lucide-vue-next'
 
 definePageMeta({ middleware: ['auth', 'teacher'] })
 
@@ -396,8 +396,8 @@ onMounted(async () => {
   <div v-else-if="course" class="max-w-5xl">
 
     <!-- Header -->
-    <div class="flex items-start justify-between mb-6">
-      <div class="flex gap-4">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6">
+      <div class="flex gap-4 min-w-0">
         <!-- Cover -->
         <div
           class="relative w-20 h-20 rounded-xl overflow-hidden border border-gray-200 flex-shrink-0 cursor-pointer group"
@@ -452,8 +452,8 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="flex flex-col items-end gap-2">
-        <div class="flex flex-nowrap justify-end gap-2 flex-shrink-0">
+      <div class="flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto">
+        <div class="flex flex-wrap justify-start sm:justify-end gap-2">
           <NuxtLink
             :to="previewCourseUrl"
             class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center inline-flex items-center gap-1.5 whitespace-nowrap flex-shrink-0"
@@ -472,7 +472,7 @@ onMounted(async () => {
           <!-- Active course: publish toggle + archive -->
           <template v-if="!course.is_archived">
             <button
-              class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 min-w-36 text-center whitespace-nowrap flex-shrink-0"
+              class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 sm:min-w-36 text-center whitespace-nowrap flex-shrink-0"
               :disabled="publishing"
               @click="togglePublish"
             >
@@ -567,9 +567,10 @@ onMounted(async () => {
 
       <div class="space-y-4 mb-4">
         <div v-for="m in course.modules" :key="m.id" class="bg-white border rounded-xl p-4">
-          <div class="font-medium text-gray-800 mb-3 flex items-center gap-2">
+          <div class="font-medium text-gray-800 mb-3 flex flex-wrap items-center gap-1.5 sm:gap-2">
             <span class="text-brand/60 text-xs font-mono shrink-0">M</span>
             <InlineEdit
+              class="flex-1 min-w-0"
               :value="m.title"
               display-class="font-medium text-gray-800"
               input-class="font-medium text-gray-800"
@@ -578,31 +579,38 @@ onMounted(async () => {
             />
             <span
               v-if="!m.is_published"
-              class="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500 shrink-0"
+              class="text-[10px] px-1.5 sm:text-xs sm:px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500 shrink-0"
             >
               Черновик
             </span>
             <span v-if="moduleTitleError[m.id]" class="text-xs text-rose-600">{{ moduleTitleError[m.id] }}</span>
-            <div class="ml-auto flex items-center gap-2">
+            <div class="ml-auto flex items-center gap-1 sm:gap-2 shrink-0">
               <NuxtLink
                 :to="previewModuleUrl(m.id)"
-                class="text-gray-300 hover:text-brand transition p-1"
+                class="shrink-0 text-gray-300 hover:text-brand transition inline-grid place-items-center w-8 h-8 sm:w-auto sm:h-auto sm:p-1"
                 title="Посмотреть модуль глазами студента"
               >
                 <Eye class="w-4 h-4" />
               </NuxtLink>
               <button
-                class="text-xs px-2 py-1 rounded-lg border transition disabled:opacity-40 whitespace-nowrap"
+                class="shrink-0 inline-grid place-items-center w-8 h-8 rounded-lg border text-xs transition disabled:opacity-40
+                       sm:inline-flex sm:w-auto sm:h-auto sm:px-2 sm:py-1 sm:whitespace-nowrap"
                 :class="m.is_published
                   ? 'border-gray-200 text-gray-600 hover:bg-gray-50'
                   : 'border-brand/40 text-brand hover:bg-brand/5'"
                 :disabled="togglingModule[m.id]"
+                :title="m.is_published ? 'Снять с публикации' : 'Опубликовать'"
+                :aria-label="m.is_published ? 'Снять с публикации' : 'Опубликовать'"
                 @click="toggleModulePublish(m)"
               >
-                {{ togglingModule[m.id] ? '…' : m.is_published ? 'Снять с публикации' : 'Опубликовать' }}
+                <template v-if="togglingModule[m.id]">…</template>
+                <template v-else>
+                  <component :is="m.is_published ? Undo2 : Send" class="w-3.5 h-3.5 sm:hidden" />
+                  <span class="hidden sm:inline">{{ m.is_published ? 'Снять с публикации' : 'Опубликовать' }}</span>
+                </template>
               </button>
               <button
-                class="text-gray-300 hover:text-red-500 transition disabled:opacity-40"
+                class="shrink-0 text-gray-300 hover:text-red-500 transition disabled:opacity-40 inline-grid place-items-center w-8 h-8 sm:w-auto sm:h-auto"
                 :disabled="deletingModule[m.id] || loading"
                 @click="deleteModule(m.id)"
               >
@@ -615,21 +623,24 @@ onMounted(async () => {
             <li v-for="l in m.lessons" :key="l.id" class="flex items-center gap-1 group/lesson">
               <NuxtLink
                 :to="`/lessons/${l.id}`"
-                class="flex-1 flex items-center justify-between rounded-lg px-3 py-2 hover:bg-gray-50 transition group border border-transparent hover:border-gray-200"
+                class="flex-1 min-w-0 flex items-center justify-between gap-1.5 sm:gap-2 rounded-lg px-2 py-2 sm:px-3 hover:bg-gray-50 transition group border border-transparent hover:border-gray-200"
               >
-                <span class="text-sm text-gray-800 group-hover:text-brand transition flex items-center gap-2">
-                  <span class="text-gray-300 text-xs">▶</span>
-                  {{ l.title }}
+                <span class="text-sm text-gray-800 group-hover:text-brand transition flex items-center gap-1.5 sm:gap-2 min-w-0">
+                  <span class="text-gray-300 text-xs shrink-0">▶</span>
+                  <span class="truncate">{{ l.title }}</span>
                 </span>
-                <span class="flex items-center gap-2">
+                <span class="flex items-center gap-1 sm:gap-2 shrink-0">
+                  <!-- Redundant on a phone: the publish button next to it already
+                       encodes the same state (icon + border colour), and the row
+                       only fits on one line if this chip stands down. -->
                   <span
                     v-if="!l.is_published"
-                    class="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500"
+                    class="hidden sm:inline text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500"
                   >
                     Черновик
                   </span>
                   <span
-                    class="text-xs px-2 py-0.5 rounded-full font-medium"
+                    class="text-[10px] px-1.5 sm:text-xs sm:px-2 py-0.5 rounded-full font-medium"
                     :class="statusColor[l.status] ?? 'bg-gray-100 text-gray-500'"
                   >
                     {{ statusLabel[l.status] ?? l.status }}
@@ -638,23 +649,30 @@ onMounted(async () => {
               </NuxtLink>
               <NuxtLink
                 :to="previewLessonUrl(l.id)"
-                class="text-gray-300 hover:text-brand transition p-1"
+                class="shrink-0 text-gray-300 hover:text-brand transition inline-grid place-items-center w-8 h-8 sm:w-auto sm:h-auto sm:p-1"
                 title="Посмотреть урок глазами студента"
               >
                 <Eye class="w-4 h-4" />
               </NuxtLink>
               <button
-                class="text-xs px-2 py-1 rounded-lg border transition disabled:opacity-40 whitespace-nowrap"
+                class="shrink-0 inline-grid place-items-center w-8 h-8 rounded-lg border text-xs transition disabled:opacity-40
+                       sm:inline-flex sm:w-auto sm:h-auto sm:px-2 sm:py-1 sm:whitespace-nowrap"
                 :class="l.is_published
                   ? 'border-gray-200 text-gray-600 hover:bg-gray-50'
                   : 'border-brand/40 text-brand hover:bg-brand/5'"
                 :disabled="togglingLesson[l.id]"
+                :title="l.is_published ? 'Снять с публикации' : 'Опубликовать'"
+                :aria-label="l.is_published ? 'Снять с публикации' : 'Опубликовать'"
                 @click="toggleLessonPublish(l)"
               >
-                {{ togglingLesson[l.id] ? '…' : l.is_published ? 'Снять' : 'Опубликовать' }}
+                <template v-if="togglingLesson[l.id]">…</template>
+                <template v-else>
+                  <component :is="l.is_published ? Undo2 : Send" class="w-3.5 h-3.5 sm:hidden" />
+                  <span class="hidden sm:inline">{{ l.is_published ? 'Снять' : 'Опубликовать' }}</span>
+                </template>
               </button>
               <button
-                class="text-gray-300 hover:text-red-500 transition opacity-0 group-hover/lesson:opacity-100 disabled:opacity-40 px-1"
+                class="shrink-0 text-gray-300 hover:text-red-500 transition opacity-100 sm:opacity-0 sm:group-hover/lesson:opacity-100 disabled:opacity-40 inline-grid place-items-center w-8 h-8 sm:w-auto sm:h-auto sm:px-1"
                 :disabled="deletingLesson[l.id] || loading"
                 @click="deleteLesson(l.id)"
               >
@@ -714,8 +732,8 @@ onMounted(async () => {
       <div v-if="course.access_code" class="space-y-5">
         <div>
           <p class="text-sm text-gray-600 mb-2">Код доступа — продиктуйте или отправьте студентам:</p>
-          <div class="flex gap-2 items-center">
-            <div class="flex-1 bg-gray-50 border rounded-xl px-6 py-4 text-3xl font-mono tracking-widest text-center text-gray-800 select-all">
+          <div class="flex flex-wrap gap-2 items-center">
+            <div class="flex-1 min-w-0 bg-gray-50 border rounded-xl px-3 py-3 text-2xl sm:px-6 sm:py-4 sm:text-3xl font-mono tracking-widest text-center text-gray-800 select-all break-all">
               {{ course.access_code }}
             </div>
             <button
@@ -725,8 +743,8 @@ onMounted(async () => {
               {{ copiedCode ? '✓ Скопировано' : 'Копировать' }}
             </button>
           </div>
-          <div class="flex items-center justify-end gap-2 mt-2">
-            <p class="text-xs text-gray-500 flex-1">После обновления старые ссылки перестанут работать.</p>
+          <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
+            <p class="text-xs text-gray-500 flex-1 min-w-0">После обновления старые ссылки перестанут работать.</p>
             <button
               class="text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 transition disabled:opacity-50"
               :disabled="accessLoading"

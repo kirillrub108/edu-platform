@@ -94,6 +94,16 @@ jobs:
         working-directory: frontend
         run: npm run test
 
+      # The vitest suite asserts sources as strings and never compiles an SFC,
+      # so a broken <template> passes it. Images are built ON THE SERVER at
+      # deploy time (see DECISIONS.md §46), which means without this step a
+      # broken template first fails in production, not here.
+      - name: Build frontend
+        working-directory: frontend
+        env:
+          NUXT_TELEMETRY_DISABLED: "1"
+        run: npm run build
+
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     needs: [test, frontend]

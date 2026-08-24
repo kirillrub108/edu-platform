@@ -1,5 +1,9 @@
 <script setup lang="ts">
-import { LogOut, Menu, MailWarning, Coins, Settings, Bug } from 'lucide-vue-next'
+import {
+  LogOut, Menu, X, MailWarning, Coins, Settings, Bug,
+  LayoutDashboard, BarChart3, Wallet, BookOpen, ClipboardList, FileQuestion,
+  type LucideIcon,
+} from 'lucide-vue-next'
 
 const auth = useAuthStore()
 const { user, isAuthenticated, isEmailVerified } = storeToRefs(auth)
@@ -23,17 +27,51 @@ watch(() => user.value?.role, (role) => {
 const initials = computed(() =>
   (user.value?.full_name || user.value?.email || '?').slice(0, 2).toUpperCase(),
 )
-const open = ref(false)
 
-const dashboardLink = computed(() =>
-  user.value?.role === 'teacher' ? '/dashboard' : '/student/dashboard',
-)
+const { isOpen, triggerRef, close, toggle } = useMobileMenu()
+
+interface NavItem {
+  to: string
+  label: string
+  icon: LucideIcon
+}
+
+// Mirrors of the desktop navigation: AppSidebar (teacher) and
+// StudentSidebar (student). Keep both lists in sync with their source.
+const TEACHER_NAV: NavItem[] = [
+  { to: '/dashboard', label: 'Мои курсы', icon: LayoutDashboard },
+  { to: '/analytics/quiz-results', label: 'Результаты тестов', icon: BarChart3 },
+  { to: '/billing', label: 'Баланс', icon: Wallet },
+]
+
+const STUDENT_NAV: NavItem[] = [
+  { to: '/student/dashboard', label: 'Дашборд', icon: LayoutDashboard },
+  { to: '/student/courses', label: 'Мои курсы', icon: BookOpen },
+  { to: '/student/assignments', label: 'Задания', icon: ClipboardList },
+  { to: '/student/quizzes', label: 'Тесты', icon: FileQuestion },
+  { to: '/student/results', label: 'Результаты', icon: BarChart3 },
+]
+
+const mobileNav = computed<NavItem[]>(() => {
+  if (!isAuthenticated.value) return []
+  return isTeacher.value ? TEACHER_NAV : STUDENT_NAV
+})
+
+const handleVerifyPrompt = () => {
+  close()
+  openVerifyPrompt()
+}
+
+const handleLogout = () => {
+  close()
+  logout()
+}
 </script>
 
 <template>
   <header class="bg-white border-b border-violet-100 sticky top-0 z-30">
-    <div class="px-6 h-16 flex items-center justify-between">
-      <NuxtLink to="/" class="flex items-center">
+    <div class="px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
+      <NuxtLink to="/" class="flex items-center min-w-0">
         <AppLogo />
       </NuxtLink>
 
@@ -112,13 +150,160 @@ const dashboardLink = computed(() =>
         </NuxtLink>
       </div>
 
-      <button
-        class="md:hidden w-9 h-9 grid place-items-center rounded-lg hover:bg-gray-100"
-        aria-label="Меню"
-        @click="open = !open"
-      >
-        <Menu class="w-5 h-5" />
-      </button>
+      <div class="md:hidden flex items-center gap-1.5 shrink-0">
+        <NuxtLink
+          v-if="isAuthenticated && isTeacher"
+          to="/billing"
+          class="flex items-center gap-1 px-2.5 h-11 rounded-lg text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-100 tabular-nums"
+          aria-label="Баланс кредитов"
+        >
+          <Coins class="w-3.5 h-3.5" />
+          {{ available }}
+        </NuxtLink>
+        <button
+          ref="triggerRef"
+          type="button"
+          class="w-11 h-11 grid place-items-center rounded-lg text-gray-700 hover:bg-gray-100 transition"
+          aria-label="Меню"
+          aria-controls="mobile-menu"
+          :aria-expanded="isOpen"
+          @click="toggle"
+        >
+          <Menu class="w-6 h-6" />
+        </button>
+      </div>
     </div>
+
+    <!-- Teleported to body so the sticky header's stacking context can never
+         clip or cover the drawer. -->
+    <Teleport to="body">
+      <Transition
+        :duration="150"
+        enter-active-class="transition-opacity duration-150"
+        leave-active-class="transition-opacity duration-150"
+        enter-from-class="opacity-0"
+        leave-to-class="opacity-0"
+      >
+        <div
+          v-if="isOpen"
+          class="md:hidden fixed inset-0 z-40 bg-black/40 backdrop-blur-sm"
+          @click="close"
+        />
+      </Transition>
+
+      <Transition
+        :duration="200"
+        enter-active-class="transition-transform duration-200"
+        leave-active-class="transition-transform duration-200"
+        enter-from-class="translate-x-full"
+        leave-to-class="translate-x-full"
+      >
+        <div
+          v-if="isOpen"
+          id="mobile-menu"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Главное меню"
+          class="md:hidden fixed inset-y-0 right-0 z-50 w-[85%] max-w-xs bg-white shadow-xl
+                 flex flex-col overflow-y-auto overscroll-contain"
+          style="padding-bottom: env(safe-area-inset-bottom)"
+        >
+          <div class="h-16 shrink-0 flex items-center justify-between px-4 border-b border-violet-100">
+            <span class="text-sm font-semibold text-gray-900">Меню</span>
+            <button
+              type="button"
+              class="w-11 h-11 -mr-2 grid place-items-center rounded-lg text-gray-500 hover:bg-gray-100 transition"
+              aria-label="Закрыть меню"
+              @click="close"
+            >
+              <X class="w-5 h-5" />
+            </button>
+          </div>
+
+          <div
+            v-if="isAuthenticated"
+            class="shrink-0 px-4 py-3 flex items-center gap-3 border-b border-gray-100"
+          >
+            <div class="w-10 h-10 shrink-0 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-sm font-semibold">
+              {{ initials }}
+            </div>
+            <div class="min-w-0 leading-tight">
+              <div class="text-sm font-medium text-gray-900 truncate">
+                {{ user?.full_name || user?.email }}
+              </div>
+              <div class="text-[11px] text-gray-500">
+                {{ isTeacher ? 'Автор' : 'Студент' }}
+              </div>
+            </div>
+          </div>
+
+          <nav v-if="mobileNav.length" class="p-2 flex flex-col gap-0.5">
+            <NuxtLink
+              v-for="item in mobileNav"
+              :key="item.to"
+              :to="item.to"
+              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-violet-50 hover:text-violet-700 transition"
+              active-class="!text-violet-700 !bg-violet-50"
+            >
+              <component :is="item.icon" class="w-5 h-5 shrink-0" />
+              <span class="min-w-0 truncate">{{ item.label }}</span>
+            </NuxtLink>
+          </nav>
+
+          <div class="mt-auto p-2 border-t border-gray-100 flex flex-col gap-0.5">
+            <button
+              v-if="isAuthenticated && user && !isEmailVerified"
+              type="button"
+              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 transition text-left"
+              @click="handleVerifyPrompt"
+            >
+              <MailWarning class="w-5 h-5 shrink-0" />
+              <span class="min-w-0">Почта не подтверждена</span>
+            </button>
+
+            <NuxtLink
+              v-if="isAuthenticated"
+              to="/account"
+              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              <Settings class="w-5 h-5 shrink-0" />
+              <span class="min-w-0 truncate">Настройки аккаунта</span>
+            </NuxtLink>
+
+            <SupportContactLink
+              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              <Bug class="w-5 h-5 shrink-0" />
+              Написать нам
+            </SupportContactLink>
+
+            <template v-if="isAuthenticated">
+              <button
+                type="button"
+                class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition text-left"
+                @click="handleLogout"
+              >
+                <LogOut class="w-5 h-5 shrink-0" />
+                Выйти
+              </button>
+            </template>
+            <template v-else>
+              <NuxtLink
+                to="/login"
+                class="flex items-center px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+              >
+                Войти
+              </NuxtLink>
+              <NuxtLink
+                to="/register"
+                class="flex items-center justify-center px-3 min-h-[44px] rounded-xl text-sm font-medium bg-brand-gradient text-white shadow-sm"
+              >
+                Создать аккаунт
+              </NuxtLink>
+            </template>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
   </header>
 </template>

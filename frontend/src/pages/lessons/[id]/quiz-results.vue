@@ -139,7 +139,7 @@ onMounted(load)
 <template>
   <div class="flex">
     <AppSidebar />
-    <main class="flex-1 px-6 lg:px-10 py-8">
+    <main class="flex-1 min-w-0 px-4 sm:px-6 lg:px-10 py-6 sm:py-8">
       <!-- Header -->
       <div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div class="flex items-center gap-3 min-w-0">
@@ -203,108 +203,110 @@ onMounted(load)
         </div>
 
         <!-- Data table -->
-        <table v-else-if="!loading && filteredItems.length > 0" class="w-full text-sm">
-          <thead class="bg-gray-50 text-gray-500">
-            <tr>
-              <th class="px-4 py-3 text-left font-medium">Студент</th>
-              <th class="px-4 py-3 text-center font-medium">Балл</th>
-              <th class="px-4 py-3 text-center font-medium">Статус</th>
-              <th class="px-4 py-3 text-left font-medium">Дата</th>
-              <th class="px-4 py-3 text-center font-medium w-10" title="Правка автором">
-                <Pencil class="w-3.5 h-3.5 mx-auto" />
-              </th>
-              <th class="px-4 py-3 text-right font-medium">Действия</th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-50">
-            <template v-for="item in filteredItems" :key="item.student_id">
-              <!-- Normal row -->
-              <tr
-                v-if="editingStudentId !== item.student_id"
-                class="hover:bg-violet-50/30 transition cursor-pointer"
-                @click="openPanel(item)"
-              >
-                <td class="px-4 py-3">
-                  <div class="text-gray-900 font-medium">
-                    {{ item.student_full_name || item.student_email }}
-                  </div>
-                  <div class="text-xs text-gray-500">{{ item.student_email }}</div>
-                </td>
-                <td class="px-4 py-3 text-center tabular-nums">
-                  <span class="font-medium" :class="scoreColor(item.quiz_score)">
-                    {{ pct(item.quiz_score) }}
-                  </span>
-                </td>
-                <td class="px-4 py-3 text-center">
-                  <span
-                    class="text-xs px-2 py-0.5 rounded-full"
-                    :class="statusBadge(item).cls"
-                  >{{ statusBadge(item).label }}</span>
-                </td>
-                <td class="px-4 py-3 text-gray-500 tabular-nums">
-                  {{ fmtDate(item.completed_at) }}
-                </td>
-                <td class="px-4 py-3 text-center">
-                  <Pencil
-                    v-if="item.edited_by_teacher"
-                    class="w-3.5 h-3.5 mx-auto text-violet-500"
-                    title="Балл скорректирован автором"
-                  />
-                </td>
-                <td class="px-4 py-3 text-right">
-                  <button
-                    class="text-xs text-violet-700 hover:text-violet-900 hover:underline transition"
-                    @click.stop="startEdit(item)"
-                  >
-                    Изменить балл
-                  </button>
-                </td>
+        <div v-else-if="!loading && filteredItems.length > 0" class="overflow-x-auto">
+          <table class="w-full min-w-[44rem] text-sm">
+            <thead class="bg-gray-50 text-gray-500">
+              <tr>
+                <th class="px-4 py-3 text-left font-medium">Студент</th>
+                <th class="px-4 py-3 text-center font-medium">Балл</th>
+                <th class="px-4 py-3 text-center font-medium">Статус</th>
+                <th class="px-4 py-3 text-left font-medium">Дата</th>
+                <th class="px-4 py-3 text-center font-medium w-10" title="Правка автором">
+                  <Pencil class="w-3.5 h-3.5 mx-auto" />
+                </th>
+                <th class="px-4 py-3 text-right font-medium">Действия</th>
               </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+              <template v-for="item in filteredItems" :key="item.student_id">
+                <!-- Normal row -->
+                <tr
+                  v-if="editingStudentId !== item.student_id"
+                  class="hover:bg-violet-50/30 transition cursor-pointer"
+                  @click="openPanel(item)"
+                >
+                  <td class="px-4 py-3">
+                    <div class="text-gray-900 font-medium">
+                      {{ item.student_full_name || item.student_email }}
+                    </div>
+                    <div class="text-xs text-gray-500">{{ item.student_email }}</div>
+                  </td>
+                  <td class="px-4 py-3 text-center tabular-nums">
+                    <span class="font-medium" :class="scoreColor(item.quiz_score)">
+                      {{ pct(item.quiz_score) }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <span
+                      class="text-xs px-2 py-0.5 rounded-full"
+                      :class="statusBadge(item).cls"
+                    >{{ statusBadge(item).label }}</span>
+                  </td>
+                  <td class="px-4 py-3 text-gray-500 tabular-nums">
+                    {{ fmtDate(item.completed_at) }}
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <Pencil
+                      v-if="item.edited_by_teacher"
+                      class="w-3.5 h-3.5 mx-auto text-violet-500"
+                      title="Балл скорректирован автором"
+                    />
+                  </td>
+                  <td class="px-4 py-3 text-right">
+                    <button
+                      class="text-xs text-violet-700 hover:text-violet-900 hover:underline transition"
+                      @click.stop="startEdit(item)"
+                    >
+                      Изменить балл
+                    </button>
+                  </td>
+                </tr>
 
-              <!-- Inline edit row -->
-              <tr v-else class="bg-violet-50/50">
-                <td colspan="6" class="px-4 py-4">
-                  <div class="flex flex-wrap gap-4 items-start">
-                    <div>
-                      <div class="text-sm font-medium text-gray-700 mb-1">
-                        {{ item.student_full_name || item.student_email }}
+                <!-- Inline edit row -->
+                <tr v-else class="bg-violet-50/50">
+                  <td colspan="6" class="px-4 py-4">
+                    <div class="flex flex-wrap gap-4 items-start">
+                      <div>
+                        <div class="text-sm font-medium text-gray-700 mb-1">
+                          {{ item.student_full_name || item.student_email }}
+                        </div>
+                        <label class="block text-xs text-gray-500 mb-1">Балл (%)</label>
+                        <input
+                          v-model.number="editScore"
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="1"
+                          class="w-24 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400"
+                          :class="{ 'border-rose-400': scoreErr }"
+                        >
+                        <div v-if="scoreErr" class="text-xs text-rose-600 mt-1">{{ scoreErr }}</div>
                       </div>
-                      <label class="block text-xs text-gray-500 mb-1">Балл (%)</label>
-                      <input
-                        v-model.number="editScore"
-                        type="number"
-                        min="0"
-                        max="100"
-                        step="1"
-                        class="w-24 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400"
-                        :class="{ 'border-rose-400': scoreErr }"
-                      >
-                      <div v-if="scoreErr" class="text-xs text-rose-600 mt-1">{{ scoreErr }}</div>
+                      <div class="flex-1 min-w-[200px]">
+                        <label class="block text-xs text-gray-500 mb-1">Причина (необязательно)</label>
+                        <textarea
+                          v-model="editReason"
+                          rows="2"
+                          class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400"
+                          placeholder="Комментарий к изменению балла"
+                        />
+                      </div>
+                      <div class="flex items-start gap-2 pt-5">
+                        <UiButton size="sm" :loading="saving" @click="save(item.student_id)">
+                          Сохранить
+                        </UiButton>
+                        <UiButton size="sm" variant="secondary" :disabled="saving" @click="cancelEdit">
+                          Отмена
+                        </UiButton>
+                      </div>
                     </div>
-                    <div class="flex-1 min-w-[200px]">
-                      <label class="block text-xs text-gray-500 mb-1">Причина (необязательно)</label>
-                      <textarea
-                        v-model="editReason"
-                        rows="2"
-                        class="w-full px-3 py-1.5 border border-gray-300 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400"
-                        placeholder="Комментарий к изменению балла"
-                      />
-                    </div>
-                    <div class="flex items-start gap-2 pt-5">
-                      <UiButton size="sm" :loading="saving" @click="save(item.student_id)">
-                        Сохранить
-                      </UiButton>
-                      <UiButton size="sm" variant="secondary" :disabled="saving" @click="cancelEdit">
-                        Отмена
-                      </UiButton>
-                    </div>
-                  </div>
-                  <div v-if="saveErr" class="text-xs text-rose-600 mt-2">{{ saveErr }}</div>
-                </td>
-              </tr>
-            </template>
-          </tbody>
-        </table>
+                    <div v-if="saveErr" class="text-xs text-rose-600 mt-2">{{ saveErr }}</div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
 

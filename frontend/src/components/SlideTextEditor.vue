@@ -256,7 +256,7 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
         class="bg-white rounded-2xl border border-gray-100 overflow-hidden shadow-soft"
       >
         <!-- top bar -->
-        <div class="px-5 py-3 border-b border-gray-100 flex items-center justify-between gap-3">
+        <div class="px-3 sm:px-5 py-3 border-b border-gray-100 flex flex-wrap items-center justify-between gap-2 sm:gap-3">
           <button
             type="button"
             class="text-sm text-violet-700 hover:text-violet-600 font-medium transition"
@@ -273,7 +273,7 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
 
           <div class="flex gap-1">
             <button
-              class="w-8 h-8 grid place-items-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
+              class="w-11 h-11 sm:w-8 sm:h-8 grid place-items-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
               :disabled="currentIdx === 0"
               aria-label="Предыдущий"
               @click="prev"
@@ -281,7 +281,7 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
               <ChevronLeft class="w-4 h-4" />
             </button>
             <button
-              class="w-8 h-8 grid place-items-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
+              class="w-11 h-11 sm:w-8 sm:h-8 grid place-items-center rounded-lg hover:bg-gray-100 disabled:opacity-30 transition"
               :disabled="currentIdx === slides.length - 1"
               aria-label="Следующий"
               @click="next"
@@ -292,7 +292,7 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
         </div>
 
         <!-- two-panel: slide preview + editor -->
-        <div class="grid grid-cols-1 md:grid-cols-5 gap-5 p-5">
+        <div class="grid grid-cols-1 md:grid-cols-5 gap-4 p-4 sm:gap-5 sm:p-5">
           <div class="md:col-span-2">
             <div class="aspect-[4/3] rounded-xl overflow-hidden bg-gray-50 border border-gray-200 shadow-sm grid place-items-center">
               <img

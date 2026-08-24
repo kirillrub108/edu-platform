@@ -170,11 +170,14 @@
       ...
   ```
 
-### 4.5 Нет eslint/prettier для frontend
+### 4.5 Frontend: нет eslint/prettier; typecheck есть, но не в CI и не зелёный
 
-- **Где:** репозиторий (frontend).
-- **Что не так:** backend линтуется `ruff` (правила E/F/I), а для frontend нет `eslint`/`prettier` — стиль и потенциальные баги в `.vue`/`.ts` не проверяются автоматически.
-- **Фикс:** `eslint` + `prettier` (vue-eslint-parser) и отдельный lint-job для frontend в CI.
+- **Где:** репозиторий (frontend), `.github/workflows/ci.yml`.
+- **Что не так:**
+  - backend линтуется `ruff` (правила E/F/I), а для frontend нет `eslint`/`prettier` — стиль и потенциальные баги в `.vue`/`.ts` не проверяются автоматически;
+  - `vue-tsc` добавлен в `devDependencies`, есть скрипт `npm run typecheck` (`nuxt typecheck`), но в CI он **не подключён**, потому что упадёт: на 2026-08-24 — 38 ошибок. Из них 31 — отсутствие `@types/node` в `tests/` и `vitest.config.ts` (`TS2591 process`, `TS2307 node:fs/node:url`), 1 — конфликт типов `vite`, который `vitest` тянет своей вложенной копией, и 6 реальных: `cover_image_url` не объявлен в типе курса студенческого стора (`src/pages/student/dashboard.vue`) и `never`-типизация `ym` в `src/plugins/metrika.client.ts`.
+- **Фикс:** `@types/node` в devDependencies + `types` в `tsconfig`, развести версии `vite`, закрыть 6 предметных ошибок — и только потом добавлять шаг `npm run typecheck` в job `frontend`. Отдельно: `eslint` + `prettier` (vue-eslint-parser) отдельным lint-job'ом.
+- **Закрыто в этой же области:** сборка фронта в CI (`npm run build` в job `frontend`, 2026-08-24). До этого CI гонял только `vitest`, который ассертит исходники строками и **не компилирует ни одного SFC**, а образы собираются на сервере при деплое (§46) — то есть битый `<template>` впервые падал на проде, а не в GitHub Actions.
 
 ### 4.6 Нет CHANGELOG.md · ~~нет CONTRIBUTING.md~~ (частично закрыто)
 

@@ -32,7 +32,7 @@ export interface VideoExample {
   hi: number
 }
 
-export interface VideoPricing {
+export interface LandingVideoPricing {
   textBase: number
   autoBase: number
   charsPerCredit: number
@@ -80,7 +80,7 @@ const VIDEO_AUTO_BASE = 3
 const CHARS_PER_CREDIT = 3000
 const AUTO_CHARS_PER_SLIDE = 600
 
-const VIDEO_PRICING: VideoPricing = {
+const VIDEO_PRICING: LandingVideoPricing = {
   textBase: VIDEO_TEXT_BASE,
   autoBase: VIDEO_AUTO_BASE,
   charsPerCredit: CHARS_PER_CREDIT,

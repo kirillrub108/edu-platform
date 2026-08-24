@@ -2,8 +2,11 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-COPY package.json ./
-RUN npm install
+# Reproducible install from the committed lockfile, same as Dockerfile.prod.
+# `npm install` (no lockfile) crashes on npm 10.9.8 with "Cannot read
+# properties of null (reading 'edgesOut')" while `npm ci` resolves fine.
+COPY package.json package-lock.json ./
+RUN npm ci
 
 # Keep an immutable snapshot of the freshly installed node_modules. The runtime
 # entrypoint copies it into /app/node_modules if the bind mount from the host is empty

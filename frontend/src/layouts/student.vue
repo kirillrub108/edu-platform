@@ -167,7 +167,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="flex flex-col h-screen overflow-hidden">
+  <div class="flex flex-col h-dvh overflow-hidden">
     <!-- Preview banner: fixed part of the layout, cannot be dismissed -->
     <div
       v-if="isPreview"
@@ -210,7 +210,7 @@ onMounted(async () => {
 
       <!-- Sidebar: fixed on mobile, static on desktop -->
       <aside
-        class="fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-100 flex flex-col
+        class="fixed inset-y-0 left-0 z-50 w-72 max-w-[85%] bg-white border-r border-gray-100 flex flex-col
                transition-transform duration-200 lg:static lg:translate-x-0"
         :class="studentStore.sidebarOpen ? 'translate-x-0' : '-translate-x-full'"
       >
@@ -350,12 +350,16 @@ onMounted(async () => {
       <!-- Main content area -->
       <div class="flex-1 flex flex-col overflow-hidden">
         <!-- Mobile sub-header: sidebar toggle -->
-        <div class="lg:hidden h-12 flex-shrink-0 bg-white border-b border-gray-100 flex items-center px-4">
+        <div class="lg:hidden h-14 flex-shrink-0 bg-white border-b border-gray-100 flex items-center px-2">
           <button
-            class="p-1.5 rounded-lg text-gray-600 hover:bg-gray-100 transition"
+            type="button"
+            class="flex items-center gap-2 h-11 px-3 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 transition"
+            aria-label="Открыть список уроков"
+            :aria-expanded="studentStore.sidebarOpen"
             @click="studentStore.sidebarOpen = true"
           >
             <Menu class="w-5 h-5" />
+            Уроки
           </button>
         </div>
 

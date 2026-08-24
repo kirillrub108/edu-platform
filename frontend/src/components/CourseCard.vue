@@ -143,7 +143,7 @@ const onPublishToggle = () => emit('publish', props.course.id)
     </div>
 
     <div class="p-5 flex flex-col flex-1">
-      <h3 class="font-semibold text-gray-900 text-lg leading-tight">{{ course.title }}</h3>
+      <h3 class="font-semibold text-gray-900 text-lg leading-tight break-words">{{ course.title }}</h3>
       <p v-if="course.description" class="text-sm text-gray-500 mt-1.5 line-clamp-2">
         {{ course.description }}
       </p>
@@ -153,7 +153,7 @@ const onPublishToggle = () => emit('publish', props.course.id)
           {{ lessonsCount }} {{ lessonsLabel }}
         </div>
       </div>
-      <div class="mt-auto pt-4 border-t border-gray-100 flex items-center justify-between text-sm">
+      <div class="mt-auto pt-4 border-t border-gray-100 flex flex-wrap items-center justify-between gap-2 text-sm">
         <template v-if="archived">
           <span class="inline-flex items-center gap-1.5 text-gray-500">
             <Archive class="w-3.5 h-3.5" />

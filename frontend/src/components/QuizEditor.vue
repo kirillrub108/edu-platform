@@ -427,10 +427,10 @@ onUnmounted(() => {
     <Teleport to="body">
       <div
         v-if="showGenModal"
-        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
         @click.self="showGenModal = false"
       >
-        <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md space-y-4">
+        <div class="bg-white rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md space-y-4 max-h-[85dvh] overflow-y-auto overscroll-contain">
           <h3 class="text-base font-semibold text-gray-900">Настройки генерации</h3>
 
           <div class="flex flex-col gap-2">
@@ -444,7 +444,7 @@ onUnmounted(() => {
               <div class="flex items-center gap-1">
                 <button
                   type="button"
-                  class="w-7 h-7 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition disabled:opacity-40"
+                  class="w-9 h-9 sm:w-7 sm:h-7 shrink-0 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition disabled:opacity-40"
                   :disabled="!generationOptions || row.count <= generationOptions.min_per_type"
                   :aria-label="`Меньше: ${GENERATABLE_TYPE_LABELS[row.type]}`"
                   @click="setGenCount(row.type, row.count - 1)"
@@ -461,7 +461,7 @@ onUnmounted(() => {
                 />
                 <button
                   type="button"
-                  class="w-7 h-7 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition disabled:opacity-40"
+                  class="w-9 h-9 sm:w-7 sm:h-7 shrink-0 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition disabled:opacity-40"
                   :disabled="!generationOptions || row.count >= generationOptions.max_per_type"
                   :aria-label="`Больше: ${GENERATABLE_TYPE_LABELS[row.type]}`"
                   @click="setGenCount(row.type, row.count + 1)"

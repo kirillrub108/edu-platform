@@ -45,7 +45,7 @@ onMounted(restoreScroll)
 </script>
 
 <template>
-  <div class="px-6 py-12 sm:py-16 flex justify-center">
+  <div class="px-0 sm:px-6 py-10 sm:py-16 flex justify-center">
     <div class="w-full max-w-sm">
       <div class="mb-6 text-center">
         <div class="mb-3 flex justify-center">
@@ -55,7 +55,7 @@ onMounted(restoreScroll)
         <p class="mt-1 text-sm text-gray-500">Начните создавать видеолекции бесплатно</p>
       </div>
 
-      <div class="rounded-2xl border border-gray-100 bg-white p-8 shadow-soft">
+      <div class="rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
         <!-- Role toggle -->
         <div class="mb-2 flex overflow-hidden rounded-xl border border-gray-200">
           <button

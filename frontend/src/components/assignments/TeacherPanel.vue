@@ -215,58 +215,60 @@ watch(
         <p v-else-if="submissions.length === 0" class="text-sm text-gray-400">
           Пока никто не сдал.
         </p>
-        <table v-else class="w-full text-sm">
-          <tbody class="divide-y divide-gray-50">
-            <tr v-for="s in submissions" :key="s.id">
-              <td class="py-2 pr-2">
-                <div class="text-gray-800">{{ s.student_name ?? s.student_email }}</div>
-                <div class="text-xs text-gray-400">{{ s.student_email }}</div>
-              </td>
-              <td class="py-2 px-2 text-center">
-                <AssignmentsStatusPill :status="s.status" />
-              </td>
-              <td class="py-2 px-2 text-center tabular-nums text-gray-600">
-                <span v-if="s.points_awarded !== null">
-                  {{ s.points_awarded }} / {{ a.max_points }}
-                </span>
-                <span v-else class="text-gray-400">—</span>
-              </td>
-              <!-- Attachment retention: when the files go, and how to keep them -->
-              <td class="py-2 px-2 text-center whitespace-nowrap">
-                <template v-if="s.attachment_count > 0 && s.attachments_expire_at">
-                  <div class="text-xs text-gray-500">
-                    Файлы до {{ expiryLabel(s.attachments_expire_at) }}
-                  </div>
-                  <button
-                    v-if="canExtend(s)"
-                    type="button"
-                    class="mt-1 text-xs font-medium text-violet-700 hover:text-violet-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                    :disabled="extendingId === s.id"
-                    @click="extendRetention(s)"
-                  >
-                    {{
-                      extendingId === s.id
-                        ? 'Продлеваем…'
-                        : `Продлить · ${s.retention_extension_credits} кр.`
-                    }}
-                  </button>
-                  <div v-else-if="retentionGone[s.id]" class="mt-1 text-xs text-gray-400">
-                    Файлы уже удалены
-                  </div>
-                  <div v-if="retentionError[s.id]" class="mt-1 text-xs text-rose-600">
-                    {{ retentionError[s.id] }}
-                  </div>
-                </template>
-                <span v-else class="text-xs text-gray-300">—</span>
-              </td>
-              <td class="py-2 pl-2 text-right">
-                <UiButton size="sm" variant="secondary" @click="reviewId = s.id">
-                  Проверить
-                </UiButton>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="overflow-x-auto">
+          <table class="w-full min-w-[34rem] text-sm">
+            <tbody class="divide-y divide-gray-50">
+              <tr v-for="s in submissions" :key="s.id">
+                <td class="py-2 pr-2">
+                  <div class="text-gray-800">{{ s.student_name ?? s.student_email }}</div>
+                  <div class="text-xs text-gray-400">{{ s.student_email }}</div>
+                </td>
+                <td class="py-2 px-2 text-center">
+                  <AssignmentsStatusPill :status="s.status" />
+                </td>
+                <td class="py-2 px-2 text-center tabular-nums text-gray-600">
+                  <span v-if="s.points_awarded !== null">
+                    {{ s.points_awarded }} / {{ a.max_points }}
+                  </span>
+                  <span v-else class="text-gray-400">—</span>
+                </td>
+                <!-- Attachment retention: when the files go, and how to keep them -->
+                <td class="py-2 px-2 text-center whitespace-nowrap">
+                  <template v-if="s.attachment_count > 0 && s.attachments_expire_at">
+                    <div class="text-xs text-gray-500">
+                      Файлы до {{ expiryLabel(s.attachments_expire_at) }}
+                    </div>
+                    <button
+                      v-if="canExtend(s)"
+                      type="button"
+                      class="mt-1 text-xs font-medium text-violet-700 hover:text-violet-800 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      :disabled="extendingId === s.id"
+                      @click="extendRetention(s)"
+                    >
+                      {{
+                        extendingId === s.id
+                          ? 'Продлеваем…'
+                          : `Продлить · ${s.retention_extension_credits} кр.`
+                      }}
+                    </button>
+                    <div v-else-if="retentionGone[s.id]" class="mt-1 text-xs text-gray-400">
+                      Файлы уже удалены
+                    </div>
+                    <div v-if="retentionError[s.id]" class="mt-1 text-xs text-rose-600">
+                      {{ retentionError[s.id] }}
+                    </div>
+                  </template>
+                  <span v-else class="text-xs text-gray-300">—</span>
+                </td>
+                <td class="py-2 pl-2 text-right">
+                  <UiButton size="sm" variant="secondary" @click="reviewId = s.id">
+                    Проверить
+                  </UiButton>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <AssignmentsReview
           v-if="reviewId"

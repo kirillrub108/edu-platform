@@ -43,14 +43,14 @@ const submit = async () => {
 </script>
 
 <template>
-  <div class="px-6 py-10 flex justify-center">
+  <div class="px-0 sm:px-6 py-8 sm:py-10 flex justify-center">
     <div class="w-full max-w-md">
       <div class="mb-6">
         <h1 class="text-xl font-semibold text-gray-900">Настройки аккаунта</h1>
         <p class="mt-1 text-sm text-gray-500">{{ user?.email }}</p>
       </div>
 
-      <div class="rounded-2xl border border-gray-100 bg-white p-8 shadow-soft">
+      <div class="rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
         <h2 class="mb-4 text-base font-semibold text-gray-900">Смена пароля</h2>
         <form class="space-y-4" @submit.prevent="submit">
           <UiInput

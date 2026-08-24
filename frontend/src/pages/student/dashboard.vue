@@ -72,18 +72,18 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="max-w-5xl mx-auto p-6 lg:p-8">
+  <div class="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
     <h1 class="text-2xl font-semibold text-gray-900 mb-8">Дашборд</h1>
 
     <!-- ── Продолжить обучение ──────────────────────────────────── -->
     <section class="mb-10">
       <div class="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
         <h2 class="text-base font-semibold text-gray-700">Продолжить обучение</h2>
-        <form class="flex gap-2 sm:ml-auto" @submit.prevent="handleEnroll">
+        <form class="flex gap-2 sm:ml-auto min-w-0" @submit.prevent="handleEnroll">
           <input
             v-model="enrollCode"
             placeholder="Код доступа"
-            class="w-44 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-violet-400"
+            class="flex-1 min-w-0 sm:flex-none sm:w-44 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-violet-400"
           />
           <button
             type="submit"

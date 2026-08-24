@@ -126,7 +126,7 @@ onMounted(async () => {
 <template>
   <div class="flex">
     <AppSidebar />
-    <main class="flex-1 px-6 lg:px-10 py-8">
+    <main class="flex-1 min-w-0 px-4 sm:px-6 lg:px-10 py-8">
       <div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div>
           <div class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Автор</div>
@@ -141,30 +141,33 @@ onMounted(async () => {
       </div>
 
       <!-- compact stats bar -->
-      <div class="grid grid-cols-3 gap-3 mb-6">
-        <div class="bg-white border border-gray-100 rounded-2xl px-4 py-3 flex items-center gap-3 shadow-soft">
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-6">
+        <div class="bg-white border border-gray-100 rounded-2xl px-3 py-3 sm:px-4 shadow-soft
+                    flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
           <div class="w-9 h-9 rounded-lg bg-violet-100 text-violet-700 grid place-items-center">
             <BookOpen class="w-4 h-4" />
           </div>
-          <div class="leading-tight">
+          <div class="leading-tight min-w-0">
             <div class="text-xl font-semibold tabular-nums">{{ stats.total }}</div>
             <div class="text-xs text-gray-500">всего курсов</div>
           </div>
         </div>
-        <div class="bg-white border border-gray-100 rounded-2xl px-4 py-3 flex items-center gap-3 shadow-soft">
+        <div class="bg-white border border-gray-100 rounded-2xl px-3 py-3 sm:px-4 shadow-soft
+                    flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
           <div class="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 grid place-items-center">
             <CheckCircle2 class="w-4 h-4" />
           </div>
-          <div class="leading-tight">
+          <div class="leading-tight min-w-0">
             <div class="text-xl font-semibold tabular-nums">{{ stats.published }}</div>
             <div class="text-xs text-gray-500">опубликовано</div>
           </div>
         </div>
-        <div class="bg-white border border-gray-100 rounded-2xl px-4 py-3 flex items-center gap-3 shadow-soft">
+        <div class="bg-white border border-gray-100 rounded-2xl px-3 py-3 sm:px-4 shadow-soft
+                    flex flex-col items-start gap-2 sm:flex-row sm:items-center sm:gap-3">
           <div class="w-9 h-9 rounded-lg bg-fuchsia-100 text-fuchsia-700 grid place-items-center">
             <Layers class="w-4 h-4" />
           </div>
-          <div class="leading-tight">
+          <div class="leading-tight min-w-0">
             <div class="text-xl font-semibold tabular-nums">{{ stats.lessons }}</div>
             <div class="text-xs text-gray-500">уроков всего</div>
           </div>

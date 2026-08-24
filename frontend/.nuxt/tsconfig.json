@@ -16,6 +16,9 @@
       "@vue/compiler-sfc": [
         "../node_modules/@vue/compiler-sfc"
       ],
+      "unplugin-vue-router/client": [
+        "../node_modules/unplugin-vue-router/client"
+      ],
       "@nuxt/schema": [
         "../node_modules/@nuxt/schema"
       ],
@@ -34,12 +37,6 @@
       "crossws": [
         "../node_modules/crossws"
       ],
-      "unplugin-vue-router/client": [
-        "../node_modules/unplugin-vue-router/client"
-      ],
-      "nitropack": [
-        "../node_modules/nitropack"
-      ],
       "vite/client": [
         "../node_modules/vite/client"
       ],
@@ -48,6 +45,9 @@
       ],
       "nitropack/runtime": [
         "../node_modules/nitropack/runtime"
+      ],
+      "nitropack": [
+        "../node_modules/nitropack"
       ],
       "~": [
         "../src"

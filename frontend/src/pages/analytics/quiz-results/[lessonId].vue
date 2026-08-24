@@ -86,7 +86,7 @@ onMounted(async () => {
 <template>
   <div class="flex">
     <AppSidebar />
-    <main class="flex-1 px-6 lg:px-10 py-8">
+    <main class="flex-1 min-w-0 px-4 sm:px-6 lg:px-10 py-6 sm:py-8">
       <!-- Breadcrumb -->
       <nav class="text-sm text-gray-500 mb-4 flex items-center gap-2">
         <NuxtLink to="/analytics/quiz-results" class="hover:text-violet-700 transition">
@@ -169,44 +169,46 @@ onMounted(async () => {
             <p class="text-sm">Никто ещё не сдавал этот тест.</p>
           </div>
 
-          <table v-else-if="submissions" class="w-full text-sm">
-            <thead class="bg-gray-50 text-gray-500">
-              <tr>
-                <th class="px-4 py-3 text-left font-medium">Студент</th>
-                <th class="px-4 py-3 text-left font-medium">Email</th>
-                <th class="px-4 py-3 text-center font-medium">Балл</th>
-                <th class="px-4 py-3 text-center font-medium">Статус</th>
-                <th class="px-4 py-3 text-left font-medium">Дата</th>
-              </tr>
-            </thead>
-            <tbody class="divide-y divide-gray-50">
-              <tr v-for="s in submissions.items" :key="`${s.student_id}-${s.lesson_id}`">
-                <td class="px-4 py-3 text-gray-900">{{ studentLabel(s.student_full_name, s.student_email) }}</td>
-                <td class="px-4 py-3 text-gray-500">{{ s.student_email }}</td>
-                <td class="px-4 py-3 text-center tabular-nums">
-                  <span
-                    class="font-medium"
-                    :class="s.passed ? 'text-emerald-600' : 'text-rose-600'"
-                  >{{ pct(s.score) }}</span>
-                </td>
-                <td class="px-4 py-3 text-center">
-                  <span
-                    v-if="s.passed"
-                    class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full"
-                  >пройден</span>
-                  <span
-                    v-else
-                    class="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full"
-                  >не сдан</span>
-                </td>
-                <td class="px-4 py-3 text-gray-500 tabular-nums">{{ fmtDate(s.completed_at) }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div v-else-if="submissions" class="overflow-x-auto">
+            <table class="w-full min-w-[46rem] text-sm">
+              <thead class="bg-gray-50 text-gray-500">
+                <tr>
+                  <th class="px-4 py-3 text-left font-medium">Студент</th>
+                  <th class="px-4 py-3 text-left font-medium">Email</th>
+                  <th class="px-4 py-3 text-center font-medium">Балл</th>
+                  <th class="px-4 py-3 text-center font-medium">Статус</th>
+                  <th class="px-4 py-3 text-left font-medium">Дата</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-gray-50">
+                <tr v-for="s in submissions.items" :key="`${s.student_id}-${s.lesson_id}`">
+                  <td class="px-4 py-3 text-gray-900">{{ studentLabel(s.student_full_name, s.student_email) }}</td>
+                  <td class="px-4 py-3 text-gray-500">{{ s.student_email }}</td>
+                  <td class="px-4 py-3 text-center tabular-nums">
+                    <span
+                      class="font-medium"
+                      :class="s.passed ? 'text-emerald-600' : 'text-rose-600'"
+                    >{{ pct(s.score) }}</span>
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <span
+                      v-if="s.passed"
+                      class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full"
+                    >пройден</span>
+                    <span
+                      v-else
+                      class="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full"
+                    >не сдан</span>
+                  </td>
+                  <td class="px-4 py-3 text-gray-500 tabular-nums">{{ fmtDate(s.completed_at) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
 
           <div
             v-if="submissions && submissions.total > pageSize"
-            class="flex items-center justify-between px-4 py-3 border-t border-gray-100 text-sm"
+            class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-100 text-sm"
           >
             <div class="text-gray-500">
               Страница {{ submissions.page }} из {{ totalPages }} · всего {{ submissions.total }}

@@ -97,7 +97,7 @@ const numberClass =
       @blur="promptTouched = true"
     />
 
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
       <div class="space-y-1.5">
         <label class="block text-sm font-medium text-gray-700">Максимальный балл</label>
         <input v-model.number="maxPoints" type="number" min="1" :class="numberClass" />

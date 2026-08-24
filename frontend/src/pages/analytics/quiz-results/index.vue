@@ -148,7 +148,7 @@ onMounted(async () => {
 <template>
   <div class="flex">
     <AppSidebar />
-    <main class="flex-1 px-6 lg:px-10 py-8">
+    <main class="flex-1 min-w-0 px-4 sm:px-6 lg:px-10 py-6 sm:py-8">
       <div class="flex items-center justify-between mb-6 gap-4 flex-wrap">
         <div>
           <div class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Аналитика</div>
@@ -161,8 +161,8 @@ onMounted(async () => {
       </div>
 
       <!-- KPI cards -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <div class="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 shadow-soft">
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <div class="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 shadow-soft min-w-0">
           <div class="w-10 h-10 rounded-xl bg-violet-100 text-violet-700 grid place-items-center">
             <BarChart3 class="w-5 h-5" />
           </div>
@@ -173,7 +173,7 @@ onMounted(async () => {
             <div class="text-xs text-gray-500 mt-1">тестов в курсах</div>
           </div>
         </div>
-        <div class="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 shadow-soft">
+        <div class="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 shadow-soft min-w-0">
           <div class="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 grid place-items-center">
             <Users class="w-5 h-5" />
           </div>
@@ -184,7 +184,7 @@ onMounted(async () => {
             <div class="text-xs text-gray-500 mt-1">всего попыток</div>
           </div>
         </div>
-        <div class="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 shadow-soft">
+        <div class="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 shadow-soft min-w-0">
           <div class="w-10 h-10 rounded-xl bg-fuchsia-100 text-fuchsia-700 grid place-items-center">
             <TrendingUp class="w-5 h-5" />
           </div>
@@ -195,7 +195,7 @@ onMounted(async () => {
             <div class="text-xs text-gray-500 mt-1">средний балл</div>
           </div>
         </div>
-        <div class="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 shadow-soft">
+        <div class="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3 shadow-soft min-w-0">
           <div class="w-10 h-10 rounded-xl bg-emerald-100 text-emerald-700 grid place-items-center">
             <Target class="w-5 h-5" />
           </div>
@@ -290,101 +290,103 @@ onMounted(async () => {
           <p class="text-sm">Студенты ещё не проходили тесты</p>
         </div>
 
-        <table v-else-if="page" class="w-full text-sm">
-          <thead class="bg-gray-50 text-gray-500">
-            <tr>
-              <th
-                class="px-4 py-3 text-left font-medium cursor-pointer select-none"
-                @click="setSort('lesson_title')"
+        <div v-else-if="page" class="overflow-x-auto">
+          <table class="w-full min-w-[52rem] text-sm">
+            <thead class="bg-gray-50 text-gray-500">
+              <tr>
+                <th
+                  class="px-4 py-3 text-left font-medium cursor-pointer select-none"
+                  @click="setSort('lesson_title')"
+                >
+                  <span class="inline-flex items-center gap-1">
+                    Урок
+                    <component :is="sortIconFor('lesson_title')" class="w-3.5 h-3.5" />
+                  </span>
+                </th>
+                <th
+                  class="px-4 py-3 text-center font-medium cursor-pointer select-none"
+                  @click="setSort('attempts_count')"
+                >
+                  <span class="inline-flex items-center gap-1">
+                    Попыток
+                    <component :is="sortIconFor('attempts_count')" class="w-3.5 h-3.5" />
+                  </span>
+                </th>
+                <th class="px-4 py-3 text-center font-medium">Студентов</th>
+                <th
+                  class="px-4 py-3 text-center font-medium cursor-pointer select-none"
+                  @click="setSort('avg_score')"
+                >
+                  <span class="inline-flex items-center gap-1">
+                    Средний балл
+                    <component :is="sortIconFor('avg_score')" class="w-3.5 h-3.5" />
+                  </span>
+                </th>
+                <th
+                  class="px-4 py-3 text-center font-medium cursor-pointer select-none"
+                  @click="setSort('pass_rate')"
+                >
+                  <span class="inline-flex items-center gap-1">
+                    % сдавших
+                    <component :is="sortIconFor('pass_rate')" class="w-3.5 h-3.5" />
+                  </span>
+                </th>
+                <th
+                  class="px-4 py-3 text-left font-medium cursor-pointer select-none"
+                  @click="setSort('last_attempt_at')"
+                >
+                  <span class="inline-flex items-center gap-1">
+                    Последняя попытка
+                    <component :is="sortIconFor('last_attempt_at')" class="w-3.5 h-3.5" />
+                  </span>
+                </th>
+                <th class="px-4 py-3 w-12" />
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-50">
+              <tr
+                v-for="row in page.items"
+                :key="row.lesson_id"
+                class="hover:bg-violet-50/40 cursor-pointer transition"
+                @click="openLesson(row.lesson_id)"
               >
-                <span class="inline-flex items-center gap-1">
-                  Урок
-                  <component :is="sortIconFor('lesson_title')" class="w-3.5 h-3.5" />
-                </span>
-              </th>
-              <th
-                class="px-4 py-3 text-center font-medium cursor-pointer select-none"
-                @click="setSort('attempts_count')"
-              >
-                <span class="inline-flex items-center gap-1">
-                  Попыток
-                  <component :is="sortIconFor('attempts_count')" class="w-3.5 h-3.5" />
-                </span>
-              </th>
-              <th class="px-4 py-3 text-center font-medium">Студентов</th>
-              <th
-                class="px-4 py-3 text-center font-medium cursor-pointer select-none"
-                @click="setSort('avg_score')"
-              >
-                <span class="inline-flex items-center gap-1">
-                  Средний балл
-                  <component :is="sortIconFor('avg_score')" class="w-3.5 h-3.5" />
-                </span>
-              </th>
-              <th
-                class="px-4 py-3 text-center font-medium cursor-pointer select-none"
-                @click="setSort('pass_rate')"
-              >
-                <span class="inline-flex items-center gap-1">
-                  % сдавших
-                  <component :is="sortIconFor('pass_rate')" class="w-3.5 h-3.5" />
-                </span>
-              </th>
-              <th
-                class="px-4 py-3 text-left font-medium cursor-pointer select-none"
-                @click="setSort('last_attempt_at')"
-              >
-                <span class="inline-flex items-center gap-1">
-                  Последняя попытка
-                  <component :is="sortIconFor('last_attempt_at')" class="w-3.5 h-3.5" />
-                </span>
-              </th>
-              <th class="px-4 py-3 w-12" />
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-gray-50">
-            <tr
-              v-for="row in page.items"
-              :key="row.lesson_id"
-              class="hover:bg-violet-50/40 cursor-pointer transition"
-              @click="openLesson(row.lesson_id)"
-            >
-              <td class="px-4 py-3">
-                <div class="text-gray-900 font-medium">{{ row.lesson_title }}</div>
-                <div class="text-xs text-gray-500">
-                  {{ row.course_title }} · {{ row.module_title }}
-                </div>
-              </td>
-              <td class="px-4 py-3 text-center tabular-nums text-gray-700">
-                {{ row.attempts_count }}
-              </td>
-              <td class="px-4 py-3 text-center tabular-nums text-gray-700">
-                {{ row.students_count }}
-              </td>
-              <td class="px-4 py-3 text-center tabular-nums text-gray-700">
-                {{ pct(row.avg_score) }}
-              </td>
-              <td class="px-4 py-3 text-center tabular-nums">
-                <span
-                  v-if="row.pass_rate !== null"
-                  :class="row.pass_rate >= 0.6 ? 'text-emerald-600' : 'text-rose-600'"
-                >{{ pct(row.pass_rate) }}</span>
-                <span v-else class="text-gray-400">—</span>
-              </td>
-              <td class="px-4 py-3 text-gray-500 tabular-nums">
-                {{ fmtDate(row.last_attempt_at) }}
-              </td>
-              <td class="px-4 py-3 text-gray-400">
-                <ChevronRightIcon class="w-4 h-4" />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+                <td class="px-4 py-3">
+                  <div class="text-gray-900 font-medium">{{ row.lesson_title }}</div>
+                  <div class="text-xs text-gray-500">
+                    {{ row.course_title }} · {{ row.module_title }}
+                  </div>
+                </td>
+                <td class="px-4 py-3 text-center tabular-nums text-gray-700">
+                  {{ row.attempts_count }}
+                </td>
+                <td class="px-4 py-3 text-center tabular-nums text-gray-700">
+                  {{ row.students_count }}
+                </td>
+                <td class="px-4 py-3 text-center tabular-nums text-gray-700">
+                  {{ pct(row.avg_score) }}
+                </td>
+                <td class="px-4 py-3 text-center tabular-nums">
+                  <span
+                    v-if="row.pass_rate !== null"
+                    :class="row.pass_rate >= 0.6 ? 'text-emerald-600' : 'text-rose-600'"
+                  >{{ pct(row.pass_rate) }}</span>
+                  <span v-else class="text-gray-400">—</span>
+                </td>
+                <td class="px-4 py-3 text-gray-500 tabular-nums">
+                  {{ fmtDate(row.last_attempt_at) }}
+                </td>
+                <td class="px-4 py-3 text-gray-400">
+                  <ChevronRightIcon class="w-4 h-4" />
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
 
         <!-- Pagination -->
         <div
           v-if="page && page.total > pageSize"
-          class="flex items-center justify-between px-4 py-3 border-t border-gray-100 text-sm"
+          class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-100 text-sm"
         >
           <div class="text-gray-500">
             Страница {{ page.page }} из {{ totalPages }} · всего {{ page.total }}

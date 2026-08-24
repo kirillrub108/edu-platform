@@ -313,6 +313,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
               class="flex items-center gap-2 text-sm"
             >
               <input
+                class="shrink-0"
                 type="radio"
                 :name="`q-${q.id}`"
                 :checked="singleChoiceSelected(q.id) === oi"
@@ -329,6 +330,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
               class="flex items-center gap-2 text-sm"
             >
               <input
+                class="shrink-0"
                 type="checkbox"
                 :checked="mcSelected(q.id).includes(oi)"
                 @change="() => toggleMc(q.id, oi)"
@@ -371,10 +373,10 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
               :key="li"
               class="flex items-center gap-2 text-sm"
             >
-              <span class="flex-1">{{ left }}</span>
-              <span class="text-gray-400">→</span>
+              <span class="flex-1 min-w-0 break-words">{{ left }}</span>
+              <span class="text-gray-400 shrink-0">→</span>
               <select
-                class="rounded-lg border border-gray-200 px-2 py-1"
+                class="min-w-0 max-w-[45%] sm:max-w-none shrink rounded-lg border border-gray-200 px-2 py-1"
                 :value="matchingValue(q, li) ?? ''"
                 @change="(e: any) => setMatching(q, li, e.target.value === '' ? -1 : Number(e.target.value))"
               >
@@ -391,9 +393,9 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
               class="flex items-center gap-2 text-sm"
             >
               <span class="text-xs text-gray-500 w-4">{{ i + 1 }}.</span>
-              <span class="flex-1">{{ item.text }}</span>
-              <button type="button" class="text-xs" :disabled="i === 0" @click="moveOrdering(q, i, -1)">↑</button>
-              <button type="button" class="text-xs" :disabled="i === q.payload.items.length - 1" @click="moveOrdering(q, i, 1)">↓</button>
+              <span class="flex-1 min-w-0 break-words">{{ item.text }}</span>
+              <button type="button" class="shrink-0 grid place-items-center w-11 h-11 sm:w-7 sm:h-7 rounded-lg hover:bg-gray-100 disabled:opacity-30 transition" aria-label="Выше" :disabled="i === 0" @click="moveOrdering(q, i, -1)">↑</button>
+              <button type="button" class="shrink-0 grid place-items-center w-11 h-11 sm:w-7 sm:h-7 rounded-lg hover:bg-gray-100 disabled:opacity-30 transition" aria-label="Ниже" :disabled="i === q.payload.items.length - 1" @click="moveOrdering(q, i, 1)">↓</button>
             </div>
           </template>
 
@@ -460,7 +462,7 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
   >
     <div class="flex items-center justify-between gap-3 flex-wrap">
       <h3 class="text-base font-semibold text-gray-900">Мои попытки</h3>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <span class="text-sm text-gray-500">Итоговая оценка:</span>
         <span
           v-if="attemptsData.final_score !== null"
@@ -486,36 +488,38 @@ const setBlank = (q: StudentQuestion, idx: number, val: string) => {
       </div>
     </div>
 
-    <table class="w-full text-sm">
-      <thead>
-        <tr class="text-left text-gray-500 border-b border-gray-100">
-          <th class="pb-2 font-medium w-10">№</th>
-          <th class="pb-2 font-medium">Дата</th>
-          <th class="pb-2 font-medium text-center">Балл</th>
-          <th class="pb-2 font-medium text-center">Результат</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-50">
-        <tr
-          v-for="a in attemptsData.attempts"
-          :key="a.id"
-          class="text-gray-700"
-        >
-          <td class="py-2 tabular-nums">{{ a.attempt_number }}</td>
-          <td class="py-2 tabular-nums text-gray-500 text-xs">{{ fmtDate(a.attempted_at) }}</td>
-          <td class="py-2 text-center tabular-nums font-medium"
-            :class="a.passed ? 'text-green-600' : 'text-red-600'"
+    <div class="overflow-x-auto">
+      <table class="w-full min-w-[26rem] text-sm">
+        <thead>
+          <tr class="text-left text-gray-500 border-b border-gray-100">
+            <th class="pb-2 font-medium w-10">№</th>
+            <th class="pb-2 font-medium">Дата</th>
+            <th class="pb-2 font-medium text-center">Балл</th>
+            <th class="pb-2 font-medium text-center">Результат</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-50">
+          <tr
+            v-for="a in attemptsData.attempts"
+            :key="a.id"
+            class="text-gray-700"
           >
-            <span v-if="a.score !== null">{{ Math.round(a.score * 100) }}%</span>
-            <span v-else class="text-gray-400 font-normal">—</span>
-          </td>
-          <td class="py-2 text-center">
-            <span v-if="a.passed === true" title="Сдан">✓</span>
-            <span v-else-if="a.passed === false" class="text-red-500" title="Не сдан">✗</span>
-            <span v-else class="text-gray-500 text-xs">проверка…</span>
-          </td>
-        </tr>
-      </tbody>
-    </table>
+            <td class="py-2 tabular-nums">{{ a.attempt_number }}</td>
+            <td class="py-2 tabular-nums text-gray-500 text-xs">{{ fmtDate(a.attempted_at) }}</td>
+            <td class="py-2 text-center tabular-nums font-medium"
+              :class="a.passed ? 'text-green-600' : 'text-red-600'"
+            >
+              <span v-if="a.score !== null">{{ Math.round(a.score * 100) }}%</span>
+              <span v-else class="text-gray-400 font-normal">—</span>
+            </td>
+            <td class="py-2 text-center">
+              <span v-if="a.passed === true" title="Сдан">✓</span>
+              <span v-else-if="a.passed === false" class="text-red-500" title="Не сдан">✗</span>
+              <span v-else class="text-gray-500 text-xs">проверка…</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </section>
 </template>

@@ -182,7 +182,7 @@ const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScoZQb5VAXVRV2
 <template>
   <div class="flex">
     <AppSidebar />
-    <main class="flex-1 min-w-0 px-6 lg:px-10 py-8">
+    <main class="flex-1 min-w-0 px-4 sm:px-6 lg:px-10 py-6 sm:py-8">
       <!-- Header -->
       <div class="mb-6">
         <div class="text-xs text-gray-500 mb-1 uppercase tracking-wide">Автор</div>
@@ -220,7 +220,7 @@ const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScoZQb5VAXVRV2
               <Coins class="w-4 h-4" /> Доступно для генерации
             </div>
             <div class="mt-1 flex items-baseline gap-2">
-              <span class="text-5xl font-semibold tabular-nums leading-none">
+              <span class="text-4xl sm:text-5xl font-semibold tabular-nums leading-none">
                 {{ loadingBalance && balance === null ? '—' : available }}
               </span>
               <span class="text-lg opacity-70">кредитов</span>
@@ -228,14 +228,14 @@ const GOOGLE_FORM_URL = 'https://docs.google.com/forms/d/e/1FAIpQLScoZQb5VAXVRV2
           </div>
 
           <!-- balance breakdown -->
-          <div class="flex gap-3">
-            <div class="rounded-2xl bg-white/10 px-4 py-3 min-w-[110px]">
+          <div class="flex flex-wrap gap-3">
+            <div class="flex-1 sm:flex-initial rounded-2xl bg-white/10 px-4 py-3 sm:min-w-[110px]">
               <div class="text-xs opacity-75 inline-flex items-center gap-1">
                 <Wallet class="w-3.5 h-3.5" /> Всего
               </div>
               <div class="text-2xl font-semibold tabular-nums mt-0.5">{{ total }}</div>
             </div>
-            <div class="rounded-2xl bg-white/10 px-4 py-3 min-w-[110px]">
+            <div class="flex-1 sm:flex-initial rounded-2xl bg-white/10 px-4 py-3 sm:min-w-[110px]">
               <div class="text-xs opacity-75 inline-flex items-center gap-1">
                 <Lock class="w-3.5 h-3.5" /> В резерве
               </div>

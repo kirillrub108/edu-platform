@@ -260,14 +260,14 @@ onMounted(load)
 
     <div
       v-else
-      class="relative overflow-auto border border-gray-200 rounded-xl bg-white shadow-soft max-h-[70vh]"
+      class="relative overflow-auto border border-gray-200 rounded-xl bg-white shadow-soft max-h-[70dvh]"
     >
       <table class="min-w-full text-sm border-collapse" role="grid">
         <thead>
           <tr class="bg-gray-50">
             <th
               scope="col"
-              class="sticky top-0 left-0 z-20 bg-gray-50 border-b border-r border-gray-200 px-4 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap"
+              class="sticky top-0 left-0 z-20 bg-gray-50 border-b border-r border-gray-200 px-3 sm:px-4 py-2.5 text-left font-medium text-gray-600 whitespace-nowrap max-w-[9rem] sm:max-w-none"
             >
               Студент
             </th>
@@ -308,10 +308,10 @@ onMounted(load)
           >
             <th
               scope="row"
-              class="sticky left-0 z-10 bg-inherit border-b border-r border-gray-100 px-4 py-2 text-left whitespace-nowrap"
+              class="sticky left-0 z-10 bg-inherit border-b border-r border-gray-100 px-3 sm:px-4 py-2 text-left whitespace-nowrap max-w-[9rem] sm:max-w-none"
             >
-              <div class="font-medium text-gray-900">{{ row.student_name }}</div>
-              <div class="text-xs text-gray-500">{{ row.student_email }}</div>
+              <div class="font-medium text-gray-900 truncate">{{ row.student_name }}</div>
+              <div class="text-xs text-gray-500 truncate">{{ row.student_email }}</div>
             </th>
 
             <td
@@ -395,7 +395,7 @@ onMounted(load)
           role="dialog"
           aria-modal="true"
           aria-label="Редактор балла"
-          class="absolute w-72 bg-white rounded-xl shadow-hero border border-gray-100 p-4"
+          class="absolute w-72 max-w-[calc(100vw-2rem)] max-h-[80dvh] overflow-y-auto overscroll-contain bg-white rounded-xl shadow-hero border border-gray-100 p-4"
           :style="editorStyle"
           @keydown="onEditorKeydown"
         >

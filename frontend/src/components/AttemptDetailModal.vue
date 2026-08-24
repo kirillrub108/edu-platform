@@ -121,7 +121,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       <div class="absolute inset-0 bg-gray-900/40" @click="emit('close')" />
 
       <div
-        class="relative bg-white rounded-2xl border border-gray-100 shadow-xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden"
+        class="relative bg-white rounded-2xl border border-gray-100 shadow-xl w-full max-w-3xl max-h-[85dvh] flex flex-col overflow-hidden"
       >
         <header class="px-5 py-4 border-b border-gray-100 flex items-center justify-between gap-3">
           <div class="min-w-0">
@@ -132,14 +132,14 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             </p>
           </div>
           <button
-            class="shrink-0 w-8 h-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 grid place-items-center transition"
+            class="shrink-0 w-11 h-11 -mr-2 sm:w-8 sm:h-8 sm:mr-0 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 grid place-items-center transition"
             @click="emit('close')"
           >
             <X class="w-4 h-4" />
           </button>
         </header>
 
-        <div class="flex-1 overflow-y-auto">
+        <div class="flex-1 overflow-y-auto overflow-x-auto overscroll-contain">
           <div v-if="loading" class="p-6 space-y-3">
             <div v-for="i in 4" :key="i" class="h-12 rounded-lg bg-gray-100 animate-pulse" />
           </div>
@@ -152,7 +152,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             <div>{{ errMsg }}</div>
           </div>
 
-          <table v-else-if="detail" class="w-full text-sm">
+          <table v-else-if="detail" class="w-full min-w-[40rem] text-sm">
             <thead class="bg-gray-50 text-gray-500 sticky top-0">
               <tr>
                 <th class="px-3 py-2.5 text-left font-medium w-8">#</th>

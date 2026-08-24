@@ -47,7 +47,7 @@ const resend = async () => {
       class="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4"
       @click.self="close"
     >
-      <div class="bg-white rounded-2xl shadow-xl p-6 w-full max-w-md space-y-4">
+      <div class="bg-white rounded-2xl shadow-xl p-5 sm:p-6 w-full max-w-md space-y-4 max-h-[85dvh] overflow-y-auto overscroll-contain">
         <div class="flex items-start gap-3">
           <div class="w-10 h-10 rounded-xl bg-amber-100 text-amber-600 grid place-items-center shrink-0">
             <MailWarning class="w-5 h-5" />

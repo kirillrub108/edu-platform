@@ -100,7 +100,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
             <p class="text-xs text-gray-500 truncate">{{ student.email }}</p>
           </div>
           <button
-            class="shrink-0 w-8 h-8 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 grid place-items-center transition"
+            class="shrink-0 w-11 h-11 -mr-2 sm:w-8 sm:h-8 sm:mr-0 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 grid place-items-center transition"
             @click="emit('close')"
           >
             <X class="w-4 h-4" />

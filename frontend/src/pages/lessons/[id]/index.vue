@@ -515,7 +515,7 @@ watch(lessonId, (newId, oldId) => {
 
     <!-- Sticky tab bar — stays reachable while the workflow scrolls -->
     <div
-      class="sticky top-16 z-20 -mx-6 lg:-mx-10 px-6 lg:px-10 pt-1 bg-gray-50/95 backdrop-blur-sm"
+      class="sticky top-16 z-20 -mx-4 px-4 sm:-mx-6 sm:px-6 lg:-mx-10 lg:px-10 pt-1 bg-gray-50/95 backdrop-blur-sm"
     >
       <UiTabs
         :model-value="activeTab"
@@ -685,7 +685,7 @@ watch(lessonId, (newId, oldId) => {
                   <div class="ml-auto flex items-center gap-2">
                     <button
                       type="button"
-                      class="text-sm text-gray-500 hover:text-gray-800 transition px-2 py-1 rounded-lg hover:bg-gray-100"
+                      class="text-sm text-gray-500 hover:text-gray-800 transition inline-grid place-items-center w-11 h-11 sm:w-auto sm:h-auto sm:px-2 sm:py-1 rounded-lg hover:bg-gray-100"
                       title="Предпросмотр"
                       @click="previewVideoUrl = video.video_url"
                     >▶</button>
@@ -709,19 +709,23 @@ watch(lessonId, (newId, oldId) => {
                steps. Glass panel overlays whatever content scrolls beneath it. -->
           <div
             v-if="workflowSteps.length > 1"
-            class="fixed inset-x-0 bottom-6 z-30 flex justify-center px-4 pointer-events-none lg:pl-[280px]"
+            class="fixed inset-x-0 z-30 flex justify-center px-4 pointer-events-none lg:pl-[280px]"
+            style="bottom: calc(1.5rem + env(safe-area-inset-bottom))"
           >
-            <div class="pointer-events-auto w-full max-w-2xl relative overflow-hidden bg-white/20 backdrop-blur-xl ring-1 ring-white/40 rounded-2xl border border-violet-200/40 shadow-soft-hover px-5 py-4 sm:px-6 sm:py-5 flex items-center justify-between gap-4">
+            <div class="pointer-events-auto w-full max-w-2xl relative overflow-hidden bg-white/20 backdrop-blur-xl ring-1 ring-white/40 rounded-2xl border border-violet-200/40 shadow-soft-hover px-3 py-3 sm:px-6 sm:py-5 flex items-center justify-between gap-2 sm:gap-4">
               <div class="absolute inset-x-0 top-0 h-1 bg-brand-gradient"></div>
 
               <UiButton
                 variant="secondary"
                 size="md"
+                class="min-w-0"
                 :disabled="!prevWorkflowStep"
                 @click="goPrevStep"
               >
                 <template #icon><ChevronLeft class="w-5 h-5" /></template>
-                {{ prevWorkflowStep ? prevWorkflowStep.title : 'Назад' }}
+                <span class="truncate max-w-[6.5rem] sm:max-w-none">
+                  {{ prevWorkflowStep ? prevWorkflowStep.title : 'Назад' }}
+                </span>
               </UiButton>
 
               <div class="flex flex-col items-center gap-2 shrink-0">
@@ -748,10 +752,11 @@ watch(lessonId, (newId, oldId) => {
               <UiButton
                 variant="primary"
                 size="md"
+                class="min-w-0"
                 :disabled="!nextWorkflowStep"
                 @click="goNextStep"
               >
-                <span>{{ nextWorkflowStep ? nextWorkflowStep.title : 'Готово' }}</span>
+                <span class="truncate max-w-[6.5rem] sm:max-w-none">{{ nextWorkflowStep ? nextWorkflowStep.title : 'Готово' }}</span>
                 <ChevronRight class="w-5 h-5" />
               </UiButton>
             </div>
@@ -773,46 +778,48 @@ watch(lessonId, (newId, oldId) => {
             class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft space-y-4"
           >
             <h2 class="text-lg font-semibold text-gray-900">Результаты теста</h2>
-            <table class="w-full text-sm">
-              <thead>
-                <tr class="text-left text-gray-500 border-b border-gray-100">
-                  <th class="pb-2 font-medium">Студент</th>
-                  <th class="pb-2 font-medium">Email</th>
-                  <th class="pb-2 font-medium text-center">Лучший</th>
-                  <th class="pb-2 font-medium text-center">Попыток</th>
-                  <th class="pb-2 font-medium text-center">Статус</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-50">
-                <tr v-for="row in quizResults" :key="row.student_id" class="py-2">
-                  <td class="py-2 text-gray-800">{{ row.full_name ?? '—' }}</td>
-                  <td class="py-2 text-gray-500">{{ row.email }}</td>
-                  <td class="py-2 text-center">
-                    <span v-if="row.best_score !== null">
+            <div class="overflow-x-auto">
+              <table class="w-full min-w-[34rem] text-sm">
+                <thead>
+                  <tr class="text-left text-gray-500 border-b border-gray-100">
+                    <th class="pb-2 font-medium">Студент</th>
+                    <th class="pb-2 font-medium">Email</th>
+                    <th class="pb-2 font-medium text-center">Лучший</th>
+                    <th class="pb-2 font-medium text-center">Попыток</th>
+                    <th class="pb-2 font-medium text-center">Статус</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-50">
+                  <tr v-for="row in quizResults" :key="row.student_id" class="py-2">
+                    <td class="py-2 text-gray-800">{{ row.full_name ?? '—' }}</td>
+                    <td class="py-2 text-gray-500">{{ row.email }}</td>
+                    <td class="py-2 text-center">
+                      <span v-if="row.best_score !== null">
+                        <span
+                          class="font-medium"
+                          :class="row.passed ? 'text-green-600' : 'text-red-600'"
+                        >{{ Math.round(Number(row.best_score) * 100) }}%</span>
+                      </span>
+                      <span v-else class="text-gray-400 italic">—</span>
+                    </td>
+                    <td class="py-2 text-center text-gray-600">{{ row.attempts_count }}</td>
+                    <td class="py-2 text-center">
                       <span
-                        class="font-medium"
-                        :class="row.passed ? 'text-green-600' : 'text-red-600'"
-                      >{{ Math.round(Number(row.best_score) * 100) }}%</span>
-                    </span>
-                    <span v-else class="text-gray-400 italic">—</span>
-                  </td>
-                  <td class="py-2 text-center text-gray-600">{{ row.attempts_count }}</td>
-                  <td class="py-2 text-center">
-                    <span
-                      v-if="row.passed"
-                      class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full"
-                    >пройден</span>
-                    <span
-                      v-else-if="row.attempts_count > 0"
-                      class="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full"
-                    >не сдан</span>
-                    <span v-else class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                      не приступал
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                        v-if="row.passed"
+                        class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full"
+                      >пройден</span>
+                      <span
+                        v-else-if="row.attempts_count > 0"
+                        class="text-xs bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full"
+                      >не сдан</span>
+                      <span v-else class="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                        не приступал
+                      </span>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
           </section>
         </div>
 
@@ -853,13 +860,13 @@ watch(lessonId, (newId, oldId) => {
       <aside
         class="fixed inset-y-0 right-0 z-50 w-[88%] max-w-sm p-4 bg-gray-50 shadow-2xl flex flex-col transition-transform duration-200
                lg:inset-auto lg:z-auto lg:w-auto lg:max-w-none lg:p-0 lg:bg-transparent lg:shadow-none lg:translate-x-0
-               lg:sticky lg:top-16 lg:max-h-[calc(100vh-5rem)]"
+               lg:sticky lg:top-16 lg:max-h-[calc(100dvh-5rem)]"
         :class="commentsOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'"
       >
         <div class="lg:hidden flex justify-end mb-2 shrink-0">
           <button
             type="button"
-            class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition"
+            class="grid place-items-center w-11 h-11 rounded-lg text-gray-500 hover:bg-gray-100 transition"
             aria-label="Закрыть комментарии"
             @click="commentsOpen = false"
           >
@@ -893,7 +900,7 @@ watch(lessonId, (newId, oldId) => {
       <button
         type="button"
         class="lg:hidden fixed right-5 z-30 inline-flex items-center gap-2 rounded-full bg-violet-600 text-white pl-4 pr-5 py-3 shadow-lg hover:bg-violet-700 transition"
-        :class="activeTab === 'lesson' && workflowSteps.length > 1 ? 'bottom-20' : 'bottom-5'"
+        :style="{ bottom: `calc(${activeTab === 'lesson' && workflowSteps.length > 1 ? '5rem' : '1.25rem'} + env(safe-area-inset-bottom))` }"
         @click="commentsOpen = true"
       >
         <MessageSquare class="w-5 h-5" />

@@ -8,8 +8,8 @@ defineProps<{
 </script>
 
 <template>
-  <ol class="flex items-start">
-    <li v-for="(s, i) in stages" :key="i" class="flex-1 flex flex-col items-center relative">
+  <ol class="flex items-start overflow-x-auto pb-1 sm:overflow-visible sm:pb-0">
+    <li v-for="(s, i) in stages" :key="i" class="flex-1 min-w-[5.5rem] sm:min-w-0 flex flex-col items-center relative">
       <div
         v-if="i > 0"
         class="absolute top-5 right-1/2 left-[-50%] h-0.5"

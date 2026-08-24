@@ -282,8 +282,8 @@ onMounted(loadLesson)
                 class="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700"
               >Студент не увидит</span>
             </h1>
-            <div class="flex items-center gap-3 text-xs">
-              <span class="px-2 py-1 rounded-md bg-violet-50 text-violet-700 font-medium">
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
+              <span class="px-2 py-1 rounded-md bg-violet-50 text-violet-700 font-medium max-w-full truncate">
                 {{ activeModule?.title }}
               </span>
               <span
@@ -345,13 +345,13 @@ onMounted(loadLesson)
       <aside
         class="fixed inset-y-0 right-0 z-50 w-[88%] max-w-sm p-4 bg-gray-50 shadow-2xl flex flex-col transition-transform duration-200
                lg:inset-auto lg:z-auto lg:w-auto lg:max-w-none lg:p-0 lg:bg-transparent lg:shadow-none lg:translate-x-0
-               lg:sticky lg:top-4 lg:max-h-[calc(100vh-7rem)]"
+               lg:sticky lg:top-4 lg:max-h-[calc(100dvh-7rem)]"
         :class="commentsOpen ? 'translate-x-0' : 'translate-x-full lg:translate-x-0'"
       >
         <div class="lg:hidden flex justify-end mb-2">
           <button
             type="button"
-            class="p-1.5 rounded-lg text-gray-500 hover:bg-gray-100 transition"
+            class="grid place-items-center w-11 h-11 rounded-lg text-gray-500 hover:bg-gray-100 transition"
             aria-label="Закрыть комментарии"
             @click="commentsOpen = false"
           >

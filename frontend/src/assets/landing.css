@@ -1269,9 +1269,10 @@ html:has(.ldg) {
   .ldg .player { transform: rotateX(6deg) !important; }
   .ldg .prim { display: none; }
 }
-@media (max-width: 420px) {
-  /* keep the primary CTA on-screen at 320px — the nav is the only row that
-     can't wrap, so the secondary support link steps aside */
+@media (max-width: 480px) {
+  /* keep the primary CTA on-screen down to 320px — the nav is the only row
+     that can't wrap, so the secondary support link steps aside. 480px so
+     the 430px-wide iPhone Pro Max is covered too. */
   .ldg .nav .contact-link { display: none; }
   .ldg .nav-right { gap: 12px; }
   .ldg .nav .btn { padding: 11px 14px; font-size: 14px; }
