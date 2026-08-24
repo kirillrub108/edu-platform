@@ -50,6 +50,7 @@
         </ul>
       </div>
     </div>
+    <SocialLinks class="foot-social" variant="compact" />
     <div class="foot-bottom">
       <span>© {{ year }} Edllm. Все права защищены.</span>
       <span>PPTX → MP4 · нейросетевая озвучка</span>
@@ -62,3 +63,11 @@ import { Bug } from 'lucide-vue-next'
 
 const year = new Date().getFullYear()
 </script>
+
+<style scoped>
+/* Ряд иконок вынесен из .foot: правила `.ldg .panel-accent .foot a:hover`
+   перекрыли бы фирменный hover-цвет внутри SocialLinks. */
+.foot-social {
+  margin-top: 32px;
+}
+</style>

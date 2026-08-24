@@ -25,6 +25,9 @@ const doc = legalDoc('contacts')
       </dd>
     </dl>
 
+    <h2>Мы в соц. сетях</h2>
+    <SocialLinks variant="cards" />
+
     <h2>Реквизиты индивидуального предпринимателя</h2>
     <dl>
       <dt>Полное наименование</dt>

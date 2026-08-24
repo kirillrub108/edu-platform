@@ -72,6 +72,9 @@ onMounted(restoreScroll)
       <LandingSection tone="plain">
         <LandingCta />
       </LandingSection>
+      <LandingSection id="social" tone="plain">
+        <LandingSocial />
+      </LandingSection>
     </main>
 
     <LandingSection tag="footer" tone="accent">
