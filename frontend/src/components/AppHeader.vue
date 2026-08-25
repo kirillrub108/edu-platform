@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import {
   LogOut, Menu, X, MailWarning, Coins, Settings, Bug,
-  LayoutDashboard, BarChart3, Wallet, BookOpen, ClipboardList, FileQuestion,
+  LayoutDashboard, BarChart3, Wallet, BookOpen, ClipboardList, FileQuestion, ChevronDown, Share2,
   type LucideIcon,
 } from 'lucide-vue-next'
 
@@ -55,6 +55,13 @@ const STUDENT_NAV: NavItem[] = [
 const mobileNav = computed<NavItem[]>(() => {
   if (!isAuthenticated.value) return []
   return isTeacher.value ? TEACHER_NAV : STUDENT_NAV
+})
+
+// Аккордеон соцсетей в мобильной шторке. Схлопывается вместе со шторкой,
+// чтобы при следующем открытии список не занимал пол-экрана.
+const isSocialOpen = ref(false)
+watch(isOpen, (open) => {
+  if (!open) isSocialOpen.value = false
 })
 
 const handleVerifyPrompt = () => {
@@ -262,29 +269,6 @@ const handleLogout = () => {
               <span class="min-w-0">Почта не подтверждена</span>
             </button>
 
-            <NuxtLink
-              v-if="isAuthenticated"
-              to="/account"
-              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
-            >
-              <Settings class="w-5 h-5 shrink-0" />
-              <span class="min-w-0 truncate">Настройки аккаунта</span>
-            </NuxtLink>
-
-            <SupportContactLink
-              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
-            >
-              <Bug class="w-5 h-5 shrink-0" />
-              Написать нам
-            </SupportContactLink>
-
-            <!-- В шторке дропдаун внутри дропдауна не нужен — ссылки лежат
-                 списком сразу. -->
-            <div class="px-3 pt-2 pb-1 text-[11px] font-semibold uppercase tracking-wider text-gray-400">
-              Мы в соц. сетях
-            </div>
-            <SocialLinks variant="menu" />
-
             <template v-if="isAuthenticated">
               <button
                 type="button"
@@ -309,6 +293,48 @@ const handleLogout = () => {
                 Создать аккаунт
               </NuxtLink>
             </template>
+
+            <button
+              type="button"
+              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition text-left"
+              aria-controls="mobile-social"
+              :aria-expanded="isSocialOpen"
+              @click="isSocialOpen = !isSocialOpen"
+            >
+              <Share2 class="w-5 h-5 shrink-0" />
+              <span class="min-w-0 flex-1">Мы в соц. сетях</span>
+              <ChevronDown
+                class="w-4 h-4 shrink-0 text-gray-400 transition-transform duration-200"
+                :class="isSocialOpen ? 'rotate-180' : ''"
+              />
+            </button>
+            <!-- Раскрытие на grid-rows вместо max-height: не нужно угадывать
+                 высоту списка, анимация чисто на CSS. -->
+            <div
+              id="mobile-social"
+              class="grid transition-all duration-200"
+              :class="isSocialOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'"
+            >
+              <div class="overflow-hidden pl-5">
+                <SocialLinks variant="menu" @click="close()" />
+              </div>
+            </div>
+
+            <SupportContactLink
+              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              <Bug class="w-5 h-5 shrink-0" />
+              Написать нам
+            </SupportContactLink>
+
+            <NuxtLink
+              v-if="isAuthenticated"
+              to="/account"
+              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50 transition"
+            >
+              <Settings class="w-5 h-5 shrink-0" />
+              <span class="min-w-0 truncate">Настройки аккаунта</span>
+            </NuxtLink>
           </div>
         </div>
       </Transition>
