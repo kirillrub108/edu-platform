@@ -24,6 +24,10 @@ usage() {
   exit 2
 }
 
+# Both on and off reload nginx, which first has to pass `nginx -t` — impossible
+# if the generated include is missing.
+ensure_generated_state
+
 case "${1:-}" in
   on)
     if maintenance_is_on; then

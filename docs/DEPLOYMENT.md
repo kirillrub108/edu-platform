@@ -549,20 +549,23 @@ docker-compose up
 cd ~/edllm && git pull --ff-only
 C="docker compose -f docker-compose.prod.yml --env-file .env.prod --profile green"
 
-# 1. собрать образы под текущий тег (:local)
+# 1. материализовать генерируемые файлы (в git их нет) — иначе nginx не
+#    стартует на отсутствующем include
+bash deploy/deploy.sh --init-state blue
+
+# 2. собрать образы под текущий тег (:local)
 $C build
 
-# 2. поднять blue-слот. Старые backend/frontend пока живы и держат трафик
+# 3. поднять blue-слот. Старые backend/frontend пока живы и держат трафик
 $C up -d backend_blue frontend_blue
 docker inspect -f '{{.Name}} {{.State.Health.Status}}' edllm-backend-blue edllm-frontend-blue
 
-# 3. пересоздать nginx и prometheus с новыми маунтами и снести осиротевшие
+# 4. пересоздать nginx и prometheus с новыми маунтами и снести осиротевшие
 #    контейнеры старых backend/frontend. Здесь будет короткий перерыв —
 #    единственный за весь переход
 $C up -d --force-recreate --remove-orphans nginx prometheus
 
-# 4. зафиксировать состояние
-mkdir -p ~/.edllm-deploy && echo blue > ~/.edllm-deploy/active_slot
+# 5. проверить
 curl -fsS --resolve edllm.ru:443:127.0.0.1 https://edllm.ru/health
 ```
 
@@ -579,9 +582,11 @@ curl -fsS --resolve edllm.ru:443:127.0.0.1 https://edllm.ru/health
 | `blue` | `backend_blue`, `frontend_blue` | нет (стартует обычным `up -d`) | `edllm-backend-blue`, `edllm-frontend-blue` |
 | `green` | `backend_green`, `frontend_green` | `green` | `edllm-backend-green`, `edllm-frontend-green` |
 
-Трафик в каждый момент обслуживает **ровно один** слот. Наружу слоты портов не публикуют — до них дотягивается только nginx по `edu-network`. Кто именно активен, записано в [nginx/upstreams/active.conf](../nginx/upstreams/active.conf), который подключается из [nginx/prod.conf.template](../nginx/prod.conf.template) строкой `include /etc/nginx/upstreams/*.conf;`. Переключение = перезапись этого файла + `nginx -t` + **`nginx -s reload`** (не `restart`: reload оставляет уже установленные соединения дожить на старых worker-процессах). Слоты сознательно НЕ заведены в `envsubst` — `NGINX_ENVSUBST_FILTER` остаётся ограниченным `${DOMAIN}`.
+Трафик в каждый момент обслуживает **ровно один** слот. Наружу слоты портов не публикуют — до них дотягивается только nginx по `edu-network`. Кто именно активен, записано в `nginx/upstreams/active.conf`, который подключается из [nginx/prod.conf.template](../nginx/prod.conf.template) строкой `include /etc/nginx/upstreams/*.conf;`. Переключение = перезапись этого файла + `nginx -t` + **`nginx -s reload`** (не `restart`: reload оставляет уже установленные соединения дожить на старых worker-процессах). Слоты сознательно НЕ заведены в `envsubst` — `NGINX_ENVSUBST_FILTER` остаётся ограниченным `${DOMAIN}`.
 
-Тем же переключением обновляется [monitoring/targets/backend.json](../monitoring/targets/backend.json) — Prometheus в проде discover'ит живой слот через `file_sd_configs` и перечитывает файл сам (reload не нужен).
+Тем же переключением обновляется `monitoring/targets/backend.json` — Prometheus в проде discover'ит живой слот через `file_sd_configs` и перечитывает файл сам (reload не нужен).
+
+> **Оба этих файла — генерируемые и в git НЕ хранятся** (`nginx/upstreams/.gitignore`, `monitoring/targets/.gitignore`). Иначе деплой правил бы версионируемый файл, и рано или поздно `git pull --ff-only` в CI отказался бы мержить поверх локальной правки — заклинив все последующие деплои. Сбрасывать их (`git checkout --`) тоже нельзя: это стёрло бы информацию о живом слоте и увело следующий деплой не туда. Отсутствующий файл восстанавливает `ensure_generated_state` в [deploy/lib.sh](../deploy/lib.sh) — из `~/.edllm-deploy/active_slot`, который переживает свежий клон. Вызывается в начале `deploy.sh`, в `maintenance.sh` и внутри `switch_upstream`.
 
 Источник истины про активный слот — именно `active.conf`; `~/.edllm-deploy/active_slot` его зеркалит и используется как фолбэк. Нет ни того, ни другого (или файл битый) — берётся `blue`.
 
@@ -630,6 +635,11 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod --profile green p
 # ── Переключить слот вручную (upstream + nginx reload + prometheus targets).
 #    Контейнеры целевого слота должны быть уже подняты.
 deploy/deploy.sh --switch green
+
+# ── Восстановить генерируемые файлы (свежий клон / их снёс git pull).
+#    Ничего не поднимает и не перезагружает — безопасно до старта контейнеров.
+deploy/deploy.sh --init-state          # слот берётся из ~/.edllm-deploy/active_slot
+deploy/deploy.sh --init-state blue     # или явно
 
 # ── Проверить логику резолва активного слота (не трогает ни прод, ни репозиторий)
 deploy/deploy.sh --self-test

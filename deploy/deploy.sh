@@ -4,6 +4,7 @@
 #
 #   deploy/deploy.sh <git_sha_short>     full deploy
 #   deploy/deploy.sh --switch blue|green flip the live slot by hand (no build)
+#   deploy/deploy.sh --init-state [slot]  write the generated files, touch nothing else
 #   deploy/deploy.sh --self-test         exercise slot resolution, touches nothing
 #
 # The web tier runs as two slots (backend_blue/backend_green, frontend_blue/
@@ -56,9 +57,11 @@ self_test() {
 
   EDLLM_STATE_DIR="${tmp}/state"
   EDLLM_UPSTREAM_FILE="${tmp}/active.conf"
+  EDLLM_PROM_TARGETS_FILE="${tmp}/backend.json"
   STATE_DIR="$EDLLM_STATE_DIR"
   SLOT_FILE="${STATE_DIR}/active_slot"
   UPSTREAM_FILE="$EDLLM_UPSTREAM_FILE"
+  PROM_TARGETS_FILE="$EDLLM_PROM_TARGETS_FILE"
 
   check() {
     local label="$1" expected="$2" actual="$3"
@@ -108,6 +111,25 @@ self_test() {
   else
     check "render_upstream is idempotent" "same" "differs"
   fi
+
+  # The generated files are git-ignored: a fresh clone, or the pull that landed
+  # the commit untracking them, leaves them absent. They must come back from the
+  # recorded slot — never invented.
+  rm -f "$UPSTREAM_FILE" "$PROM_TARGETS_FILE"
+  record_active_slot green
+  ensure_generated_state > /dev/null
+  check "missing include is regenerated from state" "green" "$(upstream_slot)"
+  if grep -q '"backend_green:8000"' "$PROM_TARGETS_FILE" 2>/dev/null; then
+    check "missing prometheus targets are regenerated" "green" "green"
+  else
+    check "missing prometheus targets are regenerated" "green" "missing/wrong"
+  fi
+
+  # Present files must be left exactly as they are.
+  render_upstream blue
+  record_active_slot green
+  ensure_generated_state > /dev/null
+  check "existing include is NOT overwritten by state" "blue" "$(upstream_slot)"
 
   if [ "$failures" -eq 0 ]; then
     echo "== self-test OK =="
@@ -270,13 +292,34 @@ case "${1:-}" in
     log "active slot is now ${TARGET} (containers were NOT started — do that first if it is down)"
     exit 0
     ;;
+  --init-state)
+    # Bootstrap for a fresh clone, where the generated (git-ignored) files do not
+    # exist yet and nginx would refuse to start on the missing include. Writes
+    # them and stops — no containers touched, no reload, so it is safe to run
+    # before anything is up.
+    TARGET="${2:-$(recorded_slot)}"
+    case "$TARGET" in blue | green) ;; *) die "unknown slot '${TARGET}' (expected blue|green)" ;; esac
+    render_upstream "$TARGET"
+    render_prometheus_targets "$TARGET"
+    record_active_slot "$TARGET"
+    log "generated state written for the ${TARGET} slot:"
+    log "  ${UPSTREAM_FILE}"
+    log "  ${PROM_TARGETS_FILE}"
+    log "  ${SLOT_FILE}"
+    exit 0
+    ;;
   "" | -*)
-    die "usage: deploy.sh <git_sha_short> | --switch blue|green | --self-test"
+    die "usage: deploy.sh <git_sha_short> | --switch blue|green | --init-state [slot] | --self-test"
     ;;
 esac
 
 SHA="$1"
 export IMAGE_TAG="$SHA"
+
+# Must come before the first read of the slot: a `git pull` can legitimately
+# remove the generated files (they are git-ignored), and a fresh clone never had
+# them. Re-creates them from $STATE_DIR/active_slot, never inventing a slot.
+ensure_generated_state
 
 ACTIVE_SLOT="$(resolve_active_slot)"
 TARGET_SLOT="$(other_slot "$ACTIVE_SLOT")"

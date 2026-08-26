@@ -7,10 +7,17 @@
 #   monitoring/targets/backend.json which slot Prometheus scrapes
 #   $STATE_DIR/active_slot          a mirror of the above, plus last_good_sha
 #
-# The include file is the SOURCE OF TRUTH — it is what nginx reads — and the
-# state file is a fallback for when it cannot be parsed. deploy.sh writes the
-# include first and the state file last, so a crash in between leaves nginx
-# serving a working slot and the next run re-derives everything from the include.
+# The first two are GENERATED and git-ignored. They must not be tracked: the
+# deploy rewrites them, and CI's `git pull --ff-only` would eventually refuse to
+# merge over the local edit and wedge every future deploy. Resetting them
+# instead is worse — that would erase which slot is live and point the next
+# deploy at the wrong one.
+#
+# The include file is the SOURCE OF TRUTH — it is what nginx reads — and
+# $STATE_DIR/active_slot is the durable fallback that survives a fresh clone.
+# deploy.sh writes the include first and the state file last, so a crash in
+# between leaves nginx serving a working slot and the next run re-derives
+# everything from the include.
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -21,6 +28,7 @@ ENV_FILE="${REPO_ROOT}/.env.prod"
 # against throwaway paths without touching real deploy state or the repo.
 STATE_DIR="${EDLLM_STATE_DIR:-${HOME}/.edllm-deploy}"
 UPSTREAM_FILE="${EDLLM_UPSTREAM_FILE:-${REPO_ROOT}/nginx/upstreams/active.conf}"
+PROM_TARGETS_FILE="${EDLLM_PROM_TARGETS_FILE:-${REPO_ROOT}/monitoring/targets/backend.json}"
 
 SLOT_FILE="${STATE_DIR}/active_slot"
 LAST_GOOD_FILE="${STATE_DIR}/last_good_sha"
@@ -77,6 +85,23 @@ recorded_slot() {
   esac
 }
 
+# Re-create the generated files if they are absent — a fresh clone has neither,
+# and a `git pull` that lands the commit which untracked them deletes them from
+# the working tree. Falls back to the recorded slot, which itself defaults to
+# blue, so this can never invent a slot that is not the live one.
+ensure_generated_state() {
+  local slot
+  slot="$(recorded_slot)"
+  if [ ! -r "$UPSTREAM_FILE" ]; then
+    log "upstream include missing — rendering it for the ${slot} slot"
+    render_upstream "$slot"
+  fi
+  if [ ! -r "$PROM_TARGETS_FILE" ]; then
+    log "prometheus targets missing — rendering them for the ${slot} slot"
+    render_prometheus_targets "$slot"
+  fi
+}
+
 # What the deploy treats as live: the include first, the state file as fallback.
 resolve_active_slot() {
   local slot
@@ -123,7 +148,7 @@ UPSTREAM
 render_prometheus_targets() {
   local slot="${1:?render_prometheus_targets needs a slot}"
   case "$slot" in blue | green) ;; *) die "refusing to render slot '${slot}'" ;; esac
-  local file="${EDLLM_PROM_TARGETS_FILE:-${REPO_ROOT}/monitoring/targets/backend.json}"
+  local file="$PROM_TARGETS_FILE"
   mkdir -p "$(dirname "$file")"
   cat > "${file}.tmp" <<TARGETS
 [
@@ -165,6 +190,7 @@ nginx_reload() {
 switch_upstream() {
   local slot="${1:?switch_upstream needs a slot}"
   local backup
+  ensure_generated_state
   backup="$(mktemp)"
   cp "$UPSTREAM_FILE" "$backup"
 
