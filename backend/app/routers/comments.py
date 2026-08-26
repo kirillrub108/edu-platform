@@ -54,6 +54,7 @@ async def create_lesson_comment(
     comment = await comment_service.create_comment(
         db, lesson_id=lesson_id, author_id=user.id, content=data.content
     )
+    await comment_service.notify_students_of_comment(db, lesson_id, user)
     return CommentRead.model_validate(comment)
 
 

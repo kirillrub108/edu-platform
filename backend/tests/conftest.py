@@ -115,6 +115,11 @@ def _set_database_url(
 
     _pay_mod.SyncSession = _vp_mod.SyncSession
 
+    # notification_pipeline likewise.
+    import app.tasks.notification_pipeline as _notif_mod
+
+    _notif_mod.SyncSession = _vp_mod.SyncSession
+
     # 2a) usage_service builds its private sync engine lazily on first record;
     # drop anything cached so it re-reads the rebound settings/URL.
     import app.services.usage_service as _usage_mod

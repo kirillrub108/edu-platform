@@ -32,6 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.celery_app import celery_app
+from app.config import settings
 from app.constants import (
     AI_GRADING_FREE_ANSWERS_PER_MONTH,
     CREDIT_WEIGHTS,
@@ -56,6 +57,7 @@ from app.services.grading_service import (
     resolved_index,
 )
 from app.services.llm_service import LLMOutputError, llm_service
+from app.services.notification_service import NotificationEvent, notify
 from app.services.quiz_service import (
     BrokenSnapshotError,
     EmptyMaterialError,
@@ -74,6 +76,27 @@ from app.services.quota_service import (
 from app.tasks.video_pipeline import SyncSession, _publish
 
 logger = structlog.get_logger()
+
+
+def _notify_quiz_ready(
+    session: Session, lesson_id: UUID, owner_id: UUID | None, task_id: str
+) -> None:
+    """Digest-class "your quiz is ready" event for the course owner. Dedup scope
+    is the task id — stable across an acks_late replay, fresh on every new
+    generation, so regenerating a quiz is announced again."""
+    if owner_id is None:
+        return
+    lesson = session.get(Lesson, lesson_id)
+    notify(
+        owner_id,
+        NotificationEvent.quiz_generated,
+        {
+            "entity_id": task_id,
+            "lesson_id": str(lesson_id),
+            "lesson_title": (lesson.title if lesson else "") or "",
+            "url": f"{settings.FRONTEND_URL}/lessons/{lesson_id}",
+        },
+    )
 
 
 def _clear_generation_task(session: Session, quiz_id: UUID) -> None:
@@ -151,6 +174,7 @@ def generate_quiz_task(
             _clear_generation_task(session, quiz_id)
             session.commit()
             _settle(success=True)
+            _notify_quiz_ready(session, lesson_uuid, owner_uuid, self.request.id)
             _progress("persist", 3, 3)
             return {"status": "ok", "total": len(generated), "quiz_id": str(quiz_id)}
 

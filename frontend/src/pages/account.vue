@@ -1,10 +1,17 @@
 <script setup lang="ts">
 import { AlertCircle, CheckCircle2 } from 'lucide-vue-next'
+import { NOTIFICATION_CATEGORIES } from '~/stores/notifications'
 
 definePageMeta({ middleware: 'auth' })
 
 const auth = useAuthStore()
 const { user } = storeToRefs(auth)
+
+const notifications = useNotificationsStore()
+const { settings, loading: loadingSettings, saving, error: settingsError } =
+  storeToRefs(notifications)
+
+onMounted(() => notifications.fetchSettings())
 
 const oldPassword = ref('')
 const newPassword = ref('')
@@ -95,6 +102,45 @@ const submit = async () => {
             {{ loading ? 'Сохранение…' : 'Сменить пароль' }}
           </UiButton>
         </form>
+      </div>
+
+      <div class="mt-6 rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
+        <h2 class="mb-1 text-base font-semibold text-gray-900">Уведомления на почту</h2>
+        <p class="mb-4 text-sm text-gray-500">
+          Письма о подтверждении почты и сбросе пароля приходят всегда.
+        </p>
+
+        <p v-if="loadingSettings && !settings" class="text-sm text-gray-500">Загрузка…</p>
+
+        <div v-else-if="settings" class="space-y-3">
+          <label
+            v-for="cat in NOTIFICATION_CATEGORIES"
+            :key="cat.key"
+            class="flex cursor-pointer items-start gap-3 rounded-xl border border-gray-100 px-4 py-3 transition-colors hover:bg-gray-50"
+          >
+            <input
+              type="checkbox"
+              class="mt-1 h-4 w-4 shrink-0 accent-violet-600"
+              :checked="settings[cat.key]"
+              :disabled="saving === cat.key"
+              @change="
+                notifications.setCategory(cat.key, ($event.target as HTMLInputElement).checked)
+              "
+            />
+            <span>
+              <span class="block text-sm font-medium text-gray-900">{{ cat.label }}</span>
+              <span class="block text-sm text-gray-500">{{ cat.hint }}</span>
+            </span>
+          </label>
+        </div>
+
+        <p
+          v-if="settingsError"
+          class="mt-3 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
+        >
+          <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{{ settingsError }}</span>
+        </p>
       </div>
     </div>
   </div>

@@ -40,6 +40,13 @@ class User(Base):
     # signed verification link; content-creating teacher endpoints are gated on
     # this via require_verified_teacher. Existing users are backfilled to True.
     email_verified = Column(Boolean, server_default="false", nullable=False, default=False)
+    # Product-notification preferences (see services/notification_service.py).
+    # One column per NotificationCategory — the enum's value IS the column name.
+    # Default on: a user who never visits the settings page still gets told when
+    # their lecture is ready. Auth mail ignores these flags entirely.
+    notify_content = Column(Boolean, server_default="true", nullable=False, default=True)
+    notify_feedback = Column(Boolean, server_default="true", nullable=False, default=True)
+    notify_submissions = Column(Boolean, server_default="true", nullable=False, default=True)
     # Soft delete: non-null = hidden everywhere (see app/database.py global filter)
     # and slated for physical purge after SOFT_DELETE_PURGE_DAYS.
     deleted_at = Column(DateTime(timezone=True), nullable=True, default=None, index=True)

@@ -32,6 +32,7 @@ from app.schemas.assignment import (
     SubmissionStudentRead,
 )
 from app.services import assignment_service
+from app.services.notification_service import NotificationEvent
 
 router = APIRouter(prefix="/api/v1/students", tags=["assignment-student"])
 
@@ -124,6 +125,16 @@ async def submit(
     )
     submission = await assignment_service.get_or_create_submission(db, assignment.id, enrollment.id)
     submission = await assignment_service.submit(db, submission, data.text_content)
+    owner_id = await assignment_service.course_owner_id(db, assignment.lesson_id)
+    if owner_id is not None:
+        assignment_service.notify_submission_event(
+            owner_id,
+            NotificationEvent.submission_received,
+            submission_id=submission.id,
+            lesson_id=assignment.lesson_id,
+            assignment_title=assignment.title,
+            student_name=user.full_name or user.email,
+        )
     return assignment_service.serialize_submission_student(submission, str(user.id))
 
 
@@ -185,6 +196,18 @@ async def post_message(
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> MessageRead:
-    await assignment_service.get_own_submission(db, submission_id, user.id)
+    submission = await assignment_service.get_own_submission(db, submission_id, user.id)
     message = await assignment_service.add_message(db, submission_id, user.id, data.body)
+    ref = await assignment_service.assignment_ref(db, submission.assignment_id)
+    if ref is not None:
+        title, lesson_id = ref
+        owner_id = await assignment_service.course_owner_id(db, lesson_id)
+        if owner_id is not None:
+            assignment_service.notify_submission_event(
+                owner_id,
+                NotificationEvent.assignment_message,
+                submission_id=submission.id,
+                lesson_id=lesson_id,
+                assignment_title=title,
+            )
     return MessageRead.model_validate(message)

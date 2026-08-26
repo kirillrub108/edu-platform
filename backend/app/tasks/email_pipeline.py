@@ -35,8 +35,15 @@ def send_email(
     subject: str,
     template_name: str,
     context: dict[str, Any],
+    headers: dict[str, str] | None = None,
 ) -> dict:
     structlog.contextvars.clear_contextvars()
     structlog.contextvars.bind_contextvars(task_id=self.request.id, task_name=self.name)
-    send_email_sync(to=to, subject=subject, template_name=template_name, context=context)
+    send_email_sync(
+        to=to,
+        subject=subject,
+        template_name=template_name,
+        context=context,
+        headers=headers,
+    )
     return {"status": "sent", "to": to}

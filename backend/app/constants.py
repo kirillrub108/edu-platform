@@ -703,6 +703,29 @@ EMAIL_VERIFY_RESEND_COOLDOWN_SECONDS: int = 60
 EMAIL_SEND_MAX_RETRIES: int = 3
 EMAIL_SEND_RETRY_BACKOFF: int = 5  # base seconds; Celery grows it exponentially
 
+# Notifications (product email subsystem — see services/notification_service.py).
+# Auth mail (verification / password reset) does NOT go through it.
+# Dedup window per (user, event, entity): a repeat inside it is dropped. Also what
+# makes an acks_late replay of deliver_notification a no-op.
+NOTIFY_DEDUP_TTL_SECONDS: int = 60 * 60 * 6  # 6h
+# How often the beat job drains the per-user digest accumulators.
+NOTIFY_DIGEST_INTERVAL_MINUTES: int = 30
+# Cap on accumulated digest items; the overflow is collapsed into "и ещё N".
+NOTIFY_DIGEST_MAX_ITEMS: int = 20
+# Accumulator lifetime — a user whose flush never runs (Redis restart, beat down)
+# doesn't keep a stale list forever. Generous multiple of the flush interval.
+NOTIFY_DIGEST_TTL_SECONDS: int = 60 * 60 * 24
+# Users drained per flush run; the rest wait for the next tick.
+NOTIFY_DIGEST_FLUSH_BATCH: int = 500
+# Presence entry lifetime in the SSE sorted set. Must exceed SSE_HEARTBEAT_SECONDS
+# by a comfortable margin so a slow heartbeat doesn't read as "user left".
+NOTIFY_PRESENCE_TTL_SECONDS: int = 45
+# Lifetime of a one-click unsubscribe link. Long — the link must still work when
+# the user digs the mail out of the archive weeks later.
+NOTIFY_UNSUBSCRIBE_TTL_SECONDS: int = 60 * 60 * 24 * 365
+# SPA route the unsubscribe endpoint redirects to.
+NOTIFY_UNSUBSCRIBED_PATH: str = "/unsubscribed"
+
 # Password reset
 # Lifetime of a one-time password-reset token (DB-backed, only its hash is
 # stored). Kept short — long enough to receive and click the email, no more.

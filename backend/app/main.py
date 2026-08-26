@@ -35,6 +35,7 @@ from app.routers import (
     gradebook,
     lesson_materials,
     lessons,
+    notifications,
     quiz_student,
     quiz_teacher,
     slides,
@@ -389,6 +390,7 @@ app.include_router(billing.router)
 app.include_router(assignment_teacher.router)
 app.include_router(assignment_student.router)
 app.include_router(lesson_materials.router)
+app.include_router(notifications.router)
 app.include_router(system.router)
 
 

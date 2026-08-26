@@ -44,7 +44,9 @@ def render_template(template_name: str, context: dict[str, Any]) -> str:
 
 
 class EmailProvider(Protocol):
-    def send(self, *, to: str, subject: str, html: str) -> None: ...
+    def send(
+        self, *, to: str, subject: str, html: str, headers: dict[str, str] | None = None
+    ) -> None: ...
 
 
 class ResendProvider:
@@ -56,12 +58,24 @@ class ResendProvider:
         self._api_key = api_key
         self._sender = sender
 
-    def send(self, *, to: str, subject: str, html: str) -> None:
+    def send(
+        self, *, to: str, subject: str, html: str, headers: dict[str, str] | None = None
+    ) -> None:
+        body: dict[str, Any] = {
+            "from": self._sender,
+            "to": [to],
+            "subject": subject,
+            "html": html,
+        }
+        if headers:
+            # Custom MIME headers (List-Unsubscribe & friends) — Resend passes
+            # them through verbatim.
+            body["headers"] = headers
         try:
             resp = httpx.post(
                 self._ENDPOINT,
                 headers={"Authorization": f"Bearer {self._api_key}"},
-                json={"from": self._sender, "to": [to], "subject": subject, "html": html},
+                json=body,
                 timeout=15.0,
             )
         except httpx.HTTPError as exc:  # connect/read/timeout — transient
@@ -84,9 +98,16 @@ def build_provider() -> EmailProvider:
     raise RuntimeError(f"Unsupported EMAIL_PROVIDER: {settings.EMAIL_PROVIDER}")
 
 
-def send_email_sync(*, to: str, subject: str, template_name: str, context: dict[str, Any]) -> None:
+def send_email_sync(
+    *,
+    to: str,
+    subject: str,
+    template_name: str,
+    context: dict[str, Any],
+    headers: dict[str, str] | None = None,
+) -> None:
     """Render `template_name` with `context` and send it. Sync — call only from
-    the send_email Celery task. Raises EmailDeliveryError on retriable failures."""
+    a Celery task. Raises EmailDeliveryError on retriable failures."""
     html = render_template(template_name, context)
     if not settings.RESEND_API_KEY:
         # Dev / unconfigured: don't contact a provider. Log the message — the
@@ -94,5 +115,5 @@ def send_email_sync(*, to: str, subject: str, template_name: str, context: dict[
         # and return success so register/resend never fail for lack of mail config.
         logger.info("email_skipped_no_provider", to=to, subject=subject, context=context)
         return
-    build_provider().send(to=to, subject=subject, html=html)
+    build_provider().send(to=to, subject=subject, html=html, headers=headers)
     logger.info("email_sent", to=to, template=template_name, provider=settings.EMAIL_PROVIDER)

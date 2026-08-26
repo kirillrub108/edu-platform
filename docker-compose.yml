@@ -1,3 +1,13 @@
+# Per-container liveness for a Celery worker: confirms the broker is reachable
+# and a worker replies. Kept byte-identical to docker-compose.prod.yml so dev
+# and prod report worker health the same way.
+x-celery-healthcheck: &celery-healthcheck
+  test: ["CMD-SHELL", "celery -A app.celery_app inspect ping -t 10 >/dev/null 2>&1 || exit 1"]
+  interval: 30s
+  timeout: 15s
+  retries: 5
+  start_period: 60s
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -67,6 +77,16 @@ services:
       - ./backend/pyproject.toml:/app/pyproject.toml
     ports:
       - "8000:8000"
+    # Without this the container reads as "Up" even when the app died on
+    # startup: uvicorn --reload keeps its supervisor process alive, so every
+    # request is refused while `docker-compose ps` looks green. A failed
+    # `alembic upgrade head` in the lifespan is exactly that case.
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health >/dev/null 2>&1 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -102,6 +122,7 @@ services:
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/app:/app/app
+    healthcheck: *celery-healthcheck
     depends_on:
       - backend
       - redis
@@ -135,6 +156,7 @@ services:
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/app:/app/app
+    healthcheck: *celery-healthcheck
     depends_on:
       - backend
       - redis
@@ -172,6 +194,7 @@ services:
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/app:/app/app
+    healthcheck: *celery-healthcheck
     depends_on:
       - backend
       - redis
@@ -207,6 +230,7 @@ services:
     volumes:
       - ./backend/storage:/app/storage
       - ./backend/app:/app/app
+    healthcheck: *celery-healthcheck
     depends_on:
       - backend
       - redis

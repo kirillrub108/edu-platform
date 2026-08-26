@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config import settings
 from app.constants import (
     ASSIGNMENT_ALLOWED_EXTENSIONS,
     ATTACHMENT_ALLOWED_TYPES,
@@ -49,6 +50,7 @@ from app.schemas.assignment import (
 from app.services import retention_service
 from app.services.file_validation_service import validate_upload
 from app.services.grading_service import aggregate_score
+from app.services.notification_service import NotificationEvent, notify
 from app.services.storage_service import UploadTooLargeError, storage_service
 
 _LOCKED_STATUSES = {SubmissionStatus.graded, SubmissionStatus.returned}
@@ -714,6 +716,55 @@ async def remove_attachment(
 
 
 # ── Private thread ───────────────────────────────────────────────────────────
+
+
+# ── Notification helpers ─────────────────────────────────────────────────────
+# Two one-query resolvers plus a payload builder. `notify` itself does no IO, so
+# the routers stay a single call away from the event.
+
+
+async def assignment_ref(db: AsyncSession, assignment_id: UUID) -> tuple[str, UUID] | None:
+    """(title, lesson_id) for one assignment, or None if it is gone."""
+    row = (
+        await db.execute(
+            select(Assignment.title, Assignment.lesson_id).where(Assignment.id == assignment_id)
+        )
+    ).first()
+    return (row[0], row[1]) if row is not None else None
+
+
+async def course_owner_id(db: AsyncSession, lesson_id: UUID) -> UUID | None:
+    return await db.scalar(
+        select(Course.owner_id)
+        .join(Module, Module.course_id == Course.id)
+        .join(Lesson, Lesson.module_id == Module.id)
+        .where(Lesson.id == lesson_id)
+    )
+
+
+def notify_submission_event(
+    recipient_id: UUID,
+    event: NotificationEvent,
+    *,
+    submission_id: UUID,
+    lesson_id: UUID,
+    assignment_title: str,
+    **fields: object,
+) -> None:
+    """Dedup scope is the submission, so a burst of thread messages collapses to
+    one mail per window. No visibility gate here on purpose: the recipient is
+    already a party to this submission, so nothing is revealed that they cannot
+    see — unlike the lesson-comment fan-out, which does gate."""
+    notify(
+        recipient_id,
+        event,
+        {
+            "entity_id": str(submission_id),
+            "assignment_title": assignment_title,
+            "url": f"{settings.FRONTEND_URL}/lessons/{lesson_id}",
+            **fields,
+        },
+    )
 
 
 async def add_message(

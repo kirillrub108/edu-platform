@@ -2,6 +2,7 @@ import asyncio
 import json
 import mimetypes
 import os
+import time
 from urllib.parse import quote
 from uuid import UUID, uuid4
 
@@ -20,6 +21,7 @@ from app.config import settings
 from app.constants import (
     CREDIT_WEIGHTS,
     MAX_VIDEO_UPLOAD_BYTES,
+    NOTIFY_PRESENCE_TTL_SECONDS,
     S3_PRESIGN_TTL_SECONDS,
     SIGNED_URL_TTL_VIDEO,
     SSE_HEARTBEAT_SECONDS,
@@ -63,6 +65,7 @@ from app.schemas.lesson import (
 )
 from app.schemas.quiz import QuizTeacherResultRow
 from app.services import billing_service, quota_service, tier_service
+from app.services.notification_service import presence_key
 from app.services.storage_service import storage_service
 from app.services.video_service import count_source_slides
 from app.tasks.video_pipeline import generate_video_lesson
@@ -713,6 +716,28 @@ async def progress_stream(
 
         yield {"retry": SSE_RETRY_MS, "comment": "stream open"}
 
+        # Presence marker consumed by the notification subsystem: while a stream
+        # is open the "lesson ready" mail is dropped instead of sent (the user is
+        # watching it happen). One member per connection, so a second tab keeps
+        # presence alive after the first one closes, and a connection lost
+        # without a clean close ages out of the score window on its own.
+        conn_id = uuid4().hex
+        pkey = presence_key(str(lesson_id))
+
+        async def touch_presence() -> None:
+            try:
+                await redis.zadd(pkey, {conn_id: time.time()})
+                await redis.expire(pkey, NOTIFY_PRESENCE_TTL_SECONDS * 2)
+            except Exception:
+                logger.warning("sse_presence_touch_failed", lesson_id=str(lesson_id))
+
+        await touch_presence()
+
+        # Distinguishes "the job finished while the user watched" from "the
+        # client went away". Declared before the try so `finally` can read it
+        # even if subscribing raises. Only the latter clears presence.
+        watched_to_completion = False
+
         pubsub = redis.pubsub()
         try:
             await pubsub.subscribe(channel)
@@ -741,6 +766,7 @@ async def progress_stream(
                     try:
                         data = json.loads(msg["data"])
                         if data.get("status") in _SSE_TERMINAL:
+                            watched_to_completion = True
                             return
                     except json.JSONDecodeError:
                         pass
@@ -749,7 +775,23 @@ async def progress_stream(
                 if now - last_heartbeat >= SSE_HEARTBEAT_SECONDS:
                     yield {"comment": "ping"}
                     last_heartbeat = now
+                    await touch_presence()
         finally:
+            # finally, not after the loop: the generator is also torn down by a
+            # client disconnect, which raises through the yield.
+            #
+            # Deliberately NOT cleared when the stream ran to the terminal event:
+            # the pipeline publishes that event and only then raises the "lesson
+            # ready" notification, so an immediate ZREM would drop presence a
+            # fraction of a second before the notification task reads it — the
+            # gate would never fire for the one case it exists for. Letting the
+            # entry age out over NOTIFY_PRESENCE_TTL_SECONDS covers that window,
+            # while a client that went away early is still cleared at once.
+            if not watched_to_completion:
+                try:
+                    await redis.zrem(pkey, conn_id)
+                except Exception:
+                    logger.warning("sse_presence_clear_failed", lesson_id=str(lesson_id))
             await pubsub.unsubscribe(channel)
             await pubsub.aclose()
 

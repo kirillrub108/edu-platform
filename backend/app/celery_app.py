@@ -13,7 +13,7 @@ from sentry_sdk.integrations.logging import LoggingIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
 from app.config import settings
-from app.constants import RECONCILE_INTERVAL_MINUTES
+from app.constants import NOTIFY_DIGEST_INTERVAL_MINUTES, RECONCILE_INTERVAL_MINUTES
 from app.logging_config import configure_logging
 
 configure_logging(settings.ENVIRONMENT)
@@ -64,6 +64,7 @@ celery_app = Celery(
         "app.tasks.quiz_pipeline",
         "app.tasks.purge_pipeline",
         "app.tasks.email_pipeline",
+        "app.tasks.notification_pipeline",
         "app.tasks.payment_pipeline",
     ],
 )
@@ -149,6 +150,15 @@ celery_app.conf.update(
         "notify-expiring-attachments-daily": {
             "task": "notify_expiring_attachments",
             "schedule": crontab(hour=3, minute=30),
+            "options": {"queue": "quiz"},
+        },
+        # Drain the per-user notification digest accumulators (see
+        # tasks/notification_pipeline). Routed to `quiz` like every other beat
+        # job — the flush only enqueues mail, the sending happens on
+        # celery_email.
+        "flush-notification-digests": {
+            "task": "flush_notification_digests",
+            "schedule": timedelta(minutes=NOTIFY_DIGEST_INTERVAL_MINUTES),
             "options": {"queue": "quiz"},
         },
     },

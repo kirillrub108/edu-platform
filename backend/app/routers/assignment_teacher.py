@@ -33,6 +33,7 @@ from app.schemas.assignment import (
     SubmissionTeacherRead,
 )
 from app.services import assignment_service, billing_service, retention_service
+from app.services.notification_service import NotificationEvent
 
 router = APIRouter(prefix="/api/v1", tags=["assignment-teacher"])
 
@@ -195,6 +196,15 @@ async def grade_submission(
     submission = await assignment_service.grade_submission(
         db, submission, assignment, data.points_awarded, data.feedback, user.id
     )
+    assignment_service.notify_submission_event(
+        submission.enrollment.student_id,
+        NotificationEvent.grade_posted,
+        submission_id=submission.id,
+        lesson_id=assignment.lesson_id,
+        assignment_title=assignment.title,
+        points=float(submission.points_awarded or 0),
+        max_points=float(assignment.max_points),
+    )
     return assignment_service.serialize_submission_teacher(submission, str(user.id))
 
 
@@ -242,8 +252,18 @@ async def post_message(
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
 ) -> MessageRead:
-    await assignment_service.get_owned_submission(db, submission_id, user.id)
+    submission = await assignment_service.get_owned_submission(db, submission_id, user.id)
     message = await assignment_service.add_message(db, submission_id, user.id, data.body)
+    ref = await assignment_service.assignment_ref(db, submission.assignment_id)
+    if ref is not None:
+        title, lesson_id = ref
+        assignment_service.notify_submission_event(
+            submission.enrollment.student_id,
+            NotificationEvent.assignment_message,
+            submission_id=submission.id,
+            lesson_id=lesson_id,
+            assignment_title=title,
+        )
     return MessageRead.model_validate(message)
 
 

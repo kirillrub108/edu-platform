@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ heading }}</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;padding:32px;">
+          <tr>
+            <td>
+              <p style="margin:0 0 16px;font-size:15px;line-height:1.5;">
+                {% if full_name %}Здравствуйте, {{ full_name }}!{% else %}Здравствуйте!{% endif %}
+              </p>
+              <h1 style="margin:0 0 20px;font-size:20px;line-height:1.4;">{{ heading }}</h1>
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0">
+                {% for item in items %}
+                <tr>
+                  <td style="padding:10px 0;border-bottom:1px solid #f1f2f4;font-size:15px;line-height:1.5;">
+                    {% if item.url %}
+                    <a href="{{ item.url }}" style="color:#2563eb;text-decoration:none;">{{ item.title }}</a>
+                    {% else %}
+                    {{ item.title }}
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </table>
+              {% if overflow %}
+              <p style="margin:16px 0 0;font-size:14px;color:#6b7280;">…и ещё {{ overflow }}.</p>
+              {% endif %}
+              <p style="margin:24px 0 0;padding-top:16px;border-top:1px solid #e5e7eb;font-size:12px;color:#9ca3af;line-height:1.5;">
+                Вы получили это письмо, потому что включены уведомления Edllm.
+                <a href="{{ unsubscribe_url }}" style="color:#9ca3af;">Отписаться от уведомлений этой категории</a>.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

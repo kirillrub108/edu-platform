@@ -27,7 +27,6 @@ from app.models.course import Course
 from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
 from app.models.slide_text import SlideText
-from app.models.user import User
 from app.services import usage_service
 from app.services.billing_service import (
     partial_video_cost,
@@ -193,29 +192,27 @@ def _set_status(
     session.commit()
 
 
-def _enqueue_video_ready_email(session: Session, lesson: Lesson, owner_id: UUID) -> None:
-    """Notify the course owner that their video lesson is published. Best-effort:
-    any failure (owner gone, no email, broker down) is logged and swallowed so it
-    can never roll back the published status."""
-    try:
-        from app.tasks.email_pipeline import send_email
+def _enqueue_video_ready_email(lesson: Lesson, owner_id: UUID, task_id: str) -> None:
+    """Tell the course owner their video lesson is published — through the
+    notification subsystem, which drops the mail entirely if the owner still has
+    the lesson's SSE stream open, and otherwise batches it into their digest.
 
-        owner = session.get(User, owner_id)
-        if not owner or not owner.email:
-            return
-        lesson_url = f"{settings.FRONTEND_URL}/lessons/{lesson.id}"
-        send_email.delay(
-            to=owner.email,
-            subject="Видеолекция готова — Edllm",
-            template_name="video_ready.html",
-            context={
-                "full_name": owner.full_name or "",
-                "lesson_title": lesson.title or "",
-                "lesson_url": lesson_url,
-            },
-        )
-    except Exception:
-        logger.warning("video_ready_email_enqueue_failed", lesson_id=str(lesson.id), exc_info=True)
+    Dedup scope is the *task*, not the lesson: Celery keeps the id across an
+    acks_late redelivery and across retries, so a replayed run is swallowed —
+    but a fresh regeneration is a new run and is announced again.
+    """
+    from app.services.notification_service import NotificationEvent, notify
+
+    notify(
+        owner_id,
+        NotificationEvent.lesson_ready,
+        {
+            "entity_id": task_id,
+            "lesson_id": str(lesson.id),
+            "lesson_title": lesson.title or "",
+            "url": f"{settings.FRONTEND_URL}/lessons/{lesson.id}",
+        },
+    )
 
 
 def _split_and_annotate(
@@ -677,11 +674,13 @@ def generate_video_lesson(
             video_id = str(video_uuid)
             # _set_status commits the session, which also persists new_video.
             _set_status(session, lesson_uuid, LessonStatus.published)
-            _publish(lesson_id, {"status": "published", "video_url": video_url})
 
-            # Notify the owner via email (separate celery_email queue). Failure
-            # here must never undo the published status.
-            _enqueue_video_ready_email(session, owner_lesson, owner_course.owner_id)
+            # Enqueue BEFORE publishing the terminal SSE event: the stream stops
+            # on that event, and the notification's presence gate needs to see a
+            # still-live stream to know the owner watched this finish.
+            _enqueue_video_ready_email(owner_lesson, owner_course.owner_id, self.request.id)
+
+            _publish(lesson_id, {"status": "published", "video_url": video_url})
 
             # Remove checkpoint on clean completion — no longer needed.
             if cp_redis:
