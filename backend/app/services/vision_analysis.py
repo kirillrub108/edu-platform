@@ -96,8 +96,16 @@ SLIDE_USER_PROMPT_TEMPLATE = """\
 Курс: {course_title}
 Слайд {slide_number} из {total_slides}
 {context_section}
-
+{budget_section}
 Напиши текст озвучки для этого слайда.
+"""
+
+
+# Overrides requirement 4 of VISION_SYSTEM_PROMPT (its default 150–300 words)
+# when the teacher picked a target duration for the lesson.
+SLIDE_BUDGET_TEMPLATE = """\
+ОБЪЁМ ТЕКСТА: около {word_budget} слов (допустимо ±15%). Это ограничение важнее
+указанной в системном промпте длины 150–300 слов — уложись в него.
 """
 
 
@@ -124,16 +132,22 @@ def _build_user_content(
     slide_number: int,
     total_slides: int,
     previous_context: str,
+    word_budget: int | None = None,
 ) -> list[dict[str, Any]]:
     context_section = ""
     if previous_context:
         context_section = f"Контекст предыдущих слайдов:\n{previous_context}"
+
+    budget_section = ""
+    if word_budget is not None:
+        budget_section = SLIDE_BUDGET_TEMPLATE.format(word_budget=word_budget)
 
     user_text = SLIDE_USER_PROMPT_TEMPLATE.format(
         course_title=course_title,
         slide_number=slide_number,
         total_slides=total_slides,
         context_section=context_section,
+        budget_section=budget_section,
     )
     image_b64 = _encode_image(image_path)
     return [
@@ -237,14 +251,20 @@ class VisionAnalysisService:
         course_title: str,
         previous_context: str = "",
         lesson_id: Any = None,
+        word_budget: int | None = None,
     ) -> str:
-        """Return narration text for one slide."""
+        """Return narration text for one slide.
+
+        word_budget caps the narration length when the lesson has a target
+        duration; None keeps the system prompt's default 150–300 words.
+        """
         user_content = _build_user_content(
             slide_image_path,
             course_title,
             slide_number,
             total_slides,
             previous_context,
+            word_budget,
         )
 
         if self.provider == "ollama":
@@ -260,8 +280,13 @@ class VisionAnalysisService:
         progress_cb: Any = None,
         cancel_check: Any = None,
         lesson_id: Any = None,
+        word_budgets: list[int] | None = None,
     ) -> list[str]:
         """Analyse all slides sequentially with accumulated context.
+
+        word_budgets holds one word allowance per slide, derived from the
+        lesson's target duration (None = no explicit constraint). Title and
+        closing slides get a smaller share — see duration_service.
 
         cancel_check() is polled at each slide boundary (cooperative
         cancellation); when it returns True, AnalysisCancelled is raised and
@@ -284,6 +309,7 @@ class VisionAnalysisService:
                     course_title=course_title,
                     previous_context=previous_context,
                     lesson_id=lesson_id,
+                    word_budget=word_budgets[idx] if word_budgets else None,
                 )
             except Exception:
                 logger.exception("vision_analysis_failed", slide=slide_number)

@@ -64,7 +64,7 @@ from app.schemas.lesson import (
     VideoGenerateRequest,
 )
 from app.schemas.quiz import QuizTeacherResultRow
-from app.services import billing_service, quota_service, tier_service
+from app.services import billing_service, duration_service, quota_service, tier_service
 from app.services.notification_service import presence_key
 from app.services.storage_service import storage_service
 from app.services.video_service import count_source_slides
@@ -153,6 +153,7 @@ async def create_lesson(
         content_type=data.content_type,
         order=data.order,
         creation_mode=data.creation_mode,
+        target_duration_min=data.target_duration_min,
     )
     db.add(lesson)
     await db.commit()
@@ -292,6 +293,16 @@ async def upload_lesson_video(
     return _lesson_out(lesson, str(user.id))
 
 
+def _duration_warning(lesson: Lesson) -> str | None:
+    """Advisory only — auto mode hits the target via the prompt word budget,
+    so only authored text can drift."""
+    if lesson.creation_mode == CreationMode.presentation_auto:
+        return None
+    return duration_service.mismatch_warning(
+        lesson.target_duration_min, lesson.script or lesson.text_content or ""
+    )
+
+
 async def _video_estimate(
     db: AsyncSession, lesson: Lesson, pptx_path: str | None
 ) -> tuple[str, int | None, int, int | None]:
@@ -316,7 +327,7 @@ async def _video_estimate(
     credits: int | None = None
     if slides:
         credits = (
-            billing_service.estimate_video_auto(slides)
+            billing_service.estimate_video_auto(slides, lesson.target_duration_min)
             if is_auto
             else billing_service.estimate_video_text(slides, script_chars)
         )
@@ -344,12 +355,25 @@ async def _count_slides_offloop(pptx_path: str) -> int | None:
 
 
 async def _trial_video_available(
-    db: AsyncSession, user_id: UUID, plan: str, slides: int | None, script_chars: int
+    db: AsyncSession,
+    user_id: UUID,
+    plan: str,
+    slides: int | None,
+    script_chars: int,
+    target_duration_min: int | None = None,
 ) -> tuple[dict, bool]:
-    """(trial_state, video slot usable) — free plan, slots left, lecture fits caps."""
+    """(trial_state, video slot usable) — free plan, slots left, lecture fits caps.
+
+    In auto mode script_chars is 0, so a target duration would otherwise let a
+    free trial buy an arbitrarily long lecture — its expected narration volume
+    answers to the same cap.
+    """
     trial = await quota_service.get_trial_state(db, user_id)
+    volume_chars = max(
+        script_chars, billing_service.expected_narration_chars(0, target_duration_min)
+    )
     fits = (
-        slides is not None and slides <= TRIAL_MAX_SLIDES and script_chars <= TRIAL_MAX_SCRIPT_CHARS
+        slides is not None and slides <= TRIAL_MAX_SLIDES and volume_chars <= TRIAL_MAX_SCRIPT_CHARS
     )
     return trial, plan == "free" and fits and trial["lectures_used"] < trial["lectures_limit"]
 
@@ -410,6 +434,8 @@ async def generate_video(
             status_code=422, detail="Не удалось определить число слайдов презентации"
         )
 
+    duration_warning = _duration_warning(lesson)
+
     is_regen = lesson.status == LessonStatus.published
     operation = CreditOperation.LESSON_REGEN if is_regen else CreditOperation.LESSON_GENERATE
     balance = await billing_service.get_balance(db, user.id)
@@ -417,7 +443,7 @@ async def generate_video(
     # 3. Trial slot or credit reservation (write, atomic).
     billing_ref = f"{lesson.id}:{uuid4().hex[:12]}"
     trial, trial_usable = await _trial_video_available(
-        db, user.id, balance["plan"], slides, script_chars
+        db, user.id, balance["plan"], slides, script_chars, lesson.target_duration_min
     )
     billed_via = "credits"
     if trial_usable and await quota_service.try_consume_slot(
@@ -462,6 +488,7 @@ async def generate_video(
         "lesson_id": str(lesson.id),
         "credit_estimate": estimate,
         "billed_via": billed_via,
+        "duration_warning": duration_warning,
     }
 
 
@@ -573,14 +600,28 @@ async def generation_estimate(
     mode, slides, script_chars, credits = await _video_estimate(db, lesson, lesson.pptx_path)
     balance = await billing_service.get_balance(db, user.id)
     trial, video_trial = await _trial_video_available(
-        db, user.id, balance["plan"], slides, script_chars
+        db, user.id, balance["plan"], slides, script_chars, lesson.target_duration_min
     )
     quiz_trial = balance["plan"] == "free" and trial["quizzes_used"] < trial["quizzes_limit"]
+    # Auto mode hits the target through the prompt word budget, so an
+    # up-front estimate would only echo the target back.
+    authored = "" if mode == "auto" else (lesson.script or lesson.text_content or "")
+    estimated_sec = (
+        None
+        if mode == "auto"
+        else duration_service.estimate_duration_sec(duration_service.count_words(authored))
+    )
     return GenerationEstimateOut(
         video=EstimateVideoOut(
-            mode=mode, slides=slides, script_chars=script_chars, credits=credits
+            mode=mode,
+            slides=slides,
+            script_chars=script_chars,
+            credits=credits,
+            target_duration_min=lesson.target_duration_min,
+            estimated_duration_sec=estimated_sec,
+            duration_warning=_duration_warning(lesson),
         ),
-        vision_credits=CREDIT_WEIGHTS["vision_analyze"],
+        vision_credits=billing_service.estimate_vision_analyze(slides, lesson.target_duration_min),
         quiz_credits=CREDIT_WEIGHTS["quiz_generate"],
         ai_review_credits=CREDIT_WEIGHTS["ai_review"],
         available=balance["available"],

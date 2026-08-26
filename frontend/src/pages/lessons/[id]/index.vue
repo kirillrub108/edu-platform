@@ -1,6 +1,15 @@
 <script setup lang="ts">
 import { AlertCircle, ChevronLeft, ChevronRight, Eye, MessageSquare, X } from 'lucide-vue-next'
 import type { Comment } from '~/stores/comments'
+import {
+  LESSON_DURATION_MAX_MINUTES,
+  LESSON_DURATION_MIN_MINUTES,
+  LESSON_DURATION_PRESETS_MIN,
+  clampTargetDuration,
+  countWords,
+  estimateDurationSec,
+  formatDuration,
+} from '~/composables/useLessonDuration'
 
 definePageMeta({ middleware: ['auth', 'teacher'], layout: 'workspace' })
 
@@ -79,9 +88,28 @@ const {
   lesson, loading, error, mode, script, scriptSaveStatus,
   pptxFile, uploading, uploadError, scriptFile, uploadingScript, scriptUploadError,
   videoFile, uploadingVideo, videoUploadError,
+  targetDuration, targetDurationError, setTargetDuration,
   isAuto, isManual, isVideoUpload,
   load, onModeSelect, uploadPptx, uploadScriptFile, uploadVideo, flushScript,
 } = useLessonData(lessonId)
+
+// Target length is a narration-budget hint; a directly uploaded MP4 has no
+// narration to budget, so the control is hidden in that mode.
+const showDurationPicker = computed(() => isManual.value || isAuto.value)
+
+// Free-form minutes; an empty field means "auto".
+const onTargetDurationInput = (event: Event) => {
+  const raw = (event.target as HTMLInputElement).value.trim()
+  void setTargetDuration(raw === '' ? null : clampTargetDuration(Number(raw)))
+}
+
+const actualDurationLabel = computed(() =>
+  lesson.value?.duration_sec ? formatDuration(lesson.value.duration_sec) : null,
+)
+
+const authoredDurationLabel = computed(() =>
+  isManual.value ? formatDuration(estimateDurationSec(countWords(script.value))) : null,
+)
 
 const {
   startAnalysis, cancelAnalysis, analyzing, analyzeMeta, analyzeStatus, analyzeError,
@@ -561,7 +589,82 @@ watch(lessonId, (newId, oldId) => {
             />
           </div>
 
-          <div v-show="activeStep === 'presentation'">
+          <div v-show="activeStep === 'presentation'" class="space-y-6">
+            <!-- Sits before the analysis button on purpose: the target is spent
+                 as a word budget when the narration is written, so changing it
+                 later does nothing until the presentation is re-analysed. -->
+            <section
+              v-if="showDurationPicker"
+              class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft"
+            >
+              <label for="target-duration" class="block text-sm font-medium text-gray-700 mb-1">
+                Целевая длительность урока
+              </label>
+              <p class="text-xs text-gray-400 mb-3">
+                {{ isAuto
+                  ? 'Задаёт объём текста, который LLM напишет для каждого слайда. Титульный и заключительный слайды получают меньше остальных.'
+                  : 'Авторский текст не сокращается и не дополняется — длительность используется только для оценки.' }}
+              </p>
+
+              <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-2">
+                  <input
+                    id="target-duration"
+                    type="number"
+                    inputmode="numeric"
+                    :min="LESSON_DURATION_MIN_MINUTES"
+                    :max="LESSON_DURATION_MAX_MINUTES"
+                    placeholder="авто"
+                    class="w-24 text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
+                    :value="targetDuration ?? ''"
+                    @change="onTargetDurationInput"
+                  />
+                  <span class="text-sm text-gray-500">мин</span>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <button
+                    v-for="preset in LESSON_DURATION_PRESETS_MIN"
+                    :key="preset"
+                    type="button"
+                    class="text-xs px-2.5 py-1 rounded-lg border transition"
+                    :class="targetDuration === preset
+                      ? 'border-violet-400 bg-violet-50 text-violet-700 font-medium'
+                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+                    @click="setTargetDuration(preset)"
+                  >
+                    {{ preset }}
+                  </button>
+                  <button
+                    type="button"
+                    class="text-xs px-2.5 py-1 rounded-lg border transition"
+                    :class="targetDuration === null
+                      ? 'border-violet-400 bg-violet-50 text-violet-700 font-medium'
+                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
+                    @click="setTargetDuration(null)"
+                  >
+                    Авто
+                  </button>
+                </div>
+
+                <span v-if="actualDurationLabel" class="text-sm text-gray-500">
+                  Фактически: <span class="font-medium text-gray-800">{{ actualDurationLabel }}</span>
+                </span>
+                <span v-if="authoredDurationLabel" class="text-sm text-gray-500">
+                  Оценка по тексту:
+                  <span class="font-medium text-gray-800">{{ authoredDurationLabel }}</span>
+                </span>
+              </div>
+
+              <p v-if="isAuto && targetDuration !== null" class="text-xs text-amber-700 mt-3">
+                Применяется во время анализа презентации. Если тексты слайдов уже
+                сгенерированы — запустите анализ заново, иначе длительность не изменится.
+              </p>
+              <p v-if="targetDurationError" class="text-sm text-rose-600 mt-2">
+                {{ targetDurationError }}
+              </p>
+            </section>
+
             <LessonUploadSection
               v-if="isManual || isAuto"
               ref="visionPanelRef"
@@ -578,6 +681,7 @@ watch(lessonId, (newId, oldId) => {
               :lesson-status="lesson.status"
               :show-slide-editor="showSlideEditor"
               :lesson-id="lessonId"
+              :target-duration-min="targetDuration"
               :cancelling-analysis="cancellingAnalysis"
               :credits-spent="analyzeCreditsSpent"
               :credits-reserved="analyzeCreditsReserved"

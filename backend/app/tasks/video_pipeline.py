@@ -37,7 +37,7 @@ from app.services.llm_service import llm_service
 from app.services.quota_service import TRIAL_LECTURE, sync_release_slot
 from app.services.storage_service import storage_service
 from app.services.tts_service import tts_service
-from app.services.video_service import video_service
+from app.services.video_service import probe_duration_seconds, video_service
 from app.services.vision_analysis import vision_analysis_service
 
 logger = structlog.get_logger()
@@ -655,6 +655,12 @@ def generate_video_lesson(
             # the current viewer so non-owner readers and post-expiry owner
             # reads also get a valid signature.
             owner_lesson = session.get(Lesson, lesson_uuid)
+            # Actual length, shown next to the teacher's target. A failed probe
+            # must not fail a finished video — the field just stays as it was.
+            try:
+                owner_lesson.duration_sec = round(probe_duration_seconds(video_local))
+            except Exception:
+                logger.warning("video_duration_probe_failed", lesson_id=lesson_id, exc_info=True)
             owner_module = session.get(Module, owner_lesson.module_id)
             owner_course = session.get(Course, owner_module.course_id)
             video_url = storage_service.get_url(video_relative, str(owner_course.owner_id))

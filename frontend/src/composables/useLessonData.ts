@@ -64,6 +64,7 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
       const data = await apiFetch<any>(`/lessons/${lessonId.value}`)
       lesson.value = data
       setProgrammaticScript(data.script ?? data.text_content ?? '')
+      targetDuration.value = data.target_duration_min ?? null
       isDirty.value = false
       if (data.creation_mode) {
         mode.value = data.creation_mode as CreationModeValue
@@ -76,6 +77,26 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
       error.value = e?.data?.detail ?? 'Не удалось загрузить урок'
     } finally {
       loading.value = false
+    }
+  }
+
+  // null = "auto": narration length follows the source material.
+  const targetDuration = ref<number | null>(null)
+  const targetDurationError = ref('')
+
+  const setTargetDuration = async (value: number | null) => {
+    const previous = targetDuration.value
+    targetDuration.value = value
+    targetDurationError.value = ''
+    try {
+      await apiFetch(`/lessons/${lessonId.value}`, {
+        method: 'PUT',
+        body: { target_duration_min: value },
+      })
+      lesson.value = { ...lesson.value, target_duration_min: value }
+    } catch (e: any) {
+      targetDuration.value = previous
+      targetDurationError.value = e?.data?.detail ?? 'Не удалось сохранить длительность'
     }
   }
 
@@ -183,6 +204,7 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
     pptxFile, uploading, uploadError,
     scriptFile, uploadingScript, scriptUploadError,
     videoFile, uploadingVideo, videoUploadError,
+    targetDuration, targetDurationError, setTargetDuration,
     isAuto, isManual, isVideoUpload,
     load, onModeSelect, uploadPptx, uploadScriptFile, uploadVideo, flushScript,
   }

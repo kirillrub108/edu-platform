@@ -27,13 +27,18 @@ from sqlalchemy.orm import Session
 
 from app.constants import (
     AUTO_CHARS_PER_SLIDE,
+    CHARS_PER_WORD,
     CREDIT_CARRYOVER_RATIO,
+    CREDIT_WEIGHTS,
     PLAN_CONFIGS,
     RETENTION_EXTEND_BASE_CREDITS,
     RETENTION_MB_PER_CREDIT,
     TTS_CHARS_PER_CREDIT,
     VIDEO_AUTO_BASE_CREDITS,
     VIDEO_TEXT_BASE_CREDITS,
+    VISION_ANALYZE_BASE_CREDITS,
+    VISION_CHARS_PER_CREDIT,
+    WORDS_PER_MINUTE,
 )
 from app.models.credit import CreditAccount, CreditOperation, CreditPlan, CreditTransaction
 from app.models.lesson import Lesson
@@ -54,12 +59,43 @@ def estimate_video_text(slides: int, script_chars: int) -> int:
     return VIDEO_TEXT_BASE_CREDITS + slides + math.ceil(script_chars / TTS_CHARS_PER_CREDIT)
 
 
-def estimate_video_auto(slides: int) -> int:
-    """COST_VIDEO_AUTO: 3 + slides + ceil(slides * 600 / 3000)."""
+def expected_narration_chars(slides: int, target_duration_min: int | None = None) -> int:
+    """Narration volume an auto lesson is expected to produce, in characters.
+
+    With a target duration the volume is the word budget the prompts are given
+    (target * WPM), converted at the measured chars-per-word rate. Without one
+    it falls back to the flat per-slide norm, so lessons that predate target
+    durations keep their old price.
+    """
+    if target_duration_min is not None:
+        return target_duration_min * WORDS_PER_MINUTE * CHARS_PER_WORD
+    return slides * AUTO_CHARS_PER_SLIDE
+
+
+def estimate_video_auto(slides: int, target_duration_min: int | None = None) -> int:
+    """COST_VIDEO_AUTO: 3 + slides + ceil(expected narration chars / 3000).
+
+    A 50-minute lesson voices ~10x the text of a 5-minute one and is priced
+    accordingly — see docs/DECISIONS.md.
+    """
     return (
         VIDEO_AUTO_BASE_CREDITS
         + slides
-        + math.ceil(slides * AUTO_CHARS_PER_SLIDE / TTS_CHARS_PER_CREDIT)
+        + math.ceil(expected_narration_chars(slides, target_duration_min) / TTS_CHARS_PER_CREDIT)
+    )
+
+
+def estimate_vision_analyze(slides: int | None, target_duration_min: int | None = None) -> int:
+    """COST_VISION_ANALYZE: 2 + ceil(expected narration chars / 2000).
+
+    The vision pass is priced by the text it writes, not per run. Falls back to
+    the flat shop-window weight when the slide count could not be determined
+    and no target duration pins the volume.
+    """
+    if slides is None and target_duration_min is None:
+        return CREDIT_WEIGHTS["vision_analyze"]
+    return VISION_ANALYZE_BASE_CREDITS + math.ceil(
+        expected_narration_chars(slides or 0, target_duration_min) / VISION_CHARS_PER_CREDIT
     )
 
 

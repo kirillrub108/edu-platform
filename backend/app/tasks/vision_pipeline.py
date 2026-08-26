@@ -11,7 +11,7 @@ from app.config import settings
 from app.models.course import Course
 from app.models.lesson import Lesson, LessonStatus, Module
 from app.models.slide_text import SlideText
-from app.services import usage_service
+from app.services import duration_service, usage_service
 from app.services.billing_service import (
     partial_vision_cost,
     sync_claim_billing,
@@ -116,6 +116,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             if not lesson:
                 raise RuntimeError(f"Lesson {lesson_id} not found")
             course_title = lesson.title or ""
+            target_duration_min = lesson.target_duration_min
 
             module = session.get(Module, lesson.module_id)
             course = session.get(Course, module.course_id) if module else None
@@ -182,6 +183,10 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                         session.commit()
                 _progress("vision", done, total_)
 
+            # Target duration is spent as a word budget spread over the slides
+            # (title/closing get a smaller share); a prompt that misses the
+            # budget is not an error — see docs/DECISIONS.md.
+            word_budgets = duration_service.slide_word_budgets(target_duration_min, total)
             texts = asyncio.run(
                 vision_analysis_service.analyze_presentation(
                     image_paths,
@@ -189,6 +194,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                     progress_cb=_on_progress,
                     cancel_check=lambda: _cancel_requested(session, lesson_uuid),
                     lesson_id=lesson_id,
+                    word_budgets=word_budgets,
                 )
             )
 

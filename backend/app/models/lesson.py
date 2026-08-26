@@ -88,6 +88,12 @@ class Lesson(Base):
         default=CreationMode.presentation_and_text,
         nullable=False,
     )
+    # Teacher-chosen target length in minutes (one of
+    # constants.LESSON_DURATION_OPTIONS_MIN); NULL = "auto", narration length
+    # follows the source material. duration_sec is the ffprobe-measured length
+    # of the most recent successful generation.
+    target_duration_min = Column(Integer, nullable=True)
+    duration_sec = Column(Integer, nullable=True)
     status = Column(
         SAEnum(LessonStatus, name="lesson_status"),
         default=LessonStatus.draft,

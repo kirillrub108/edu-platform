@@ -176,7 +176,15 @@ async def test_estimate_endpoint_reports_trial_state(
     assert resp.status_code == 200
     body = resp.json()
     # text mode: 2 + 5 slides + ceil(4500/3000)=2 → 9
-    assert body["video"] == {"mode": "text", "slides": 5, "script_chars": 4500, "credits": 9}
+    assert body["video"] == {
+        "mode": "text",
+        "slides": 5,
+        "script_chars": 4500,
+        "credits": 9,
+        "target_duration_min": None,
+        "estimated_duration_sec": 0,
+        "duration_warning": None,
+    }
     assert body["trial"]["video_trial_available"] is True
     assert body["trial"]["lectures_used"] == 0
     assert body["plan"] == "free"

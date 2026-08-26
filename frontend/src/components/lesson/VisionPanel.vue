@@ -21,6 +21,7 @@ defineProps<{
   lessonStatus: string
   showSlideEditor: boolean
   lessonId: string
+  targetDurationMin: number | null
   cancellingAnalysis: boolean
   creditsSpent: number
   creditsReserved: number
@@ -172,6 +173,7 @@ onUnmounted(clearConfirmTimer)
         <SlideTextEditor
           ref="slideEditorRef"
           :lesson-id="lessonId"
+          :target-duration-min="targetDurationMin"
           @back="emit('slide-back')"
           @ready="emit('slide-ready')"
         />

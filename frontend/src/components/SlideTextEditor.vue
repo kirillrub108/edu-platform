@@ -3,6 +3,12 @@ import { ChevronLeft, ChevronRight, Sparkles, Save, FileText, RotateCcw } from '
 import ProgressBar from './ProgressBar.vue'
 import UiButton from './UiButton.vue'
 import { friendlyApiError } from '~/composables/useBillingMeta'
+import {
+  countWords,
+  estimateDurationSec,
+  formatDuration,
+  slideWordBudgets,
+} from '~/composables/useLessonDuration'
 
 interface SlideText {
   id: string
@@ -15,6 +21,8 @@ interface SlideText {
 
 interface Props {
   lessonId: string
+  /** null = "auto": no length target, so no budget hint is shown. */
+  targetDurationMin?: number | null
 }
 
 const props = defineProps<Props>()
@@ -43,15 +51,29 @@ const restoreNotice = ref('')
 let restoreNoticeTimer: ReturnType<typeof setTimeout> | null = null
 
 const current = computed<SlideText | null>(() => slides.value[currentIdx.value] ?? null)
-const wordsPerMinute = 130
 
-const wordCount = computed(() => buffer.value.trim().split(/\s+/).filter(Boolean).length)
-const estDurationLabel = computed(() => {
-  const seconds = Math.round((wordCount.value / wordsPerMinute) * 60)
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}:${s.toString().padStart(2, '0')} мин`
-})
+const wordCount = computed(() => countWords(buffer.value))
+const estDurationLabel = computed(
+  () => `${formatDuration(estimateDurationSec(wordCount.value))} мин`,
+)
+
+const targetMin = computed(() => props.targetDurationMin ?? null)
+// Title/closing slides get a smaller budget, so this is indexed, not divided.
+const budgets = computed(() => slideWordBudgets(targetMin.value, slides.value.length))
+const slideBudget = computed(() => budgets.value?.[currentIdx.value] ?? null)
+
+// Whole-lesson estimate: the open slide counts by its unsaved buffer, the rest
+// by what is stored — so the number tracks typing without a round-trip.
+const lessonWordCount = computed(() =>
+  slides.value.reduce(
+    (sum, s, i) =>
+      sum + (i === currentIdx.value ? wordCount.value : countWords(s.edited_text ?? s.generated_text ?? '')),
+    0,
+  ),
+)
+const lessonDurationLabel = computed(
+  () => `${formatDuration(estimateDurationSec(lessonWordCount.value))} мин`,
+)
 
 const editedCount = computed(() =>
   slides.value.filter(
@@ -318,10 +340,15 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
             <div class="flex justify-between text-xs text-gray-500 mt-2">
               <span>
                 Слов: <span class="font-medium text-gray-700">{{ wordCount }}</span>
+                <span v-if="slideBudget !== null" class="text-gray-400"> / {{ slideBudget }}</span>
                 <span class="text-gray-300 mx-1.5">·</span>
                 ≈ {{ estDurationLabel }}
               </span>
               <span v-if="isSavingCurrent" class="text-violet-700">сохранение…</span>
+            </div>
+            <div class="text-xs text-gray-500 mt-1">
+              Весь урок: ≈ <span class="font-medium text-gray-700">{{ lessonDurationLabel }}</span>
+              <span v-if="targetMin !== null" class="text-gray-400"> · цель {{ targetMin }} мин</span>
             </div>
           </div>
         </div>

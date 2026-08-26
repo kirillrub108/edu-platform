@@ -66,8 +66,13 @@ def test_unsubscribe_token_roundtrip() -> None:
 
 def test_unsubscribe_token_rejects_tampering() -> None:
     token = ns.generate_unsubscribe_token(str(uuid.uuid4()), ns.NotificationCategory.content)
+    # Tamper with the payload, not the signature's last character: the SHA-1
+    # signature is 20 bytes in 27 base64url chars, so that last char carries
+    # only 4 significant bits and four distinct characters decode to the same
+    # bytes — flipping it left the token valid 1 run in 16.
+    tampered = ("B" if token[0] != "B" else "C") + token[1:]
     with pytest.raises(ValueError, match="invalid"):
-        ns.verify_unsubscribe_token(token[:-1] + ("A" if token[-1] != "A" else "B"))
+        ns.verify_unsubscribe_token(tampered)
 
 
 def test_unsubscribe_token_rejects_expired(monkeypatch: pytest.MonkeyPatch) -> None:

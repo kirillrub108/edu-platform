@@ -1,9 +1,12 @@
 from datetime import datetime
+from typing import Annotated
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.constants import (
+    LESSON_DURATION_MAX_MINUTES,
+    LESSON_DURATION_MIN_MINUTES,
     POLZA_TTS_VOICES,
     YANDEX_TTS_PITCH_MAX,
     YANDEX_TTS_PITCH_MIN,
@@ -13,6 +16,12 @@ from app.constants import (
 )
 from app.models.lesson import ContentType, CreationMode, LessonStatus
 
+# Free-form minutes; None = "auto", no explicit length target for this lesson.
+TargetDurationMin = Annotated[
+    int | None,
+    Field(ge=LESSON_DURATION_MIN_MINUTES, le=LESSON_DURATION_MAX_MINUTES),
+]
+
 
 class LessonCreate(BaseModel):
     title: str = Field(min_length=1, max_length=255)
@@ -20,6 +29,7 @@ class LessonCreate(BaseModel):
     content_type: ContentType = ContentType.video
     order: int = 0
     creation_mode: CreationMode = CreationMode.presentation_and_text
+    target_duration_min: TargetDurationMin = None
 
 
 class LessonUpdate(BaseModel):
@@ -31,6 +41,7 @@ class LessonUpdate(BaseModel):
     script: str | None = None
     status: LessonStatus | None = None
     creation_mode: CreationMode | None = None
+    target_duration_min: TargetDurationMin = None
 
 
 class LessonPartialUpdate(BaseModel):
@@ -72,6 +83,8 @@ class LessonOut(BaseModel):
     status: LessonStatus
     is_published: bool
     creation_mode: CreationMode
+    target_duration_min: int | None = None
+    duration_sec: int | None = None
     analyze_task_id: str | None = None
     video_task_id: str | None = None
     last_warning: str | None = None

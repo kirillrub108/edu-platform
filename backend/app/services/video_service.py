@@ -105,6 +105,11 @@ def _get_audio_duration(path: str) -> float:
     return float(raw)
 
 
+def probe_duration_seconds(path: str) -> float:
+    """Public alias of the ffprobe duration probe — works for video too."""
+    return _get_audio_duration(path)
+
+
 def _trim_trailing_silence(src: str, dest: str) -> bool:
     """Write *src* to *dest* with trailing silence removed.
 

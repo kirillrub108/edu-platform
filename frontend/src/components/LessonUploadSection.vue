@@ -16,6 +16,7 @@ defineProps<{
   lessonStatus: string
   showSlideEditor: boolean
   lessonId: string
+  targetDurationMin: number | null
   cancellingAnalysis: boolean
   creditsSpent: number
   creditsReserved: number
@@ -70,6 +71,7 @@ defineExpose({
       :lesson-status="lessonStatus"
       :show-slide-editor="showSlideEditor"
       :lesson-id="lessonId"
+      :target-duration-min="targetDurationMin"
       :cancelling-analysis="cancellingAnalysis"
       :credits-spent="creditsSpent"
       :credits-reserved="creditsReserved"

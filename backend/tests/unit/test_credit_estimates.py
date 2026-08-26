@@ -20,6 +20,7 @@ from app.services.billing_service import (
     estimate_retention_extension,
     estimate_video_auto,
     estimate_video_text,
+    estimate_vision_analyze,
     partial_video_cost,
     partial_vision_cost,
 )
@@ -64,6 +65,43 @@ def test_estimate_video_text_more_slides_costs_more() -> None:
 )
 def test_estimate_video_auto(slides: int, expected: int) -> None:
     assert estimate_video_auto(slides) == expected
+
+
+@pytest.mark.parametrize(
+    "slides, target, expected",
+    [
+        # 5 min  -> 650 words * 7 = 4550 chars -> ceil(4550/3000) = 2
+        (3, 5, 3 + 3 + 2),
+        # 50 min -> 6500 words * 7 = 45500 chars -> ceil(45500/3000) = 16
+        (3, 50, 3 + 3 + 16),
+    ],
+)
+def test_estimate_video_auto_scales_with_target(slides: int, target: int, expected: int) -> None:
+    """Same deck, ten times the lesson: the TTS part of the bill follows."""
+    assert estimate_video_auto(slides, target) == expected
+
+
+def test_estimate_video_auto_without_target_keeps_legacy_price() -> None:
+    assert estimate_video_auto(7, None) == estimate_video_auto(7)
+
+
+@pytest.mark.parametrize(
+    "slides, target, expected",
+    [
+        # No target: 10 * 600 = 6000 chars -> 2 + ceil(6000/2000) = 5, the old flat weight.
+        (10, None, 5),
+        (3, None, 2 + 1),
+        # 15 min -> 1950 words * 7 = 13650 chars -> 2 + ceil(13650/2000) = 9
+        (3, 15, 9),
+        (3, 50, 2 + 23),
+    ],
+)
+def test_estimate_vision_analyze(slides: int, target: int | None, expected: int) -> None:
+    assert estimate_vision_analyze(slides, target) == expected
+
+
+def test_estimate_vision_analyze_falls_back_when_slides_unknown() -> None:
+    assert estimate_vision_analyze(None, None) == CREDIT_WEIGHTS["vision_analyze"]
 
 
 def test_auto_formula_constants_match_spec() -> None:

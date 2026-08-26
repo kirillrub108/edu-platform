@@ -90,6 +90,11 @@ class EstimateVideoOut(BaseModel):
     slides: int | None
     script_chars: int
     credits: int | None  # None when slides are unknown (no PPTX yet)
+    target_duration_min: int | None = None
+    # Text mode only: spoken length of the authored script, plus an advisory
+    # warning when it drifts from the target. Never blocks generation.
+    estimated_duration_sec: int | None = None
+    duration_warning: str | None = None
 
 
 class EstimateTrialOut(BaseModel):

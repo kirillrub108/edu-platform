@@ -73,6 +73,7 @@ def _seed_lesson(
     creation_mode: CreationMode = CreationMode.presentation_and_text,
     pptx_path: str = "pptx/x.pptx",
     script: str = "Sentence one. Sentence two.",
+    target_duration_min: int | None = None,
 ) -> Lesson:
     user = User(
         email=f"t-{uuid4().hex[:8]}@example.com",
@@ -94,6 +95,7 @@ def _seed_lesson(
         creation_mode=creation_mode,
         pptx_path=pptx_path,
         script=script,
+        target_duration_min=target_duration_min,
         status=LessonStatus.draft,
     )
     sync_session.add(lesson)
@@ -143,6 +145,43 @@ def test_analyze_presentation_task_happy_path(
     rows = sync_session.query(SlideText).filter(SlideText.lesson_id == lesson.id).all()
     assert len(rows) >= 1
     assert all(r.generated_text for r in rows)
+
+
+def test_analyze_presentation_passes_word_budget(
+    sync_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    _seed_pptx_on_disk: str,
+    mock_subprocess: dict[str, list[list[str]]],
+    mock_vision: dict[str, Any],
+) -> None:
+    """A target duration reaches the vision service as a per-slide word budget."""
+    from app.services import duration_service
+    from app.tasks.vision_pipeline import analyze_presentation_task
+
+    lesson = _seed_lesson(sync_session, pptx_path=_seed_pptx_on_disk, target_duration_min=10)
+
+    result = analyze_presentation_task.apply(args=[str(lesson.id), lesson.pptx_path]).get()
+    assert result["status"] == "ok"
+
+    slides = sync_session.query(SlideText).filter(SlideText.lesson_id == lesson.id).count()
+    assert mock_vision["word_budgets"] == duration_service.slide_word_budgets(10, slides)
+
+
+def test_analyze_presentation_without_target_sends_no_budget(
+    sync_session: Session,
+    monkeypatch: pytest.MonkeyPatch,
+    _seed_pptx_on_disk: str,
+    mock_subprocess: dict[str, list[list[str]]],
+    mock_vision: dict[str, Any],
+) -> None:
+    """No target duration = the prompt keeps its default length guidance."""
+    from app.tasks.vision_pipeline import analyze_presentation_task
+
+    lesson = _seed_lesson(sync_session, pptx_path=_seed_pptx_on_disk)
+
+    result = analyze_presentation_task.apply(args=[str(lesson.id), lesson.pptx_path]).get()
+    assert result["status"] == "ok"
+    assert mock_vision["word_budgets"] is None
 
 
 def test_analyze_presentation_task_handles_vision_error(

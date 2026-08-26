@@ -107,6 +107,21 @@ TTS_CACHE_TTL_DAYS: int = 7
 TTS_CHUNK_CACHE_ENABLED: bool = True
 TTS_CHUNK_CACHE_DIR_NAME: str = "tts_chunk_cache"
 
+# Lesson target duration (teacher-selected). Realised as a WORD BUDGET fed to
+# the narration prompt, never as a TTS speed change — see docs/DECISIONS.md.
+# None on a lesson = "auto": narration length follows the source material.
+# Free-form minutes inside these bounds; the frontend offers presets on top.
+LESSON_DURATION_MIN_MINUTES: int = 1
+LESSON_DURATION_MAX_MINUTES: int = 180
+LESSON_DURATION_PRESETS_MIN: tuple[int, ...] = (5, 10, 15, 20, 30)
+WORDS_PER_MINUTE: int = 130  # spoken pace; mirrored in frontend useLessonDuration.ts
+# Title and closing slides carry far less content than body slides, so they get
+# this fraction of a body slide's word budget instead of an equal share.
+EDGE_SLIDE_BUDGET_WEIGHT: float = 0.4
+# presentation_and_text: relative gap between the estimated and the target
+# duration above which the teacher gets a warning. Never blocks generation.
+DURATION_MISMATCH_RATIO: float = 0.25
+
 # Slide rendering
 SLIDE_DPI: int = 150  # indistinguishable from 300 DPI on 1080p, 4× smaller PNGs
 
@@ -518,6 +533,15 @@ VIDEO_TEXT_BASE_CREDITS: int = 2
 VIDEO_AUTO_BASE_CREDITS: int = 3
 TTS_CHARS_PER_CREDIT: int = 3000
 AUTO_CHARS_PER_SLIDE: int = 600  # нормативная длина озвучки слайда в auto-режиме
+# Измерено на ~22k слов сгенерированной озвучки: 6.96 символа на слово.
+# Переводит бюджет слов целевой длительности в символы для тарификации TTS.
+CHARS_PER_WORD: int = 7
+# Vision-анализ тарифицируется по объёму текста, который он пишет: дека на 3
+# слайда и лекция на 50 минут не могут стоить одинаково. База + посимвольная
+# часть подобраны так, что дека без целевой длительности остаётся около
+# прежней плоской пятёрки CREDIT_WEIGHTS['vision_analyze'].
+VISION_ANALYZE_BASE_CREDITS: int = 2
+VISION_CHARS_PER_CREDIT: int = 2000
 
 # Provider cost rates (rubles) for the generation_usage margin journal.
 TTS_RUB_PER_MCHAR: float = 1380.48
