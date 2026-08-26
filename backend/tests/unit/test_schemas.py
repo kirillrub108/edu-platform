@@ -64,6 +64,24 @@ def test_user_register_rejects_short_password(password: str) -> None:
         UserRegister(email="x@y.com", password=password, **CONSENTS)
 
 
+@pytest.mark.parametrize(
+    "email",
+    ["x@mailinator.com", "X@MAILINATOR.COM", "x@sub.mailinator.com", "x@yopmail.com"],
+)
+def test_user_register_rejects_disposable_email(email: str) -> None:
+    with pytest.raises(ValidationError, match="disposable_email_not_allowed"):
+        UserRegister(email=email, password="password123", **CONSENTS)
+
+
+@pytest.mark.parametrize(
+    "email",
+    ["x@gmail.com", "x@yandex.ru", "x@mail.ru", "x@outlook.com"],
+)
+def test_user_register_accepts_legitimate_email(email: str) -> None:
+    u = UserRegister(email=email, password="password123", **CONSENTS)
+    assert u.email == email
+
+
 # ── CourseCreate ────────────────────────────────────────────────────────────
 
 

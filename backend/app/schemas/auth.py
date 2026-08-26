@@ -1,5 +1,6 @@
 from typing import Annotated
 
+from disposable_email_domains import blocklist
 from pydantic import BaseModel, EmailStr, Field, model_validator
 
 from app.models.user import UserRole
@@ -8,6 +9,12 @@ from app.schemas.user import UserOut
 # Shared password constraint — the single source of truth for "what counts as an
 # acceptable password" across registration, reset, and change.
 PasswordStr = Annotated[str, Field(min_length=8, max_length=128)]
+
+
+def _is_disposable_domain(domain: str) -> bool:
+    """True if `domain` or any of its parent domains is a known disposable provider."""
+    labels = domain.lower().split(".")
+    return any(".".join(labels[i:]) in blocklist for i in range(len(labels) - 1))
 
 
 class UserRegister(BaseModel):
@@ -34,6 +41,12 @@ class UserRegister(BaseModel):
         ]
         if missing:
             raise ValueError(f"Required consents not accepted: {', '.join(missing)}")
+        return self
+
+    @model_validator(mode="after")
+    def _reject_disposable_email(self) -> "UserRegister":
+        if _is_disposable_domain(self.email.split("@")[-1]):
+            raise ValueError("disposable_email_not_allowed")
         return self
 
 
