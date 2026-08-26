@@ -4,19 +4,25 @@ import re
 import shutil
 import subprocess
 import threading
+import zipfile
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from pathlib import Path
 
 import structlog
 from cachetools import TTLCache
 from pptx import Presentation
+from pptx.enum.text import PP_ALIGN
+from pptx.oxml.ns import qn
+from pptx.text.text import TextFrame
 
 from app.config import settings
 from app.constants import (
     ENCODE_WORKERS as _ENCODE_WORKERS_DEFAULT,
 )
 from app.constants import (
+    NOWRAP_WIDEN_FACTOR,
     SEGMENT_AUDIO_BITRATE,
     SEGMENT_AUDIO_CHANNELS,
     SEGMENT_FPS,
@@ -145,6 +151,183 @@ def _seed_lo_profile(lo_user_dir: str) -> None:
         )
 
 
+# ── PPTX pre-processing: no-wrap text boxes ───────────────────────────────────
+# LibreOffice ignores <a:bodyPr wrap="none"> and re-wraps text it had to render
+# in a substituted (wider) font, while also declining to grow the spAutoFit box
+# the extra line then overflows — so it lands on whatever shape sits below. On
+# flush-stacked boxes that reads as lines printed on top of each other. Widening
+# the box beforehand removes the reason to wrap; PowerPoint semantics are
+# untouched, since wrap="none" means the text never wraps there anyway.
+# See docs/DECISIONS.md §55.
+
+_ALGN_FROM_XML: dict[str, PP_ALIGN] = {"ctr": PP_ALIGN.CENTER, "r": PP_ALIGN.RIGHT}
+
+
+def _text_alignment(text_frame: TextFrame) -> PP_ALIGN:
+    """Effective horizontal alignment of a text box.
+
+    OOXML keeps alignment per paragraph, so a box only counts as centred or
+    right-aligned when every paragraph stating one agrees; mixed or unset falls
+    back to the spec default LEFT, which is also the one direction where
+    widening provably cannot move the visible text. When no paragraph says
+    anything we still honour the shape-level lstStyle default, otherwise a
+    centred box authored that way would drift sideways.
+    """
+    stated = {p.alignment for p in text_frame.paragraphs if p.alignment is not None}
+    if len(stated) == 1:
+        only = stated.pop()
+        return only if only in (PP_ALIGN.CENTER, PP_ALIGN.RIGHT) else PP_ALIGN.LEFT
+    if not stated:
+        lvl1 = text_frame._txBody.find(f"{qn('a:lstStyle')}/{qn('a:lvl1pPr')}")
+        if lvl1 is not None:
+            return _ALGN_FROM_XML.get(lvl1.get("algn", ""), PP_ALIGN.LEFT)
+    return PP_ALIGN.LEFT
+
+
+def _widened_geometry(
+    left: int, width: int, slide_cx: int, algn: PP_ALIGN
+) -> tuple[int, int] | None:
+    """New ``(left, width)`` in EMU for a no-wrap box, or None if it cannot grow.
+
+    The growth direction follows the alignment so the rendered ink stays where
+    the author put it: left-aligned grows rightwards, right-aligned leftwards,
+    centred evenly around *its own* centre — never the slide's, which would slide
+    the text sideways. Every result is clamped inside the slide.
+    """
+    delta = int(width * (NOWRAP_WIDEN_FACTOR - 1))
+    if algn is PP_ALIGN.RIGHT:
+        new_left = max(0, left - delta)
+        new_width = left + width - new_left
+    elif algn is PP_ALIGN.CENTER:
+        centre = left + width / 2
+        half = min(width / 2 + delta / 2, centre, slide_cx - centre)
+        new_left, new_width = int(centre - half), int(2 * half)
+    else:
+        new_left = left
+        new_width = min(width + delta, slide_cx - left)
+    if new_width <= width:
+        return None
+    return new_left, new_width
+
+
+def _prepare_pptx_for_libreoffice(pptx_path: str, work_dir: str) -> str:
+    """Return the file LibreOffice should convert.
+
+    A wrap-relaxed temp copy when the deck has no-wrap boxes worth widening, the
+    untouched original otherwise. Never raises: a layout tweak must not be the
+    reason a lesson fails to render.
+    """
+    try:
+        prs = Presentation(pptx_path)
+        slide_cx = int(prs.slide_width or 0)
+    except Exception:
+        logger.exception("pptx_prepare_open_failed", path=pptx_path)
+        return pptx_path
+
+    if slide_cx <= 0:
+        logger.warning("pptx_slide_width_unknown", path=pptx_path)
+        return pptx_path
+
+    widened = 0
+    for index, slide in enumerate(prs.slides, start=1):
+        for shape in slide.shapes:
+            try:
+                if not shape.has_text_frame or shape.text_frame.word_wrap is not False:
+                    continue
+                if shape.left is None or shape.width is None:
+                    continue
+                geometry = _widened_geometry(
+                    int(shape.left),
+                    int(shape.width),
+                    slide_cx,
+                    _text_alignment(shape.text_frame),
+                )
+                if geometry is None:
+                    # Already flush against the slide edge — nothing to give.
+                    logger.warning("nowrap_widen_no_room", slide=index, shape=shape.shape_id)
+                    continue
+                shape.left, shape.width = geometry
+                widened += 1
+            except Exception:
+                # One malformed shape must not cost the whole presentation.
+                logger.exception("nowrap_widen_shape_failed", slide=index)
+
+    if not widened:
+        return pptx_path
+
+    dest_dir = os.path.join(work_dir, "_prepared")
+    try:
+        os.makedirs(dest_dir, exist_ok=True)
+        # Same basename — the caller derives the produced PDF's name from the stem.
+        dest = os.path.join(dest_dir, os.path.basename(pptx_path))
+        prs.save(dest)
+    except OSError:
+        logger.exception("pptx_prepare_save_failed", path=pptx_path)
+        return pptx_path
+
+    logger.info("pptx_nowrap_relaxed", shapes=widened)
+    return dest
+
+
+# ── Font telemetry ────────────────────────────────────────────────────────────
+# Pure visibility, not a fix. LibreOffice substitutes missing typefaces silently
+# and it is the substitute's metrics that reflow the text, so knowing which
+# families real decks actually ask for is what lets the bundled font pack grow
+# from evidence instead of guesswork. See docs/DECISIONS.md §56.
+
+_TYPEFACE_RE = re.compile(r'<a:(?:latin|cs|ea) typeface="([^"]*)"')
+_FONT_SCAN_PREFIXES = ("ppt/slides/", "ppt/slideLayouts/", "ppt/slideMasters/", "ppt/theme/")
+
+
+@lru_cache(maxsize=1)
+def _installed_font_families() -> frozenset[str]:
+    """Lower-cased families fontconfig can resolve. Cached — the container's font
+    set cannot change while the process is alive."""
+    try:
+        result = subprocess.run(
+            ["fc-list", ":", "family"],
+            capture_output=True,
+            text=True,
+            errors="replace",
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("fc_list_unavailable")
+        return frozenset()
+    if result.returncode != 0:
+        logger.warning("fc_list_failed", returncode=result.returncode)
+        return frozenset()
+    families = result.stdout or ""
+    return frozenset(
+        part.strip().lower()
+        for line in families.splitlines()
+        for part in line.split(",")
+        if part.strip()
+    )
+
+
+def _log_missing_fonts(pptx_path: str) -> None:
+    """Warn about typefaces the deck asks for that fontconfig cannot resolve."""
+    installed = _installed_font_families()
+    if not installed:
+        return
+    wanted: set[str] = set()
+    try:
+        with zipfile.ZipFile(pptx_path) as z:
+            for name in z.namelist():
+                if name.startswith(_FONT_SCAN_PREFIXES) and name.endswith(".xml"):
+                    wanted.update(_TYPEFACE_RE.findall(z.read(name).decode("utf8", "replace")))
+    except (OSError, zipfile.BadZipFile):
+        logger.warning("pptx_font_scan_failed", path=pptx_path)
+        return
+    # "+mn-lt" & co. are theme references, resolved by the theme's own fontScheme.
+    missing = sorted(
+        f for f in wanted if f and not f.startswith("+") and f.lower() not in installed
+    )
+    if missing:
+        logger.warning("pptx_fonts_missing", fonts=missing, count=len(missing))
+
+
 def _pptx_cache_key(pptx_path: str) -> str:
     """Content hash + DPI → stable key for the PNG slide cache."""
     h = hashlib.md5()
@@ -254,6 +437,11 @@ class VideoService:
             # embedded fonts (especially Cyrillic), producing garbled text in the output.
             pdf_path = pptx_path
         else:
+            _log_missing_fonts(pptx_path)
+            # Convert a wrap-relaxed copy, never the original — the cache key
+            # above is computed from the original's bytes and must stay so.
+            source_path = _prepare_pptx_for_libreoffice(pptx_path, output_dir)
+
             pdf_dir = os.path.join(output_dir, "_pdf")
             os.makedirs(pdf_dir, exist_ok=True)
 
@@ -268,11 +456,11 @@ class VideoService:
                     "pdf",
                     "--outdir",
                     pdf_dir,
-                    pptx_path,
+                    source_path,
                 ]
             )
 
-            pdf_name = Path(pptx_path).stem + ".pdf"
+            pdf_name = Path(source_path).stem + ".pdf"
             pdf_path = os.path.join(pdf_dir, pdf_name)
             if not os.path.exists(pdf_path):
                 pdfs = list(Path(pdf_dir).glob("*.pdf"))

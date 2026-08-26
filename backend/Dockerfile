@@ -63,14 +63,17 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements-dev.txt
 
 # ── Custom .ttf fonts ─────────────────────────────────────────────────────
-# If the project ships its own typefaces (e.g. corporate branding fonts),
-# copy them before running fc-cache so LibreOffice picks them up:
+# Typefaces real uploaded decks ask for that Debian does not package. A family
+# LibreOffice cannot resolve is silently substituted, and the substitute's
+# metrics reflow the text — so shipping the real thing is a rendering-fidelity
+# fix, not cosmetics. Static instances only: LibreOffice renders a *variable*
+# font at its first named instance (Montserrat → Thin, Merriweather → Light),
+# which is worse than the substitution it replaces. See docs/DECISIONS.md §56.
 #
-#   COPY ./fonts/*.ttf /usr/local/share/fonts/
-#   RUN fc-cache -f -v
-#
-# The COPY line goes here (after pip install, before "COPY . .") so that
-# adding a new font does not invalidate the pip layer cache.
+# Placed after pip install and before "COPY . ." so adding a font does not
+# invalidate the pip layer cache.
+COPY ./fonts/*.ttf /usr/local/share/fonts/
+RUN fc-cache -f
 
 COPY --chown=appuser:appgroup lo-emoji-substitution.xcu /app/lo-emoji-substitution.xcu
 

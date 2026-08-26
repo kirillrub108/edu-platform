@@ -110,6 +110,13 @@ TTS_CHUNK_CACHE_DIR_NAME: str = "tts_chunk_cache"
 # Slide rendering
 SLIDE_DPI: int = 150  # indistinguishable from 300 DPI on 1080p, 4× smaller PNGs
 
+# LibreOffice ignores <a:bodyPr wrap="none"> and re-wraps text it had to render
+# in a substituted font, without growing the spAutoFit box the extra line then
+# overflows. Widening such boxes before conversion removes the reason to wrap.
+# Deliberately a blunt multiplier: the substituted font is whatever fontconfig
+# picks, so computing an exact text width would be guesswork either way.
+NOWRAP_WIDEN_FACTOR: float = 2.0
+
 # Upload limits
 MAX_SCRIPT_BYTES: int = 10 * 1024 * 1024  # 10 MB
 # Hard cap on the DECOMPRESSED size of an uploaded .docx (a zip package).
