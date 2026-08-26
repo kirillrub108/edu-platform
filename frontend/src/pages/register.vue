@@ -2,6 +2,8 @@
 import { AlertCircle } from 'lucide-vue-next'
 import { parseApiError } from '~/composables/useApi'
 
+definePageMeta({ middleware: ['guest'] })
+
 const auth = useAuthStore()
 const { reachGoal } = useMetrika()
 const email = ref('')

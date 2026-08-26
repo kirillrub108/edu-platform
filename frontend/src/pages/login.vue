@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { AlertCircle } from 'lucide-vue-next'
 
+definePageMeta({ middleware: ['guest'] })
+
 const route = useRoute()
 const auth = useAuthStore()
 const email = ref('')
