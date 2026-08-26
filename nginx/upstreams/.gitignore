@@ -1,0 +1,6 @@
+# GENERATED, not committed. deploy/deploy.sh rewrites this on every slot switch,
+# and a tracked file that the deploy edits would eventually make CI's
+# `git pull --ff-only` refuse to merge over the local change — wedging deploys.
+# deploy/lib.sh:ensure_generated_state re-creates it from ~/.edllm-deploy/active_slot
+# (default: blue) whenever it is missing.
+active.conf

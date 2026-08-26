@@ -1,6 +1,0 @@
-[
-  {
-    "targets": ["backend_blue:8000"],
-    "labels": { "slot": "blue" }
-  }
-]

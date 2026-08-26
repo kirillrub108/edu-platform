@@ -1,0 +1,3 @@
+# GENERATED, not committed — see nginx/upstreams/.gitignore for why.
+# Rewritten by deploy/lib.sh:render_prometheus_targets on every slot switch.
+backend.json
