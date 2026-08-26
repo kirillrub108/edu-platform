@@ -1,3 +1,4 @@
+from datetime import datetime
 from functools import lru_cache
 from typing import List, Literal
 
@@ -249,6 +250,27 @@ class Settings(BaseSettings):
 
     # Metrics
     METRICS_ENABLED: bool = True
+
+    # ── Announced maintenance window ─────────────────────────────────────────
+    # Surfaced by GET /api/v1/system/status so the SPA can warn users ahead of a
+    # release that cannot be done live (see docs/DECISIONS.md §53). Env-driven on
+    # purpose: no table, no admin UI — a planned window is edited in .env.prod
+    # and picked up on the next backend roll. Blank START/END = nothing planned.
+    # ISO-8601; a value without a timezone is read as UTC.
+    MAINTENANCE_WINDOW_START: datetime | None = None
+    MAINTENANCE_WINDOW_END: datetime | None = None
+    MAINTENANCE_MESSAGE: str = ""
+    # How early the banner appears before the window opens.
+    MAINTENANCE_NOTICE_HOURS: int = 24
+
+    @field_validator("MAINTENANCE_WINDOW_START", "MAINTENANCE_WINDOW_END", mode="before")
+    @classmethod
+    def _blank_window_is_none(cls, v: object) -> object:
+        # An unset key in .env.prod arrives as "" — pydantic would reject that as
+        # a malformed datetime and refuse to boot the whole app.
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v
 
     # CORS — accepts a comma-separated string from env (CORS_ORIGINS=a,b,c) or
     # a JSON array. Use "*" to allow any origin in dev.

@@ -360,6 +360,19 @@ LESSON_VIDEO_KEEP_UNPUBLISHED: int = 2  # newest N unpublished per lesson always
 # in-flight tasks during a rolling restart are not disturbed.
 STUCK_LESSON_GRACE_MINUTES: int = 120
 
+# ── Progress SSE (routers/lessons.progress_stream) ───────────────────────────
+# Comment frame emitted this often so an idle stream keeps proxies and the
+# browser from treating it as dead. Must stay well under nginx's
+# proxy_read_timeout (300s in nginx/prod.conf.template).
+SSE_HEARTBEAT_SECONDS: float = 15.0
+
+# `retry:` hint sent once at the top of every stream — the delay the browser
+# waits before reconnecting after the connection drops. Deliberately short: a
+# blue-green switch cuts open streams when the old slot drains, and the client
+# should be back on the new slot in seconds. Progress is republished from the
+# Celery checkpoint on reconnect, so an early retry costs nothing.
+SSE_RETRY_MS: int = 2000
+
 # ── Worker-concurrency budget ────────────────────────────────────────────────
 # Video/vision pool sizes are derived from the usable CPU count so a small host
 # doesn't oversubscribe (thread contention, KNOWN_PROBLEMS §3.7) and a big host

@@ -1,0 +1,3 @@
+# Runtime maintenance flag, toggled by deploy/maintenance.sh. Its presence is
+# what nginx tests for; it must never be committed.
+ON

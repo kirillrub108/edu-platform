@@ -77,6 +77,8 @@ const handleLogout = () => {
 
 <template>
   <header class="bg-white border-b border-violet-100 sticky top-0 z-30">
+    <MaintenanceBanner />
+
     <div class="px-4 sm:px-6 h-16 flex items-center justify-between gap-3">
       <NuxtLink to="/" class="flex items-center min-w-0">
         <AppLogo />

@@ -1,0 +1,16 @@
+# Production Prometheus config. Separate from monitoring/prometheus.yml (used by
+# the dev stack) because the prod backend runs as blue-green slots — there is no
+# service literally named `backend` to scrape.
+#
+# The active slot comes from file-based service discovery: deploy/deploy.sh
+# rewrites targets/backend.json when it switches slots, and Prometheus picks the
+# change up on its own (file_sd watches the files — no reload, no restart).
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: edllm_backend
+    file_sd_configs:
+      - files: ['/etc/prometheus/targets/*.json']
+    metrics_path: /metrics

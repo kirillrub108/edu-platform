@@ -539,29 +539,175 @@ docker-compose up
 
 ## 7. Production deployment — что реализовано и что ещё нет
 
-> Текущий проект — MVP. Базовый прод-рантайм уже собран в [docker-compose.prod.yml](../docker-compose.prod.yml) (self-contained, НЕ override dev-compose) + [frontend/Dockerfile.prod](../frontend/Dockerfile.prod), и с 2026-08 деплой на push в `master` **автоматизирован** через GitHub Actions + SSH (см. ниже). Ниже — что уже реализовано (✅) и что ещё понадобится при росте.
->
-> **Автоматический деплой** (`.github/workflows/ci.yml`, job `deploy`): на `push` в `master`, после того как `test` прошёл, воркфлоу по SSH (ключ — секрет `DEPLOY_SSH_KEY`, хост/юзер — `DEPLOY_HOST`/`DEPLOY_USER`) заходит на сервер и запускает `git pull --ff-only && bash deploy/deploy.sh <short_sha>`. [deploy/deploy.sh](../deploy/deploy.sh) делает: билд `edllm-backend:<sha>`/`edllm-frontend:<sha>` → если `alembic current` ≠ `alembic heads`, дамп БД (`pg_dump -Fc` через сервис `db_backup`) ПЕРЕД миграцией, иначе апгрейд пропускается → `up --force-recreate` app-сервисов + `nginx` → локальный smoke-test (`/health` + `/docs`, до 12 попыток) → при успехе тегирует `:local`, чистит старые sha-образы (оставляет 3) и пишет `last_good_sha`; при провале — **автооткат** на `last_good_sha` без пересборки, и job всё равно красный (даже если откат прошёл успешно — сигнал, что было падение). CI-раннер после этого сам делает внешний smoke-test с своей стороны.
->
-> **Ручной порядок деплоя** (то же самое, что делает `deploy.sh` шагами 1 и 3, без conditional-дампа и авто-отката):
-> ```
-> docker compose -f docker-compose.prod.yml --env-file .env.prod build
-> docker compose -f docker-compose.prod.yml --env-file .env.prod --profile migrate run --rm migrate
-> docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
-> ```
-> **Восстановление из backup:** `... run --rm db_backup sh -c 'pg_restore -c -d "$PGDATABASE" /backups/<file>.dump'`.
+> Текущий проект — MVP. Прод-рантайм собран в [docker-compose.prod.yml](../docker-compose.prod.yml) (self-contained, НЕ override dev-compose) + [frontend/Dockerfile.prod](../frontend/Dockerfile.prod), деплой на push в `master` автоматизирован через GitHub Actions + SSH, и с 2026-08-26 web-слой катится **без простоя** (blue-green, см. [DECISIONS.md](DECISIONS.md) §53).
+
+### 7.0 Разовый переход на blue-green (делается один раз)
+
+До этой правки прод крутился на сервисах `backend`/`frontend`; теперь их нет — есть слоты. Первый деплой сам по себе не сработает: старый контейнер nginx не имеет маунтов `/etc/nginx/upstreams` и `/etc/nginx/maintenance`, поэтому `nginx -t` упадёт на отсутствующем `include`. Разовая последовательность на сервере, **до** первого запуска нового `deploy.sh`:
+
+```bash
+cd ~/edllm && git pull --ff-only
+C="docker compose -f docker-compose.prod.yml --env-file .env.prod --profile green"
+
+# 1. собрать образы под текущий тег (:local)
+$C build
+
+# 2. поднять blue-слот. Старые backend/frontend пока живы и держат трафик
+$C up -d backend_blue frontend_blue
+docker inspect -f '{{.Name}} {{.State.Health.Status}}' edllm-backend-blue edllm-frontend-blue
+
+# 3. пересоздать nginx и prometheus с новыми маунтами и снести осиротевшие
+#    контейнеры старых backend/frontend. Здесь будет короткий перерыв —
+#    единственный за весь переход
+$C up -d --force-recreate --remove-orphans nginx prometheus
+
+# 4. зафиксировать состояние
+mkdir -p ~/.edllm-deploy && echo blue > ~/.edllm-deploy/active_slot
+curl -fsS --resolve edllm.ru:443:127.0.0.1 https://edllm.ru/health
+```
+
+Дальше `deploy/deploy.sh <sha>` работает штатно и уже без простоя.
+
+> ⚠️ **`--remove-orphans` и профили.** Запуская `up --remove-orphans`, всегда добавляйте `--profile green`. Без него Compose может посчитать контейнеры выключенного профиля осиротевшими и снести **живой зелёный слот**. Именно поэтому `compose()` в [deploy/lib.sh](../deploy/lib.sh) передаёт `--profile green` всегда.
+
+### 7.1 Как устроен blue-green
+
+`backend` и `frontend` существуют в двух экземплярах — **слотах**:
+
+| Слот | Сервисы | Профиль | Контейнеры |
+|---|---|---|---|
+| `blue` | `backend_blue`, `frontend_blue` | нет (стартует обычным `up -d`) | `edllm-backend-blue`, `edllm-frontend-blue` |
+| `green` | `backend_green`, `frontend_green` | `green` | `edllm-backend-green`, `edllm-frontend-green` |
+
+Трафик в каждый момент обслуживает **ровно один** слот. Наружу слоты портов не публикуют — до них дотягивается только nginx по `edu-network`. Кто именно активен, записано в [nginx/upstreams/active.conf](../nginx/upstreams/active.conf), который подключается из [nginx/prod.conf.template](../nginx/prod.conf.template) строкой `include /etc/nginx/upstreams/*.conf;`. Переключение = перезапись этого файла + `nginx -t` + **`nginx -s reload`** (не `restart`: reload оставляет уже установленные соединения дожить на старых worker-процессах). Слоты сознательно НЕ заведены в `envsubst` — `NGINX_ENVSUBST_FILTER` остаётся ограниченным `${DOMAIN}`.
+
+Тем же переключением обновляется [monitoring/targets/backend.json](../monitoring/targets/backend.json) — Prometheus в проде discover'ит живой слот через `file_sd_configs` и перечитывает файл сам (reload не нужен).
+
+Источник истины про активный слот — именно `active.conf`; `~/.edllm-deploy/active_slot` его зеркалит и используется как фолбэк. Нет ни того, ни другого (или файл битый) — берётся `blue`.
+
+Образ выбирается одной переменной: `edllm-backend:${IMAGE_TAG:-local}` / `edllm-frontend:${IMAGE_TAG:-local}`. `deploy.sh` экспортирует `IMAGE_TAG=<short_sha>`, а на успехе перетегирует `:local` на этот sha — поэтому ручные команды ниже работают без переменных. **`IMAGE_TAG` в `.env.prod` задавать не нужно.** Старые `BACKEND_IMAGE`/`FRONTEND_IMAGE` больше не читаются.
+
+### 7.2 Порядок автодеплоя
+
+`.github/workflows/ci.yml` (job `deploy`, только push в `master`, после `test` и `frontend`) заходит по SSH и запускает `git pull --ff-only && bash deploy/deploy.sh <short_sha>`. [deploy/deploy.sh](../deploy/deploy.sh) делает:
+
+1. **build** `edllm-backend:<sha>` / `edllm-frontend:<sha>` на сервере;
+2. **migration guard** — если `alembic current` ≠ `alembic heads`, ревизии между ними прогоняются через `app.scripts.migration_guard`. Найдены `drop_column`/`drop_table`/`rename`/`alter_column(nullable=False)`/сырой `DROP`—`RENAME` в теле `upgrade()` → **деплой останавливается ДО миграции**, прод продолжает работать на старой версии (см. 7.4);
+3. **дамп БД** (`pg_dump -Fc` через сервис `db_backup`) — только если миграции есть;
+4. **migrate** (one-shot сервис `migrate`);
+5. **поднять целевой слот** (противоположный активному) и дождаться готовности: `docker inspect` по healthcheck обоих контейнеров + кросс-сервисная проба сети изнутри целевого backend;
+6. **переключить upstream** на целевой слот → `nginx -t` → `nginx -s reload`;
+7. **smoke-test** уже через nginx (`/health` + `/docs`, до 12 попыток по 10 с);
+8. **retag `:local`** на новый sha и **пересоздать** Celery-воркеров и flower (`up -d --force-recreate` — именно пересоздать: `restart` не меняет образ);
+9. **погасить старый слот** (`compose stop`, дренаж в пределах `stop_grace_period`);
+10. записать `active_slot` + `last_good_sha`, почистить старые sha-образы (оставляет 3).
+
+**Что происходит при провале:**
+
+| Где упало | Что делает скрипт | Что видит пользователь |
+|---|---|---|
+| build / guard / migrate | ничего не поднято, миграция не применена | ничего, прод на старой версии |
+| целевой слот не стал healthy | целевые контейнеры удаляются | ничего, трафик на старом слоте |
+| `nginx -t` отверг include | include возвращается на предыдущий, целевой слот удаляется | ничего |
+| smoke-test после переключения | upstream возвращается на старый слот (он ещё жив), целевой удаляется | ничего |
+| воркеры не поднялись | upstream назад + **откат на `last_good_sha`** | короткий перерыв на откате |
+| после погашения старого слота | **откат на `last_good_sha`** (пересборки нет, образы локальные) | короткий перерыв на откате |
+
+Job красный в любом из этих случаев — даже если откат прошёл успешно.
+
+### 7.3 Ручные операции
+
+```bash
+# ── Ручной деплой (эквивалент шагов 1/3/4 автодеплоя, без guard'а и авто-отката).
+#    Работает как раньше: голый `up -d` поднимает blue-слот и всю инфру.
+docker compose -f docker-compose.prod.yml --env-file .env.prod build
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile migrate run --rm migrate
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+
+# ── Посмотреть оба слота (без --profile green зелёный слот не показывается!)
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile green ps
+
+# ── Переключить слот вручную (upstream + nginx reload + prometheus targets).
+#    Контейнеры целевого слота должны быть уже подняты.
+deploy/deploy.sh --switch green
+
+# ── Проверить логику резолва активного слота (не трогает ни прод, ни репозиторий)
+deploy/deploy.sh --self-test
+
+# ── Режим техработ
+deploy/maintenance.sh on       # 503 + страница/JSON, /health в обход
+deploy/maintenance.sh status   # exit 0 = включен, 1 = выключен
+deploy/maintenance.sh off
+
+# ── Восстановление из backup
+docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm \
+  db_backup sh -c 'pg_restore -c -d "$PGDATABASE" /backups/<file>.dump'
+```
+
+**Ручной откат**, если авто-откат не отработал: поднять предыдущий sha на активном слоте и переключиться на него.
+
+```bash
+export IMAGE_TAG=<предыдущий_short_sha>
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile green \
+  up -d --force-recreate backend_blue frontend_blue
+deploy/deploy.sh --switch blue
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile green \
+  up -d --force-recreate celery_video celery_vision celery_quiz celery_email_worker flower
+```
+
+### 7.4 Разрушающие миграции (expand/contract)
+
+Во время переключения обе версии кода работают против одной БД, поэтому миграция релиза N обязана быть совместима с кодом N-1: **только добавление** — nullable-колонки, новые таблицы, индексы (`CONCURRENTLY`). `DROP` / `RENAME` / `SET NOT NULL` выносятся в следующий релиз. То же правило действует для сигнатур Celery-тасок: новые kwargs — только опциональные с дефолтом, удаление/переименование аргумента и смена очереди — следующим релизом (в проде во время рестарта воркеров новый web и старый воркер сосуществуют).
+
+Если разрушающая правка всё же нужна одним релизом:
+
+```bash
+DEPLOY_ALLOW_UNSAFE_MIGRATION=1 bash deploy/deploy.sh <short_sha>
+```
+
+Тогда сценарий становится: **maintenance on → дамп → migrate → поднять слот → переключить → maintenance off → smoke**. Пользователи видят страницу техработ, а не 502. О таком релизе стоит предупредить заранее — заполнить `MAINTENANCE_WINDOW_START`/`MAINTENANCE_WINDOW_END`/`MAINTENANCE_MESSAGE` в `.env.prod` и выкатить их обычным (безопасным) деплоем: `GET /api/v1/system/status` начнёт отдавать окно, а `MaintenanceBanner` в шапке покажет его за `MAINTENANCE_NOTICE_HOURS` часов до начала и во время.
+
+### 7.5 Проверка перед первым blue-green деплоем
+
+Второй слот на время переключения добавляет ~2.5 GiB (backend 2g + frontend 512m). Перед первым таким деплоем стоит убедиться, что запас есть:
+
+```bash
+free -h
+docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}'
+```
+
+Проверка самого zero-downtime — непрерывный `curl` во время деплоя, считающий не-200:
+
+```bash
+fails=0; total=0
+end=$(( $(date +%s) + 600 ))
+while [ "$(date +%s)" -lt "$end" ]; do
+  total=$((total+1))
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 https://edllm.ru/health || echo 000)
+  [ "$code" = "200" ] || { fails=$((fails+1)); echo "$(date +%T) -> $code"; }
+  sleep 0.5
+done
+echo "non-200: $fails / $total"
+```
+
+Ожидаемый результат обычного релиза — `non-200: 0`. Открытая в это время страница урока с активной генерацией должна продолжать показывать прогресс: допустим один обрыв SSE с автопереподключением, но не «ошибка генерации» и не сброс состояния.
+
+### 7.6 Статус компонентов
 
 | Что нужно | Зачем / статус |
 |---|---|
-| ✅ **CI/CD** | [.github/workflows/ci.yml](../.github/workflows/ci.yml): `lint` (ruff check + format) → `test` (`pytest -m "not slow"`, `--cov-fail-under=70`) → `deploy` (только push на `master`, `needs: test`) — SSH-автодеплой на прод через `deploy/deploy.sh`, см. выше |
-| ✅ **nginx + TLS** | в prod-compose: конфиг рендерится из [nginx/prod.conf.template](../nginx/prod.conf.template) (nginx-образ прогоняет `envsubst`, подставляется только `${DOMAIN}` — `NGINX_ENVSUBST_FILTER`); certbot — профиль `certbot` + [deploy/init-letsencrypt.sh](../deploy/init-letsencrypt.sh) + systemd-таймер в [deploy/systemd/](../deploy/systemd/). `/files/*` — напрямую с диска, видео — через `X-Accel-Redirect` (`/protected-media/`), Flower за `/flower`, Grafana за `/grafana` |
-| ✅ **production frontend** | реализовано в [frontend/Dockerfile.prod](../frontend/Dockerfile.prod): `nuxt build` → `node .output/server/index.mjs`. Dev-compose остаётся на `nuxt dev` |
-| ✅ **production uvicorn** | реализовано в `docker-compose.prod.yml`: `gunicorn app.main:app -k uvicorn.workers.UvicornWorker --workers N`, без `--reload`. Dev остаётся на `--reload` |
-| ✅ **миграции отдельным шагом деплоя** | `RUN_MIGRATIONS_ON_STARTUP=false` (prod) + one-shot сервис `migrate` (`alembic upgrade head`) в `docker-compose.prod.yml`, запускается ДО `up`. `deploy.sh` дополнительно пропускает этот шаг целиком, если ревизий не прибавилось. Dev: авто-`upgrade head` в lifespan |
+| ✅ **CI/CD** | [.github/workflows/ci.yml](../.github/workflows/ci.yml): `lint` (ruff check + format) → `test` (`pytest -m "not slow"`, `--cov-fail-under=70`) + `frontend` (vitest) → `deploy` (только push на `master`) — SSH-автодеплой через `deploy/deploy.sh`, см. 7.2 |
+| ✅ **Zero-downtime деплой** | blue-green web-слоты + `nginx -s reload` по сгенерированному include; дренаж через `--graceful-timeout` gunicorn и `stop_grace_period`; см. 7.1 и [DECISIONS.md](DECISIONS.md) §53 |
+| ✅ **Защита от несовместимых миграций** | `app.scripts.migration_guard` в `deploy.sh`, обход — только явным `DEPLOY_ALLOW_UNSAFE_MIGRATION=1`; см. 7.4 |
+| ✅ **Режим техработ** | флаг-файл + `deploy/maintenance.sh`; nginx отдаёт 503 + `Retry-After` (страница / фиксированный JSON `{"code":"maintenance"}` для `/api/*`), `/health` в обход. Предупреждение заранее — `GET /api/v1/system/status` + баннер в `AppHeader` |
+| ✅ **nginx + TLS** | конфиг рендерится из [nginx/prod.conf.template](../nginx/prod.conf.template) (`envsubst` подставляет только `${DOMAIN}`); certbot — профиль `certbot` + [deploy/init-letsencrypt.sh](../deploy/init-letsencrypt.sh) + systemd-таймер в [deploy/systemd/](../deploy/systemd/). `/files/*` — напрямую с диска, видео — через `X-Accel-Redirect` (`/protected-media/`), Flower за `/flower`, Grafana за `/grafana` |
+| ✅ **production frontend** | [frontend/Dockerfile.prod](../frontend/Dockerfile.prod): `nuxt build` → `node .output/server/index.mjs`. Dev-compose остаётся на `nuxt dev` |
+| ✅ **production uvicorn** | `gunicorn app.main:app -k uvicorn.workers.UvicornWorker --workers N`, без `--reload`, с явными `--timeout`/`--graceful-timeout`. Dev остаётся на `--reload` |
+| ✅ **миграции отдельным шагом деплоя** | `RUN_MIGRATIONS_ON_STARTUP=false` (prod) + one-shot сервис `migrate`, запускается ДО подъёма слота. `deploy.sh` пропускает шаг целиком, если ревизий не прибавилось. Dev: авто-`upgrade head` в lifespan |
 | ✅ **Backup БД** | сайдкар `db_backup`: периодический `pg_dump -Fc` → volume `db_backups`, ретенция `BACKUP_RETENTION_DAYS`; `deploy.sh` дополнительно снимает разовый дамп перед каждой миграцией. Off-host копия в Object Storage — post-MVP |
 | ✅ **healthchecks воркеров** | prod-compose: `celery inspect ping` на каждом воркере (общий anchor). В dev-compose healthcheck только у postgres |
 | ✅ **Sentry** | инициализирован в `main.py` и `celery_app.py`; включается заданием `SENTRY_DSN`. `before_send` отбрасывает sub-500 HTTPException |
-| ✅ **Prometheus / Grafana** | `prometheus-fastapi-instrumentator` (`/metrics`), Celery-метрики через сигналы, DB-backed `UsageCostCollector`; дашборды в `monitoring/` |
+| ✅ **Prometheus / Grafana** | `prometheus-fastapi-instrumentator` (`/metrics`), Celery-метрики через сигналы, DB-backed `UsageCostCollector`; в проде цель скрейпа — активный слот через `file_sd_configs` ([monitoring/prometheus.prod.yml](../monitoring/prometheus.prod.yml)) |
 | ✅ **S3-бекенд (код)** | `storage_service` умеет `STORAGE_BACKEND=s3` (Yandex OS/совместимый, presigned URLs). Остался операционный шаг: перенос существующих файлов + `PUBLIC_FILES_BASE_URL` |
 | **Secret manager** | `SECRET_KEY`, `REDIS_PASSWORD`, ключи провайдеров — сейчас в `.env.prod` (и `DEPLOY_SSH_KEY`/`DEPLOY_HOST`/`DEPLOY_USER` в GitHub Secrets). При росте: Yandex Lockbox / Vault |
 | **Вынос локального inference** | актуально только при возврате на Ollama: отдельный inference-хост/контейнер с GPU. Облачный дефолт (Polza/Yandex AI Studio) снимает вопрос |

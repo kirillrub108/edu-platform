@@ -14,13 +14,13 @@
 # The :443 server references the Let's Encrypt cert for ${DOMAIN} — run
 # deploy/init-letsencrypt.sh once so the files exist before nginx starts.
 
-upstream edllm_backend {
-    server backend:8000;
-}
-
-upstream edllm_frontend {
-    server frontend:3000;
-}
+# edllm_backend / edllm_frontend live in a generated include, NOT here: they
+# name the active blue-green slot, which deploy/deploy.sh rewrites and applies
+# with `nginx -s reload` (never a restart — reload keeps established connections
+# alive on the old worker until they finish). Slot switching deliberately stays
+# out of envsubst: NGINX_ENVSUBST_FILTER is pinned to ${DOMAIN} and must stay
+# that way. See docs/DECISIONS.md §53.
+include /etc/nginx/upstreams/*.conf;
 
 upstream edllm_grafana {
     server grafana:3000;
@@ -84,6 +84,44 @@ server {
     gzip_min_length 1024;
     gzip_types text/plain text/css application/javascript application/json image/svg+xml;
 
+    # ── Maintenance mode ──────────────────────────────────────────────────────
+    # Toggled by deploy/maintenance.sh, which creates/removes the flag file in
+    # the bind-mounted deploy/maintenance/ directory. The -f test runs per
+    # request, so the flag takes effect without a config change; the script still
+    # reloads so the switch is deterministic.
+    #
+    # Fallback path only — a normal release is zero-downtime via the blue-green
+    # slots. This exists for releases where that is impossible (a destructive
+    # migration, see deploy.sh + DEPLOY_ALLOW_UNSAFE_MIGRATION).
+    #
+    # `if (...) { return ...; }` is one of the two officially safe uses of `if`
+    # inside a location — do not grow these blocks into anything else.
+    set $maintenance 0;
+    if (-f /etc/nginx/maintenance/ON) {
+        set $maintenance 1;
+    }
+
+    # Rendered for page requests. `internal` — only reachable as an error_page
+    # target. root + exact-match location resolves to
+    # /etc/nginx/maintenance/_maintenance.html.
+    location = /_maintenance.html {
+        internal;
+        root /etc/nginx/maintenance;
+        default_type "text/html; charset=utf-8";
+        add_header Retry-After 300 always;
+        add_header Cache-Control "no-store" always;
+    }
+
+    # Rendered for /api/* so the SPA can tell planned downtime from a real 5xx.
+    # The shape is a contract: `code` stays "maintenance" forever.
+    location = /_maintenance.json {
+        internal;
+        default_type "application/json; charset=utf-8";
+        add_header Retry-After 300 always;
+        add_header Cache-Control "no-store" always;
+        return 503 '{"detail":"Идут технические работы","code":"maintenance","retry_after":300}';
+    }
+
     # ── External health-check -> FastAPI /health ───────────────────────────
     # Отдельно от /healthz на :80 (тот - только "nginx процесс жив", без
     # upstream). Этот путь реально проксирует на backend, используется
@@ -102,6 +140,13 @@ server {
 
     # ── API → FastAPI ─────────────────────────────────────────────────────────
     location /api/ {
+        if ($maintenance = 1) {
+            return 503;
+        }
+        # Catches ONLY the 503 generated above: proxy_intercept_errors stays off
+        # (the default), so a genuine 503 from FastAPI passes through untouched.
+        error_page 503 /_maintenance.json;
+
         proxy_pass http://edllm_backend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
@@ -116,6 +161,11 @@ server {
     #    by nginx's secure_link (MD5 only), so a bodyless subrequest hands the
     #    URL to the backend, which re-runs verify_signed_url().
     location /files/ {
+        if ($maintenance = 1) {
+            return 503;
+        }
+        error_page 503 /_maintenance.html;
+
         auth_request /_verify_signature;
         auth_request_set $signed_ttl $upstream_http_x_signed_ttl;
         add_header Cache-Control "public, max-age=$signed_ttl";
@@ -166,6 +216,11 @@ server {
 
     # ── Nuxt SPA (everything else) → Nitro server ──────────────────────────────
     location / {
+        if ($maintenance = 1) {
+            return 503;
+        }
+        error_page 503 /_maintenance.html;
+
         proxy_pass http://edllm_frontend;
         proxy_http_version 1.1;
         proxy_set_header Host $host;

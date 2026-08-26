@@ -22,6 +22,8 @@ from app.constants import (
     MAX_VIDEO_UPLOAD_BYTES,
     S3_PRESIGN_TTL_SECONDS,
     SIGNED_URL_TTL_VIDEO,
+    SSE_HEARTBEAT_SECONDS,
+    SSE_RETRY_MS,
     TRIAL_MAX_SCRIPT_CHARS,
     TRIAL_MAX_SLIDES,
     VIDEO_XACCEL_ENABLED,
@@ -700,10 +702,16 @@ async def progress_stream(
     channel = f"lesson:{lesson_id}"
 
     async def generator():
-        # If the lesson is already in a terminal state, emit once and close.
+        # `retry` tells the browser how long to wait before reconnecting after
+        # the connection drops. Emitted first on every stream because a
+        # blue-green switch cuts open streams when the old backend slot drains
+        # — the client must come back promptly, and reconnecting is cheap: the
+        # snapshot below replays the current progress from Celery.
         if terminal_payload is not None:
-            yield {"data": json.dumps(terminal_payload)}
+            yield {"retry": SSE_RETRY_MS, "data": json.dumps(terminal_payload)}
             return
+
+        yield {"retry": SSE_RETRY_MS, "comment": "stream open"}
 
         pubsub = redis.pubsub()
         try:
@@ -738,7 +746,7 @@ async def progress_stream(
                         pass
 
                 now = asyncio.get_running_loop().time()
-                if now - last_heartbeat >= 15.0:
+                if now - last_heartbeat >= SSE_HEARTBEAT_SECONDS:
                     yield {"comment": "ping"}
                     last_heartbeat = now
         finally:

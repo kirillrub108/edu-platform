@@ -8,6 +8,21 @@
 #   Up:       docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 #   Validate: docker compose -f docker-compose.prod.yml --env-file .env.prod config
 #
+# IMAGE_TAG selects the image every app service runs: `edllm-backend:${IMAGE_TAG:-local}`
+# / `edllm-frontend:${IMAGE_TAG:-local}`. deploy/deploy.sh exports IMAGE_TAG=<sha>
+# and re-points the `:local` tag at the deployed sha when it succeeds, so the
+# commands above keep working verbatim with IMAGE_TAG unset.
+#
+# The web tier is blue-green: backend_blue/backend_green and frontend_blue/
+# frontend_green. Exactly one slot serves traffic; nginx picks it up from
+# nginx/upstreams/active.conf and switches with `nginx -s reload`, never a
+# restart. `blue` is the default slot (no profile), `green` needs
+# `--profile green`. See docs/DEPLOYMENT.md §7 and docs/DECISIONS.md §53.
+#
+# ALWAYS pass `--profile green` alongside `--remove-orphans`. Without it Compose
+# can treat the containers of a disabled profile as orphans and delete the LIVE
+# green slot. deploy/lib.sh passes the flag on every call for this reason.
+#
 # App containers run as appuser (uid/gid 1000) — the image's USER, pinned here
 # explicitly on every service built from that image. The shared `app_storage`
 # volume is seeded from the image's /app/storage, which the Dockerfile chowns to
@@ -18,7 +33,7 @@
 # ONCE on the server, before the first `up` on the new images:
 #
 #   docker compose -f docker-compose.prod.yml --env-file .env.prod \
-#     run --rm --user root backend chown -R 1000:1000 /app/storage
+#     run --rm --user root backend_blue chown -R 1000:1000 /app/storage
 
 # ── Reusable fragments (x-* are ignored by Compose; anchors are expanded) ─────
 x-logging: &default-logging
@@ -45,6 +60,94 @@ x-backend-env: &backend-env
     APP_VERSION: ${APP_VERSION:-prod}
     SENTRY_DSN: ${SENTRY_DSN:-}
     SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+
+# ── Blue-green web slots ─────────────────────────────────────────────────────
+# The two slots per tier are identical apart from the container name and the
+# `green` profile. Neither publishes a host port — nginx reaches them over
+# edu-network and only ever names the ACTIVE one, so a stopped slot can't break
+# an `nginx -t`.
+#
+# The env keys are spelled out here rather than merged from *backend-env on
+# purpose: a merge key inside an anchored map that is then itself merged is a
+# YAML corner this file should not depend on.
+x-backend-web: &backend-web
+  image: edllm-backend:${IMAGE_TAG:-local}
+  build:
+    context: ./backend
+    dockerfile: Dockerfile
+  user: "1000:1000"
+  # gunicorn master + N uvicorn workers, no --reload.
+  # --graceful-timeout bounds the drain on SIGTERM: in-flight requests finish,
+  # and open SSE streams — which never end on their own — are cut at the
+  # deadline, after which the browser reconnects onto the new slot.
+  # stop_grace_period MUST stay larger, or Docker SIGKILLs the master mid-drain.
+  command: >
+    gunicorn app.main:app
+    -k uvicorn.workers.UvicornWorker
+    --workers ${GUNICORN_WORKERS:-4}
+    --bind 0.0.0.0:8000
+    --timeout ${GUNICORN_TIMEOUT:-120}
+    --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT:-45}
+    --access-logfile -
+    --error-logfile -
+  env_file:
+    - .env.prod
+  environment:
+    ENVIRONMENT: ${ENVIRONMENT:-production}
+    APP_VERSION: ${APP_VERSION:-prod}
+    SENTRY_DSN: ${SENTRY_DSN:-}
+    SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0.1}
+  extra_hosts: *extra-hosts
+  volumes: *app-storage
+  # interval is short so deploy/deploy.sh's `docker inspect` readiness wait
+  # converges in seconds rather than in healthcheck periods.
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health >/dev/null 2>&1 || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 30s
+  stop_grace_period: 60s
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        memory: 2g
+  networks:
+    - edu-network
+  logging: *default-logging
+
+x-frontend-web: &frontend-web
+  image: edllm-frontend:${IMAGE_TAG:-local}
+  build:
+    context: ./frontend
+    dockerfile: Dockerfile.prod
+  # The SPA needs no backend secrets. apiBase is relative by default (same
+  # origin behind nginx); override only if the API ever moves off-domain.
+  environment:
+    NUXT_PUBLIC_API_BASE: ${NUXT_PUBLIC_API_BASE:-/api/v1}
+    # Yandex.Metrika counter id — set in .env.prod (NUXT_PUBLIC_METRIKA_ID=...).
+    NUXT_PUBLIC_METRIKA_ID: ${NUXT_PUBLIC_METRIKA_ID:-}
+  healthcheck:
+    test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1 || exit 1"]
+    interval: 10s
+    timeout: 5s
+    retries: 5
+    start_period: 20s
+  stop_grace_period: 30s
+  restart: unless-stopped
+  deploy:
+    resources:
+      limits:
+        memory: 512m
+  networks:
+    - edu-network
+  logging: *default-logging
 
 # Per-container liveness for a Celery worker: confirms the broker is reachable
 # and a worker replies. (The task spec's canonical check.)
@@ -152,7 +255,7 @@ services:
   #    `alembic upgrade head` resolves the URL from settings.DATABASE_URL via
   #    alembic/env.py (async path) — no psycopg2 conversion needed here.
   migrate:
-    image: ${BACKEND_IMAGE:-edllm-backend:local}
+    image: edllm-backend:${IMAGE_TAG:-local}
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -169,47 +272,21 @@ services:
       - edu-network
     logging: *default-logging
 
-  backend:
-    image: ${BACKEND_IMAGE:-edllm-backend:local}
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    user: "1000:1000"
-    # Production server: gunicorn master + N uvicorn workers, no --reload.
-    command: >
-      gunicorn app.main:app
-      -k uvicorn.workers.UvicornWorker
-      --workers ${GUNICORN_WORKERS:-4}
-      --bind 0.0.0.0:8000
-      --timeout 120
-      --graceful-timeout 30
-      --access-logfile -
-      --error-logfile -
-    <<: *backend-env
-    extra_hosts: *extra-hosts
-    volumes: *app-storage
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health >/dev/null 2>&1 || exit 1"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 2g
-    networks:
-      - edu-network
-    logging: *default-logging
+  # ── Web slots. `blue` carries no profile, so a bare `up -d` (the manual §7
+  #    order) brings up a working stack on blue. `green` is opt-in via
+  #    `--profile green`, so it never starts by accident and costs no memory
+  #    outside the deploy window.
+  backend_blue:
+    <<: *backend-web
+    container_name: edllm-backend-blue
+
+  backend_green:
+    <<: *backend-web
+    container_name: edllm-backend-green
+    profiles: ["green"]
 
   celery_video:
-    image: ${BACKEND_IMAGE:-edllm-backend:local}
+    image: edllm-backend:${IMAGE_TAG:-local}
     user: "1000:1000"
     command: >
       celery -A app.celery_app worker
@@ -227,8 +304,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      backend:
-        condition: service_started
     restart: unless-stopped
     deploy:
       resources:
@@ -239,7 +314,7 @@ services:
     logging: *default-logging
 
   celery_vision:
-    image: ${BACKEND_IMAGE:-edllm-backend:local}
+    image: edllm-backend:${IMAGE_TAG:-local}
     user: "1000:1000"
     command: >
       celery -A app.celery_app worker
@@ -256,8 +331,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      backend:
-        condition: service_started
     restart: unless-stopped
     deploy:
       resources:
@@ -271,7 +344,7 @@ services:
   # purge_soft_deleted job. Do NOT add --beat to any other worker or replicate
   # this service, or purge runs twice.
   celery_quiz:
-    image: ${BACKEND_IMAGE:-edllm-backend:local}
+    image: edllm-backend:${IMAGE_TAG:-local}
     user: "1000:1000"
     command: >
       celery -A app.celery_app worker
@@ -290,8 +363,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      backend:
-        condition: service_started
     restart: unless-stopped
     deploy:
       resources:
@@ -302,7 +373,7 @@ services:
     logging: *default-logging
 
   celery_email_worker:
-    image: ${BACKEND_IMAGE:-edllm-backend:local}
+    image: edllm-backend:${IMAGE_TAG:-local}
     user: "1000:1000"
     command: >
       celery -A app.celery_app worker
@@ -319,8 +390,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      backend:
-        condition: service_started
     restart: unless-stopped
     deploy:
       resources:
@@ -330,34 +399,14 @@ services:
       - edu-network
     logging: *default-logging
 
-  frontend:
-    image: ${FRONTEND_IMAGE:-edllm-frontend:local}
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.prod
-    # The SPA needs no backend secrets. apiBase is relative by default (same
-    # origin behind nginx); override only if the API ever moves off-domain.
-    environment:
-      NUXT_PUBLIC_API_BASE: ${NUXT_PUBLIC_API_BASE:-/api/v1}
-      # Yandex.Metrika counter id — set in .env.prod (NUXT_PUBLIC_METRIKA_ID=...).
-      NUXT_PUBLIC_METRIKA_ID: ${NUXT_PUBLIC_METRIKA_ID:-}
-    healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ >/dev/null 2>&1 || exit 1"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    depends_on:
-      backend:
-        condition: service_started
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          memory: 512m
-    networks:
-      - edu-network
-    logging: *default-logging
+  frontend_blue:
+    <<: *frontend-web
+    container_name: edllm-frontend-blue
+
+  frontend_green:
+    <<: *frontend-web
+    container_name: edllm-frontend-green
+    profiles: ["green"]
 
   nginx:
     image: nginx:1.27-alpine
@@ -370,6 +419,14 @@ services:
       NGINX_ENVSUBST_FILTER: "^DOMAIN$$"
     volumes:
       - ./nginx/prod.conf.template:/etc/nginx/templates/default.conf.template:ro
+      # The live slot, rewritten by deploy/deploy.sh + `nginx -s reload`. Mounted
+      # as a DIRECTORY so the include glob keeps working while the file is
+      # replaced on the host.
+      - ./nginx/upstreams:/etc/nginx/upstreams:ro
+      # Maintenance flag + its 503 page. Also a directory mount: the flag file
+      # (deploy/maintenance/ON) does not exist most of the time, and bind-mounting
+      # a missing file would make Docker create a directory in its place.
+      - ./deploy/maintenance:/etc/nginx/maintenance:ro
       - app_storage:/var/www/storage:ro
       - letsencrypt:/etc/letsencrypt:ro
       - certbot_webroot:/var/www/certbot:ro
@@ -382,11 +439,10 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
-    depends_on:
-      backend:
-        condition: service_started
-      frontend:
-        condition: service_started
+    # No depends_on for the web slots ON PURPOSE. Exactly one of them runs, and
+    # naming either here would make `up -d nginx` start a slot that the deploy
+    # deliberately stopped. nginx only ever resolves the slot named in
+    # nginx/upstreams/active.conf, which by construction is the running one.
     restart: unless-stopped
     deploy:
       resources:
@@ -418,11 +474,13 @@ services:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}'
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # Prod-specific: the dev config scrapes `backend:8000`, a service that does
+      # not exist here. This one discovers the live slot from targets/*.json,
+      # which deploy/deploy.sh rewrites on every switch (file_sd picks the change
+      # up by itself — no reload).
+      - ./monitoring/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/targets:/etc/prometheus/targets:ro
       - prometheus_data:/prometheus
-    depends_on:
-      backend:
-        condition: service_started
     restart: unless-stopped
     networks:
       - edu-network
@@ -446,7 +504,7 @@ services:
     logging: *default-logging
 
   flower:
-    image: ${BACKEND_IMAGE:-edllm-backend:local}
+    image: edllm-backend:${IMAGE_TAG:-local}
     user: "1000:1000"
     command: celery -A app.celery_app flower --port=5555 --url-prefix=/flower
     # Flower imports app.celery_app, so it needs exactly what Settings requires
@@ -465,8 +523,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      backend:
-        condition: service_started
     restart: unless-stopped
     networks:
       - edu-network
