@@ -459,11 +459,18 @@ echo "$SHA" > "$LAST_GOOD_FILE"
 log "== deploy OK: ${SHA} live on the ${TARGET_SLOT} slot =="
 
 # ---------- 8. ретенция образов ----------
-# оставляем KEEP_IMAGES последних sha-тегов
+# Keep the KEEP_IMAGES most recent sha tags. `docker images` already lists them
+# newest-first, which is the ONLY correct order here: sorting the tags textually
+# ranks them by hex spelling, so a sha starting with a digit sorts below older
+# ones starting with a letter and the just-deployed image is pruned first. That
+# silently broke rollback, whose whole premise is that the image is still local.
+#
+# The rollback target is filtered out outright — belt and braces, so no future
+# change to the ordering can delete the one image the recovery path needs.
 for img in edllm-backend edllm-frontend; do
   docker images "$img" --format '{{.Tag}}' \
     | grep -vE '^(local|<none>)$' \
-    | sort -r \
+    | { [ -n "$GOOD_SHA" ] && grep -vxF "$GOOD_SHA" || cat; } \
     | tail -n +"$((KEEP_IMAGES + 1))" \
     | while read -r old_tag; do
       log "pruning old image ${img}:${old_tag}"
