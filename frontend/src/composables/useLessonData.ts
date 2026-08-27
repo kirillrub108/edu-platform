@@ -1,4 +1,5 @@
 import { CreationMode, type CreationModeValue } from '~/composables/useCreationMode'
+import { DEFAULT_DETAIL_LEVEL, type DetailLevelValue } from '~/composables/useLessonDuration'
 
 export function useLessonData(lessonId: Readonly<Ref<string>>) {
   const { apiFetch } = useApi()
@@ -64,7 +65,7 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
       const data = await apiFetch<any>(`/lessons/${lessonId.value}`)
       lesson.value = data
       setProgrammaticScript(data.script ?? data.text_content ?? '')
-      targetDuration.value = data.target_duration_min ?? null
+      detailLevel.value = data.detail_level ?? DEFAULT_DETAIL_LEVEL
       isDirty.value = false
       if (data.creation_mode) {
         mode.value = data.creation_mode as CreationModeValue
@@ -78,25 +79,41 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
     } finally {
       loading.value = false
     }
+    void loadSlideCount()
   }
 
-  // null = "auto": narration length follows the source material.
-  const targetDuration = ref<number | null>(null)
-  const targetDurationError = ref('')
+  // How deeply the narration covers each slide; the lesson's length follows.
+  const detailLevel = ref<DetailLevelValue>(DEFAULT_DETAIL_LEVEL)
+  const detailLevelError = ref('')
 
-  const setTargetDuration = async (value: number | null) => {
-    const previous = targetDuration.value
-    targetDuration.value = value
-    targetDurationError.value = ''
+  const setDetailLevel = async (value: DetailLevelValue) => {
+    const previous = detailLevel.value
+    detailLevel.value = value
+    detailLevelError.value = ''
     try {
       await apiFetch(`/lessons/${lessonId.value}`, {
         method: 'PUT',
-        body: { target_duration_min: value },
+        body: { detail_level: value },
       })
-      lesson.value = { ...lesson.value, target_duration_min: value }
+      lesson.value = { ...lesson.value, detail_level: value }
     } catch (e: any) {
-      targetDuration.value = previous
-      targetDurationError.value = e?.data?.detail ?? 'Не удалось сохранить длительность'
+      detailLevel.value = previous
+      detailLevelError.value = e?.data?.detail ?? 'Не удалось сохранить степень раскрытия'
+    }
+  }
+
+  // Slide count drives the duration estimate shown next to the choice. It comes
+  // from the estimate endpoint (which reads it off the PPTX) because the deck is
+  // not analysed yet at the point the teacher makes this choice.
+  const slideCount = ref(0)
+
+  const loadSlideCount = async () => {
+    if (!lesson.value?.pptx_path) return
+    try {
+      const est = await apiFetch<any>(`/lessons/${lessonId.value}/generation-estimate`)
+      slideCount.value = est?.video?.slides ?? 0
+    } catch {
+      slideCount.value = 0  // estimate is a nicety — never block the page on it
     }
   }
 
@@ -126,6 +143,7 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
         size_mb: Math.round(fileSizeMb * 100) / 100,
       })
       pptxFile.value = null
+      void loadSlideCount()
     } catch (e: any) {
       uploadError.value = e?.data?.detail ?? 'Ошибка загрузки'
     } finally {
@@ -204,7 +222,8 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
     pptxFile, uploading, uploadError,
     scriptFile, uploadingScript, scriptUploadError,
     videoFile, uploadingVideo, videoUploadError,
-    targetDuration, targetDurationError, setTargetDuration,
+    detailLevel, detailLevelError, setDetailLevel,
+    slideCount, loadSlideCount,
     isAuto, isManual, isVideoUpload,
     load, onModeSelect, uploadPptx, uploadScriptFile, uploadVideo, flushScript,
   }

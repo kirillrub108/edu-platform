@@ -1,10 +1,11 @@
-"""duration_service: word budgets and spoken-duration estimates."""
+"""duration_service: per-slide word budgets and the duration they imply."""
 
 from __future__ import annotations
 
 import pytest
 
-from app.constants import DURATION_MISMATCH_RATIO, WORDS_PER_MINUTE
+from app.constants import DETAIL_LEVEL_BODY_WORDS, WORDS_PER_MINUTE
+from app.models.lesson import DetailLevel
 from app.services import duration_service
 
 pytestmark = pytest.mark.unit
@@ -23,70 +24,80 @@ def test_estimate_duration_sec_matches_nominal_pace() -> None:
     assert duration_service.estimate_duration_sec(0) == 0
 
 
-def test_slide_word_budgets_none_target_keeps_current_behaviour() -> None:
-    assert duration_service.slide_word_budgets(None, 10) is None
+def test_body_words_per_level_is_ordered() -> None:
+    brief = duration_service.body_words(DetailLevel.brief)
+    auto = duration_service.body_words(DetailLevel.auto)
+    high = duration_service.body_words(DetailLevel.high)
+    assert brief < auto < high
 
 
-def test_slide_word_budgets_single_slide_gets_whole_budget() -> None:
-    assert duration_service.slide_word_budgets(10, 1) == [10 * WORDS_PER_MINUTE]
+def test_body_words_falls_back_to_the_default() -> None:
+    """The value arrives from a DB column — an odd one must not break generation."""
+    default = DETAIL_LEVEL_BODY_WORDS["auto"]
+    assert duration_service.body_words(None) == default
+    assert duration_service.body_words("nonsense") == default
+
+
+def test_enum_member_indexes_the_table_directly() -> None:
+    """DetailLevel is a str enum, so it feeds the constants dict as-is."""
+    assert duration_service.body_words(DetailLevel.high) == DETAIL_LEVEL_BODY_WORDS["high"]
+
+
+def test_slide_word_budgets_zero_slides_is_none() -> None:
+    assert duration_service.slide_word_budgets(DetailLevel.auto, 0) is None
+
+
+def test_slide_word_budgets_single_slide() -> None:
+    assert duration_service.slide_word_budgets(DetailLevel.auto, 1) == [
+        DETAIL_LEVEL_BODY_WORDS["auto"]
+    ]
 
 
 def test_slide_word_budgets_two_slides_split_evenly() -> None:
     # No body slide to contrast with, so the edge weighting is a no-op.
-    budgets = duration_service.slide_word_budgets(10, 2)
+    budgets = duration_service.slide_word_budgets(DetailLevel.auto, 2)
     assert budgets is not None
     assert budgets[0] == budgets[1]
 
 
 def test_slide_word_budgets_edges_are_smaller_than_body() -> None:
-    budgets = duration_service.slide_word_budgets(15, 5)
+    budgets = duration_service.slide_word_budgets(DetailLevel.auto, 5)
     assert budgets is not None
     assert len(budgets) == 5
     assert budgets[0] == budgets[-1] < budgets[1]
     assert budgets[1] == budgets[2] == budgets[3]
 
 
-def test_slide_word_budgets_sum_to_the_target() -> None:
-    target_words = 20 * WORDS_PER_MINUTE
-    budgets = duration_service.slide_word_budgets(20, 7)
+def test_slide_word_budgets_never_drop_below_one() -> None:
+    budgets = duration_service.slide_word_budgets(DetailLevel.brief, 3)
     assert budgets is not None
-    # Rounding per slide, so allow a slide's worth of slack.
-    assert abs(sum(budgets) - target_words) <= len(budgets)
+    assert min(budgets) >= 1
 
 
-def test_slide_word_budgets_many_slides_never_drop_below_one() -> None:
-    budgets = duration_service.slide_word_budgets(5, 5000)
+def test_deeper_detail_means_more_words_on_every_slide() -> None:
+    brief = duration_service.slide_word_budgets(DetailLevel.brief, 6)
+    auto = duration_service.slide_word_budgets(DetailLevel.auto, 6)
+    high = duration_service.slide_word_budgets(DetailLevel.high, 6)
+    assert brief is not None and auto is not None and high is not None
+    assert all(b < a < h for b, a, h in zip(brief, auto, high))
+
+
+def test_expected_duration_grows_with_detail_and_with_the_deck() -> None:
+    brief = duration_service.expected_duration_sec(DetailLevel.brief, 10)
+    auto = duration_service.expected_duration_sec(DetailLevel.auto, 10)
+    high = duration_service.expected_duration_sec(DetailLevel.high, 10)
+    assert brief < auto < high
+    assert auto < duration_service.expected_duration_sec(DetailLevel.auto, 20)
+
+
+def test_expected_duration_without_slides_is_zero() -> None:
+    assert duration_service.expected_duration_sec(DetailLevel.auto, 0) == 0
+    assert duration_service.expected_words(DetailLevel.auto, 0) == 0
+
+
+def test_expected_duration_matches_the_budgets_handed_out() -> None:
+    budgets = duration_service.slide_word_budgets(DetailLevel.high, 8)
     assert budgets is not None
-    assert min(budgets) == 1
-
-
-def test_slide_word_budgets_zero_slides_is_none() -> None:
-    assert duration_service.slide_word_budgets(15, 0) is None
-
-
-def test_mismatch_warning_none_target_never_warns() -> None:
-    assert duration_service.mismatch_warning(None, "word " * 5000) is None
-
-
-def test_mismatch_warning_within_threshold_is_silent() -> None:
-    # Exactly on target, and at the edge of the allowed band.
-    on_target = "word " * (10 * WORDS_PER_MINUTE)
-    assert duration_service.mismatch_warning(10, on_target) is None
-
-    edge_words = round(10 * WORDS_PER_MINUTE * (1 + DURATION_MISMATCH_RATIO))
-    assert duration_service.mismatch_warning(10, "word " * edge_words) is None
-
-
-def test_mismatch_warning_flags_short_text() -> None:
-    warning = duration_service.mismatch_warning(30, "word " * 100)
-    assert warning is not None
-    assert "30" in warning
-
-
-def test_mismatch_warning_flags_long_text() -> None:
-    warning = duration_service.mismatch_warning(5, "word " * (30 * WORDS_PER_MINUTE))
-    assert warning is not None
-
-
-def test_mismatch_warning_empty_text_against_target() -> None:
-    assert duration_service.mismatch_warning(5, "") is not None
+    assert duration_service.expected_duration_sec(
+        DetailLevel.high, 8
+    ) == duration_service.estimate_duration_sec(sum(budgets))

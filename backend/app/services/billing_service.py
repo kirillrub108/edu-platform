@@ -27,9 +27,10 @@ from sqlalchemy.orm import Session
 
 from app.constants import (
     AUTO_CHARS_PER_SLIDE,
-    CHARS_PER_WORD,
     CREDIT_CARRYOVER_RATIO,
     CREDIT_WEIGHTS,
+    DEFAULT_DETAIL_LEVEL,
+    DETAIL_LEVEL_BODY_WORDS,
     PLAN_CONFIGS,
     RETENTION_EXTEND_BASE_CREDITS,
     RETENTION_MB_PER_CREDIT,
@@ -38,7 +39,6 @@ from app.constants import (
     VIDEO_TEXT_BASE_CREDITS,
     VISION_ANALYZE_BASE_CREDITS,
     VISION_CHARS_PER_CREDIT,
-    WORDS_PER_MINUTE,
 )
 from app.models.credit import CreditAccount, CreditOperation, CreditPlan, CreditTransaction
 from app.models.lesson import Lesson
@@ -59,43 +59,43 @@ def estimate_video_text(slides: int, script_chars: int) -> int:
     return VIDEO_TEXT_BASE_CREDITS + slides + math.ceil(script_chars / TTS_CHARS_PER_CREDIT)
 
 
-def expected_narration_chars(slides: int, target_duration_min: int | None = None) -> int:
+def expected_narration_chars(slides: int, detail_level: str | None = None) -> int:
     """Narration volume an auto lesson is expected to produce, in characters.
 
-    With a target duration the volume is the word budget the prompts are given
-    (target * WPM), converted at the measured chars-per-word rate. Without one
-    it falls back to the flat per-slide norm, so lessons that predate target
-    durations keep their old price.
+    AUTO_CHARS_PER_SLIDE is the per-slide norm the 'auto' level is priced at,
+    kept verbatim so the default level costs exactly what it always did; the
+    other levels scale by how much more (or less) narration they ask for.
     """
-    if target_duration_min is not None:
-        return target_duration_min * WORDS_PER_MINUTE * CHARS_PER_WORD
-    return slides * AUTO_CHARS_PER_SLIDE
+    words = DETAIL_LEVEL_BODY_WORDS.get(
+        detail_level or DEFAULT_DETAIL_LEVEL, DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
+    )
+    ratio = words / DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
+    return round(slides * AUTO_CHARS_PER_SLIDE * ratio)
 
 
-def estimate_video_auto(slides: int, target_duration_min: int | None = None) -> int:
+def estimate_video_auto(slides: int, detail_level: str | None = None) -> int:
     """COST_VIDEO_AUTO: 3 + slides + ceil(expected narration chars / 3000).
 
-    A 50-minute lesson voices ~10x the text of a 5-minute one and is priced
-    accordingly — see docs/DECISIONS.md.
+    A lesson covered in depth voices several times the text of a brief one and
+    is priced accordingly — see docs/DECISIONS.md.
     """
     return (
         VIDEO_AUTO_BASE_CREDITS
         + slides
-        + math.ceil(expected_narration_chars(slides, target_duration_min) / TTS_CHARS_PER_CREDIT)
+        + math.ceil(expected_narration_chars(slides, detail_level) / TTS_CHARS_PER_CREDIT)
     )
 
 
-def estimate_vision_analyze(slides: int | None, target_duration_min: int | None = None) -> int:
+def estimate_vision_analyze(slides: int | None, detail_level: str | None = None) -> int:
     """COST_VISION_ANALYZE: 2 + ceil(expected narration chars / 2000).
 
     The vision pass is priced by the text it writes, not per run. Falls back to
-    the flat shop-window weight when the slide count could not be determined
-    and no target duration pins the volume.
+    the flat shop-window weight when the slide count could not be determined.
     """
-    if slides is None and target_duration_min is None:
+    if slides is None:
         return CREDIT_WEIGHTS["vision_analyze"]
     return VISION_ANALYZE_BASE_CREDITS + math.ceil(
-        expected_narration_chars(slides or 0, target_duration_min) / VISION_CHARS_PER_CREDIT
+        expected_narration_chars(slides, detail_level) / VISION_CHARS_PER_CREDIT
     )
 
 

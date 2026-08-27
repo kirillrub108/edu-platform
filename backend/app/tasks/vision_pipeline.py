@@ -116,7 +116,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
             if not lesson:
                 raise RuntimeError(f"Lesson {lesson_id} not found")
             course_title = lesson.title or ""
-            target_duration_min = lesson.target_duration_min
+            detail_level = lesson.detail_level
 
             module = session.get(Module, lesson.module_id)
             course = session.get(Course, module.course_id) if module else None
@@ -183,10 +183,10 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                         session.commit()
                 _progress("vision", done, total_)
 
-            # Target duration is spent as a word budget spread over the slides
-            # (title/closing get a smaller share); a prompt that misses the
-            # budget is not an error — see docs/DECISIONS.md.
-            word_budgets = duration_service.slide_word_budgets(target_duration_min, total)
+            # The detail level becomes a per-slide word budget (title/closing
+            # get a smaller share); a prompt that misses it is not an error —
+            # see docs/DECISIONS.md.
+            word_budgets = duration_service.slide_word_budgets(detail_level, total)
             texts = asyncio.run(
                 vision_analysis_service.analyze_presentation(
                     image_paths,

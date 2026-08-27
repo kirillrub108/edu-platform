@@ -1,15 +1,38 @@
-// Mirrors backend app/constants.py (WORDS_PER_MINUTE, LESSON_DURATION_*,
+// Mirrors backend app/constants.py (DETAIL_LEVEL_BODY_WORDS, WORDS_PER_MINUTE,
 // EDGE_SLIDE_BUDGET_WEIGHT) and app/services/duration_service.py. Keep the two
 // in sync — the backend is the one that actually budgets the narration prompt.
 export const WORDS_PER_MINUTE = 130
 
-export const LESSON_DURATION_MIN_MINUTES = 1
-export const LESSON_DURATION_MAX_MINUTES = 180
+export const DetailLevel = {
+  BRIEF: 'brief',
+  AUTO: 'auto',
+  HIGH: 'high',
+} as const
 
-/** Quick picks next to the free-form minutes input. */
-export const LESSON_DURATION_PRESETS_MIN = [5, 10, 15, 20, 30] as const
+export type DetailLevelValue = typeof DetailLevel[keyof typeof DetailLevel]
+
+export const DEFAULT_DETAIL_LEVEL: DetailLevelValue = DetailLevel.AUTO
+
+/** Word budget for one body slide at each level. */
+const DETAIL_LEVEL_BODY_WORDS: Record<DetailLevelValue, number> = {
+  [DetailLevel.BRIEF]: 120,
+  [DetailLevel.AUTO]: 225,
+  [DetailLevel.HIGH]: 400,
+}
 
 const EDGE_SLIDE_BUDGET_WEIGHT = 0.4
+
+export interface DetailLevelOption {
+  value: DetailLevelValue
+  label: string
+  hint: string
+}
+
+export const DETAIL_LEVEL_OPTIONS: DetailLevelOption[] = [
+  { value: DetailLevel.BRIEF, label: 'Кратко', hint: 'Тезисно, только суть каждого слайда' },
+  { value: DetailLevel.AUTO, label: 'Авто', hint: 'Обычное объяснение — подходит большинству' },
+  { value: DetailLevel.HIGH, label: 'Подробно', hint: 'Максимальное раскрытие: примеры, контекст' },
+]
 
 export function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length
@@ -26,29 +49,46 @@ export function formatDuration(seconds: number): string {
   return `${m}:${s.toString().padStart(2, '0')}`
 }
 
-/**
- * Per-slide word allowances the backend will put into the narration prompts.
- * Title and closing slides get a smaller share than body slides.
- */
-export function slideWordBudgets(targetMin: number | null, slideCount: number): number[] | null {
-  if (targetMin === null || slideCount <= 0) return null
+function bodyWords(level: DetailLevelValue | null): number {
+  return DETAIL_LEVEL_BODY_WORDS[level ?? DEFAULT_DETAIL_LEVEL]
+    ?? DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
+}
 
+function slideWeights(slideCount: number): number[] {
   const weights = Array<number>(slideCount).fill(1)
   if (slideCount > 2) {
     weights[0] = EDGE_SLIDE_BUDGET_WEIGHT
     weights[slideCount - 1] = EDGE_SLIDE_BUDGET_WEIGHT
   }
-
-  const totalWords = targetMin * WORDS_PER_MINUTE
-  const weightSum = weights.reduce((a, b) => a + b, 0)
-  return weights.map(w => Math.max(1, Math.round((totalWords * w) / weightSum)))
+  return weights
 }
 
-/** Clamp free-form input to the range the backend accepts; null = auto. */
-export function clampTargetDuration(value: number | null): number | null {
-  if (value === null || !Number.isFinite(value)) return null
-  const rounded = Math.round(value)
-  if (rounded < LESSON_DURATION_MIN_MINUTES) return LESSON_DURATION_MIN_MINUTES
-  if (rounded > LESSON_DURATION_MAX_MINUTES) return LESSON_DURATION_MAX_MINUTES
-  return rounded
+/**
+ * Per-slide word allowances the backend will put into the narration prompts.
+ * Title and closing slides get a smaller share than body slides.
+ */
+export function slideWordBudgets(
+  level: DetailLevelValue | null,
+  slideCount: number,
+): number[] | null {
+  if (slideCount <= 0) return null
+  const perBody = bodyWords(level)
+  return slideWeights(slideCount).map(w => Math.max(1, Math.round(perBody * w)))
+}
+
+/** Approximate lesson length for this deck at this level of detail. */
+export function expectedDurationSec(level: DetailLevelValue | null, slideCount: number): number {
+  const budgets = slideWordBudgets(level, slideCount)
+  if (!budgets) return 0
+  return estimateDurationSec(budgets.reduce((a, b) => a + b, 0))
+}
+
+/** "≈ 12 мин" — the label shown next to the detail-level choice. */
+export function expectedDurationLabel(
+  level: DetailLevelValue | null,
+  slideCount: number,
+): string | null {
+  if (slideCount <= 0) return null
+  const minutes = expectedDurationSec(level, slideCount) / 60
+  return minutes < 1 ? '≈ 1 мин' : `≈ ${Math.round(minutes)} мин`
 }

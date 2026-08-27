@@ -1,13 +1,16 @@
-"""Lesson-duration arithmetic: word budgets and duration estimates.
+"""Narration volume arithmetic: per-slide word budgets and duration estimates.
 
 Pure functions — no DB, no I/O — so both the async routers and the sync Celery
-tasks can share them. The teacher's target duration is realised as a word
-budget handed to the narration prompt; TTS speed is never touched (see
-docs/DECISIONS.md).
+tasks can share them.
+
+The teacher picks how deeply the narration covers each slide; the lesson's
+length follows from that choice and the size of the deck. Duration is never an
+input, and TTS speed is never touched — see docs/DECISIONS.md.
 """
 
 from app.constants import (
-    DURATION_MISMATCH_RATIO,
+    DEFAULT_DETAIL_LEVEL,
+    DETAIL_LEVEL_BODY_WORDS,
     EDGE_SLIDE_BUDGET_WEIGHT,
     WORDS_PER_MINUTE,
 )
@@ -23,43 +26,50 @@ def estimate_duration_sec(word_count: int) -> int:
     return round(word_count / WORDS_PER_MINUTE * 60)
 
 
-def slide_word_budgets(target_duration_min: int | None, slide_count: int) -> list[int] | None:
-    """Per-slide word budgets, or None when there is no target to spread.
+def body_words(detail_level: str | None) -> int:
+    """Word budget for one body slide at this level of detail.
 
-    The first and last slides (title / closing) carry less content than body
-    slides, so they get EDGE_SLIDE_BUDGET_WEIGHT of a body slide's share. The
-    weights are normalised, so the budgets always add up to the target.
-
-    None means "no explicit volume constraint" and leaves the prompt as it was
-    before target durations existed.
+    An unknown or missing level falls back to the default rather than raising:
+    the value reaches here from a DB column, and a lesson must stay generatable
+    even if that column ever holds something unexpected.
     """
-    if target_duration_min is None or slide_count <= 0:
-        return None
+    return DETAIL_LEVEL_BODY_WORDS.get(
+        detail_level or DEFAULT_DETAIL_LEVEL, DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
+    )
 
+
+def _slide_weights(slide_count: int) -> list[float]:
+    """Relative share of the word budget per slide.
+
+    Body slides weigh 1.0; the first and last (title / closing) carry far less
+    content, so they weigh EDGE_SLIDE_BUDGET_WEIGHT. With two slides or fewer
+    there is no body slide to contrast with, so the weighting is a no-op.
+    """
     weights = [1.0] * slide_count
     if slide_count > 2:
         weights[0] = EDGE_SLIDE_BUDGET_WEIGHT
         weights[-1] = EDGE_SLIDE_BUDGET_WEIGHT
-
-    total_words = target_duration_min * WORDS_PER_MINUTE
-    weight_sum = sum(weights)
-    return [max(1, round(total_words * w / weight_sum)) for w in weights]
+    return weights
 
 
-def mismatch_warning(target_duration_min: int | None, text: str) -> str | None:
-    """Warn when authored text is off the target by more than the threshold.
+def slide_word_budgets(detail_level: str | None, slide_count: int) -> list[int] | None:
+    """Per-slide word budgets, or None when there are no slides to spread over."""
+    if slide_count <= 0:
+        return None
+    per_body = body_words(detail_level)
+    return [max(1, round(per_body * w)) for w in _slide_weights(slide_count)]
 
-    Advisory only: the caller must not block generation on it.
+
+def expected_words(detail_level: str | None, slide_count: int) -> int:
+    """Total narration volume this deck is expected to produce, in words."""
+    budgets = slide_word_budgets(detail_level, slide_count)
+    return sum(budgets) if budgets else 0
+
+
+def expected_duration_sec(detail_level: str | None, slide_count: int) -> int:
+    """Approximate lesson length for this deck at this level of detail.
+
+    This is what the teacher is shown next to the choice — the number moves
+    with the detail level and with how many slides the presentation has.
     """
-    if target_duration_min is None:
-        return None
-    estimated = estimate_duration_sec(count_words(text))
-    target_sec = target_duration_min * 60
-    if abs(estimated - target_sec) <= target_sec * DURATION_MISMATCH_RATIO:
-        return None
-    verb = "короче" if estimated < target_sec else "длиннее"
-    return (
-        f"Текст лекции примерно на {round(estimated / 60)} мин — это заметно {verb} "
-        f"целевых {target_duration_min} мин. Авторский текст не сокращается и не "
-        f"дополняется автоматически."
-    )
+    return estimate_duration_sec(expected_words(detail_level, slide_count))

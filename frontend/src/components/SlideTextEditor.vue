@@ -4,6 +4,7 @@ import ProgressBar from './ProgressBar.vue'
 import UiButton from './UiButton.vue'
 import { friendlyApiError } from '~/composables/useBillingMeta'
 import {
+  type DetailLevelValue,
   countWords,
   estimateDurationSec,
   formatDuration,
@@ -21,8 +22,8 @@ interface SlideText {
 
 interface Props {
   lessonId: string
-  /** null = "auto": no length target, so no budget hint is shown. */
-  targetDurationMin?: number | null
+  /** How deeply the narration was asked to cover each slide. */
+  detailLevel?: DetailLevelValue | null
 }
 
 const props = defineProps<Props>()
@@ -57,9 +58,10 @@ const estDurationLabel = computed(
   () => `${formatDuration(estimateDurationSec(wordCount.value))} мин`,
 )
 
-const targetMin = computed(() => props.targetDurationMin ?? null)
 // Title/closing slides get a smaller budget, so this is indexed, not divided.
-const budgets = computed(() => slideWordBudgets(targetMin.value, slides.value.length))
+const budgets = computed(() =>
+  slideWordBudgets(props.detailLevel ?? null, slides.value.length),
+)
 const slideBudget = computed(() => budgets.value?.[currentIdx.value] ?? null)
 
 // Whole-lesson estimate: the open slide counts by its unsaved buffer, the rest
@@ -348,7 +350,6 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
             </div>
             <div class="text-xs text-gray-500 mt-1">
               Весь урок: ≈ <span class="font-medium text-gray-700">{{ lessonDurationLabel }}</span>
-              <span v-if="targetMin !== null" class="text-gray-400"> · цель {{ targetMin }} мин</span>
             </div>
           </div>
         </div>

@@ -107,20 +107,25 @@ TTS_CACHE_TTL_DAYS: int = 7
 TTS_CHUNK_CACHE_ENABLED: bool = True
 TTS_CHUNK_CACHE_DIR_NAME: str = "tts_chunk_cache"
 
-# Lesson target duration (teacher-selected). Realised as a WORD BUDGET fed to
-# the narration prompt, never as a TTS speed change — see docs/DECISIONS.md.
-# None on a lesson = "auto": narration length follows the source material.
-# Free-form minutes inside these bounds; the frontend offers presets on top.
-LESSON_DURATION_MIN_MINUTES: int = 1
-LESSON_DURATION_MAX_MINUTES: int = 180
-LESSON_DURATION_PRESETS_MIN: tuple[int, ...] = (5, 10, 15, 20, 30)
+# Глубина раскрытия темы — единственный рычаг длительности урока.
+# Длительность здесь СЛЕДСТВИЕ, а не вход: сколько можно рассказать, определяет
+# сама презентация, преподаватель выбирает лишь подробность (docs/DECISIONS.md).
+# Значения — бюджет слов на один СОДЕРЖАТЕЛЬНЫЙ слайд:
+#   brief — тезисно; auto — совпадает с дефолтом системного промпта (150-300);
+#   high  — потолок, за которым qwen-vl вместо текста уходит в цикл из
+#           полноширинной CJK-пунктуации (проверено на бюджете 578 слов).
+DETAIL_LEVEL_BODY_WORDS: dict[str, int] = {"brief": 120, "auto": 225, "high": 400}
+DEFAULT_DETAIL_LEVEL: str = "auto"
 WORDS_PER_MINUTE: int = 130  # spoken pace; mirrored in frontend useLessonDuration.ts
-# Title and closing slides carry far less content than body slides, so they get
-# this fraction of a body slide's word budget instead of an equal share.
+# Титульный и заключительный слайды несут меньше содержания, поэтому получают
+# эту долю от бюджета содержательного слайда.
 EDGE_SLIDE_BUDGET_WEIGHT: float = 0.4
-# presentation_and_text: relative gap between the estimated and the target
-# duration above which the teacher gets a warning. Never blocks generation.
-DURATION_MISMATCH_RATIO: float = 0.25
+# Доля буквенных символов, ниже которой ответ считается вырожденным и
+# перезапрашивается (см. vision_analysis._looks_degenerate).
+MIN_NARRATION_LETTER_RATIO: float = 0.5
+# Ответы короче этого не проверяются на вырожденность — на нескольких словах
+# доля букв слишком шумная.
+DEGENERATE_CHECK_MIN_CHARS: int = 40
 
 # Slide rendering
 SLIDE_DPI: int = 150  # indistinguishable from 300 DPI on 1080p, 4× smaller PNGs

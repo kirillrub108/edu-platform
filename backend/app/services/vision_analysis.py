@@ -11,6 +11,8 @@ from openai import AsyncOpenAI
 
 from app.config import provider_routing, settings
 from app.constants import (
+    DEGENERATE_CHECK_MIN_CHARS,
+    MIN_NARRATION_LETTER_RATIO,
     VISION_MAX_RETRIES,
     VISION_REQUEST_TIMEOUT_SECONDS,
     VISION_SUMMARY_CONCURRENCY,
@@ -183,6 +185,21 @@ _QUOTE_PAIRS = (
 )
 
 
+def _looks_degenerate(text: str) -> bool:
+    """True when a response is punctuation soup rather than narration.
+
+    Asked for more words than a slide can carry, qwen-vl stops writing and
+    loops fullwidth CJK punctuation ("Представьте себе ， ， ， —— “ ”"). Such a
+    response is syntactically fine and non-empty, so only the share of actual
+    letters tells it apart from narration.
+    """
+    stripped = "".join(text.split())
+    if len(stripped) < DEGENERATE_CHECK_MIN_CHARS:
+        return False
+    letters = sum(1 for ch in stripped if ch.isalpha())
+    return letters / len(stripped) < MIN_NARRATION_LETTER_RATIO
+
+
 def _sanitize_narration_text(raw_text: str, *, slide_number: int, lesson_id: Any = None) -> str:
     """Strip LLM chatter from a raw narration response before it is stored.
 
@@ -258,20 +275,38 @@ class VisionAnalysisService:
         word_budget caps the narration length when the lesson has a target
         duration; None keeps the system prompt's default 150–300 words.
         """
-        user_content = _build_user_content(
-            slide_image_path,
-            course_title,
-            slide_number,
-            total_slides,
-            previous_context,
-            word_budget,
-        )
+        # A degenerate response is retried once without the word budget: the
+        # budget is what pushes the model past what the slide can carry, so
+        # repeating the same prompt would most likely loop again.
+        for attempt_budget in (word_budget, None):
+            user_content = _build_user_content(
+                slide_image_path,
+                course_title,
+                slide_number,
+                total_slides,
+                previous_context,
+                attempt_budget,
+            )
+            if self.provider == "ollama":
+                raw = await self._call_ollama(user_content)
+            else:
+                raw = await self._call_yandex(user_content)
+            text = _sanitize_narration_text(raw, slide_number=slide_number, lesson_id=lesson_id)
+            if not _looks_degenerate(text):
+                return text
+            logger.warning(
+                "vision_narration_degenerate",
+                slide_number=slide_number,
+                lesson_id=lesson_id,
+                word_budget=attempt_budget,
+                sample=text[:120],
+            )
+            if attempt_budget is None:
+                break
 
-        if self.provider == "ollama":
-            text = await self._call_ollama(user_content)
-        else:
-            text = await self._call_yandex(user_content)
-        return _sanitize_narration_text(text, slide_number=slide_number, lesson_id=lesson_id)
+        # Both attempts looped: an empty slide is handled by the caller (the
+        # pipeline errors only when EVERY slide came back empty).
+        return ""
 
     async def analyze_presentation(
         self,

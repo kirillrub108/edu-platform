@@ -87,13 +87,15 @@ const title = computed(() =>
             </div>
           </div>
 
-          <!-- Advisory: authored text drifting from the target length. Never blocks. -->
+          <!-- Expected lesson length, so the cost is read next to what it buys. -->
           <div
-            v-if="kind === 'video' && estimate.video?.duration_warning"
-            class="flex items-start gap-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2"
+            v-if="kind === 'video' && estimate.video?.estimated_duration_sec"
+            class="flex items-center justify-between text-sm"
           >
-            <AlertCircle class="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
-            <span class="flex-1">{{ estimate.video.duration_warning }}</span>
+            <span class="text-gray-600">Длительность урока:</span>
+            <span class="font-semibold tabular-nums text-gray-900">
+              ≈ {{ Math.round(estimate.video.estimated_duration_sec / 60) }} мин
+            </span>
           </div>
 
           <div

@@ -2,12 +2,11 @@
 import { AlertCircle, ChevronLeft, ChevronRight, Eye, MessageSquare, X } from 'lucide-vue-next'
 import type { Comment } from '~/stores/comments'
 import {
-  LESSON_DURATION_MAX_MINUTES,
-  LESSON_DURATION_MIN_MINUTES,
-  LESSON_DURATION_PRESETS_MIN,
-  clampTargetDuration,
+  DETAIL_LEVEL_OPTIONS,
+  type DetailLevelValue,
   countWords,
   estimateDurationSec,
+  expectedDurationLabel,
   formatDuration,
 } from '~/composables/useLessonDuration'
 
@@ -88,20 +87,21 @@ const {
   lesson, loading, error, mode, script, scriptSaveStatus,
   pptxFile, uploading, uploadError, scriptFile, uploadingScript, scriptUploadError,
   videoFile, uploadingVideo, videoUploadError,
-  targetDuration, targetDurationError, setTargetDuration,
+  detailLevel, detailLevelError, setDetailLevel, slideCount,
   isAuto, isManual, isVideoUpload,
   load, onModeSelect, uploadPptx, uploadScriptFile, uploadVideo, flushScript,
 } = useLessonData(lessonId)
 
-// Target length is a narration-budget hint; a directly uploaded MP4 has no
-// narration to budget, so the control is hidden in that mode.
-const showDurationPicker = computed(() => isManual.value || isAuto.value)
+// Detail level only drives narration the LLM writes: manual mode keeps the
+// author's own text, and a directly uploaded MP4 has no narration at all.
+const showDetailPicker = computed(() => isAuto.value)
 
-// Free-form minutes; an empty field means "auto".
-const onTargetDurationInput = (event: Event) => {
-  const raw = (event.target as HTMLInputElement).value.trim()
-  void setTargetDuration(raw === '' ? null : clampTargetDuration(Number(raw)))
-}
+/** "≈ 12 мин" per option, so the trade-off is visible before choosing. */
+const detailDurationLabels = computed<Record<string, string | null>>(() =>
+  Object.fromEntries(
+    DETAIL_LEVEL_OPTIONS.map(o => [o.value, expectedDurationLabel(o.value, slideCount.value)]),
+  ),
+)
 
 const actualDurationLabel = computed(() =>
   lesson.value?.duration_sec ? formatDuration(lesson.value.duration_sec) : null,
@@ -590,81 +590,6 @@ watch(lessonId, (newId, oldId) => {
           </div>
 
           <div v-show="activeStep === 'presentation'" class="space-y-6">
-            <!-- Sits before the analysis button on purpose: the target is spent
-                 as a word budget when the narration is written, so changing it
-                 later does nothing until the presentation is re-analysed. -->
-            <section
-              v-if="showDurationPicker"
-              class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft"
-            >
-              <label for="target-duration" class="block text-sm font-medium text-gray-700 mb-1">
-                Целевая длительность урока
-              </label>
-              <p class="text-xs text-gray-400 mb-3">
-                {{ isAuto
-                  ? 'Задаёт объём текста, который LLM напишет для каждого слайда. Титульный и заключительный слайды получают меньше остальных.'
-                  : 'Авторский текст не сокращается и не дополняется — длительность используется только для оценки.' }}
-              </p>
-
-              <div class="flex flex-wrap items-center gap-3">
-                <div class="flex items-center gap-2">
-                  <input
-                    id="target-duration"
-                    type="number"
-                    inputmode="numeric"
-                    :min="LESSON_DURATION_MIN_MINUTES"
-                    :max="LESSON_DURATION_MAX_MINUTES"
-                    placeholder="авто"
-                    class="w-24 text-sm border border-gray-200 rounded-lg px-3 py-1.5 bg-white text-gray-800 focus:outline-none focus:ring-2 focus:ring-violet-300"
-                    :value="targetDuration ?? ''"
-                    @change="onTargetDurationInput"
-                  />
-                  <span class="text-sm text-gray-500">мин</span>
-                </div>
-
-                <div class="flex flex-wrap items-center gap-1.5">
-                  <button
-                    v-for="preset in LESSON_DURATION_PRESETS_MIN"
-                    :key="preset"
-                    type="button"
-                    class="text-xs px-2.5 py-1 rounded-lg border transition"
-                    :class="targetDuration === preset
-                      ? 'border-violet-400 bg-violet-50 text-violet-700 font-medium'
-                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
-                    @click="setTargetDuration(preset)"
-                  >
-                    {{ preset }}
-                  </button>
-                  <button
-                    type="button"
-                    class="text-xs px-2.5 py-1 rounded-lg border transition"
-                    :class="targetDuration === null
-                      ? 'border-violet-400 bg-violet-50 text-violet-700 font-medium'
-                      : 'border-gray-200 text-gray-600 hover:bg-gray-50'"
-                    @click="setTargetDuration(null)"
-                  >
-                    Авто
-                  </button>
-                </div>
-
-                <span v-if="actualDurationLabel" class="text-sm text-gray-500">
-                  Фактически: <span class="font-medium text-gray-800">{{ actualDurationLabel }}</span>
-                </span>
-                <span v-if="authoredDurationLabel" class="text-sm text-gray-500">
-                  Оценка по тексту:
-                  <span class="font-medium text-gray-800">{{ authoredDurationLabel }}</span>
-                </span>
-              </div>
-
-              <p v-if="isAuto && targetDuration !== null" class="text-xs text-amber-700 mt-3">
-                Применяется во время анализа презентации. Если тексты слайдов уже
-                сгенерированы — запустите анализ заново, иначе длительность не изменится.
-              </p>
-              <p v-if="targetDurationError" class="text-sm text-rose-600 mt-2">
-                {{ targetDurationError }}
-              </p>
-            </section>
-
             <LessonUploadSection
               v-if="isManual || isAuto"
               ref="visionPanelRef"
@@ -681,7 +606,7 @@ watch(lessonId, (newId, oldId) => {
               :lesson-status="lesson.status"
               :show-slide-editor="showSlideEditor"
               :lesson-id="lessonId"
-              :target-duration-min="targetDuration"
+              :detail-level="detailLevel"
               :cancelling-analysis="cancellingAnalysis"
               :credits-spent="analyzeCreditsSpent"
               :credits-reserved="analyzeCreditsReserved"
@@ -695,6 +620,62 @@ watch(lessonId, (newId, oldId) => {
               @slide-back="showSlideEditor = false"
               @slide-ready="showSlideEditor = false; activeStep = 'generate'"
             />
+
+            <!-- Sits after the upload on purpose: the target is spent as a word
+                 budget when the narration is written, so changing it later does
+                 nothing until the presentation is re-analysed. -->
+            <section
+              v-if="showDetailPicker"
+              class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft"
+            >
+              <h3 class="text-sm font-medium text-gray-700">Степень раскрытия темы</h3>
+              <p class="text-xs text-gray-400 mt-1 mb-3">
+                Насколько подробно LLM разберёт каждый слайд. От этого зависит длительность
+                урока — титульный и заключительный слайды в любом случае короче остальных.
+              </p>
+
+              <div class="grid gap-2 sm:grid-cols-3">
+                <button
+                  v-for="opt in DETAIL_LEVEL_OPTIONS"
+                  :key="opt.value"
+                  type="button"
+                  class="text-left px-3 py-2.5 rounded-xl border transition"
+                  :class="detailLevel === opt.value
+                    ? 'border-violet-400 bg-violet-50'
+                    : 'border-gray-200 hover:bg-gray-50'"
+                  @click="setDetailLevel(opt.value as DetailLevelValue)"
+                >
+                  <span class="flex items-baseline justify-between gap-2">
+                    <span
+                      class="text-sm font-medium"
+                      :class="detailLevel === opt.value ? 'text-violet-700' : 'text-gray-700'"
+                    >{{ opt.label }}</span>
+                    <span
+                      v-if="detailDurationLabels[opt.value]"
+                      class="text-xs tabular-nums shrink-0"
+                      :class="detailLevel === opt.value ? 'text-violet-600' : 'text-gray-400'"
+                    >{{ detailDurationLabels[opt.value] }}</span>
+                  </span>
+                  <span class="block text-xs text-gray-400 mt-1">{{ opt.hint }}</span>
+                </button>
+              </div>
+
+              <p v-if="!slideCount" class="text-xs text-gray-400 mt-3">
+                Загрузите презентацию — и рядом с каждым вариантом появится примерная
+                длительность урока.
+              </p>
+              <p v-if="actualDurationLabel" class="text-sm text-gray-500 mt-3">
+                Фактическая длительность:
+                <span class="font-medium text-gray-800">{{ actualDurationLabel }}</span>
+              </p>
+              <p class="text-xs text-amber-700 mt-3">
+                Применяется во время анализа презентации. Если тексты слайдов уже
+                сгенерированы — запустите анализ заново, иначе ничего не изменится.
+              </p>
+              <p v-if="detailLevelError" class="text-sm text-rose-600 mt-2">
+                {{ detailLevelError }}
+              </p>
+            </section>
           </div>
 
           <div v-show="activeStep === 'script'">
@@ -708,6 +689,15 @@ watch(lessonId, (newId, oldId) => {
               @script-file-change="scriptFile = $event; scriptUploadError = ''"
               @upload-script="uploadScriptFile"
             />
+            <!-- Manual mode has no detail level: the text is the author's, so
+                 the only honest number is what that text already amounts to. -->
+            <p v-if="isManual" class="text-xs text-gray-500 mt-2">
+              По этому тексту урок займёт ≈
+              <span class="font-medium text-gray-700">{{ authoredDurationLabel }} мин</span>
+              <span v-if="actualDurationLabel" class="text-gray-400">
+                · фактически {{ actualDurationLabel }}
+              </span>
+            </p>
           </div>
 
           <div v-show="activeStep === 'generate'">

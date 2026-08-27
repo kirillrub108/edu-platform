@@ -1,18 +1,19 @@
 /**
- * Duration arithmetic shared by the lesson form and the slide editor. These
- * mirror backend app/services/duration_service.py — the assertions below are
- * what keeps the two implementations from drifting.
+ * Detail levels and the duration they imply. These mirror backend
+ * app/services/duration_service.py — the assertions below are what keeps the
+ * two implementations from drifting.
  */
 
 import { describe, expect, it } from 'vitest'
 import {
-  LESSON_DURATION_MAX_MINUTES,
-  LESSON_DURATION_MIN_MINUTES,
-  LESSON_DURATION_PRESETS_MIN,
+  DETAIL_LEVEL_OPTIONS,
+  DEFAULT_DETAIL_LEVEL,
+  DetailLevel,
   WORDS_PER_MINUTE,
-  clampTargetDuration,
   countWords,
   estimateDurationSec,
+  expectedDurationLabel,
+  expectedDurationSec,
   formatDuration,
   slideWordBudgets,
 } from '~/composables/useLessonDuration'
@@ -45,21 +46,21 @@ describe('formatDuration', () => {
 })
 
 describe('slideWordBudgets', () => {
-  it('is null without a target (auto mode)', () => {
-    expect(slideWordBudgets(null, 12)).toBeNull()
+  it('is null when there are no slides yet', () => {
+    expect(slideWordBudgets(DetailLevel.AUTO, 0)).toBeNull()
   })
 
-  it('gives a single slide the whole budget', () => {
-    expect(slideWordBudgets(10, 1)).toEqual([10 * WORDS_PER_MINUTE])
+  it('falls back to the default level for an unknown value', () => {
+    expect(slideWordBudgets(null, 4)).toEqual(slideWordBudgets(DEFAULT_DETAIL_LEVEL, 4))
   })
 
   it('splits two slides evenly — no body slide to contrast with', () => {
-    const budgets = slideWordBudgets(10, 2)!
+    const budgets = slideWordBudgets(DetailLevel.AUTO, 2)!
     expect(budgets[0]).toBe(budgets[1])
   })
 
   it('gives title and closing slides less than body slides', () => {
-    const budgets = slideWordBudgets(15, 5)!
+    const budgets = slideWordBudgets(DetailLevel.AUTO, 5)!
     expect(budgets).toHaveLength(5)
     expect(budgets[0]).toBe(budgets[4])
     expect(budgets[0]).toBeLessThan(budgets[1])
@@ -67,44 +68,65 @@ describe('slideWordBudgets', () => {
     expect(budgets[2]).toBe(budgets[3])
   })
 
-  it('adds up to the target, give or take per-slide rounding', () => {
-    const budgets = slideWordBudgets(20, 7)!
-    const total = budgets.reduce((a, b) => a + b, 0)
-    expect(Math.abs(total - 20 * WORDS_PER_MINUTE)).toBeLessThanOrEqual(budgets.length)
+  it('gives every slide more words as the detail level rises', () => {
+    const brief = slideWordBudgets(DetailLevel.BRIEF, 6)!
+    const auto = slideWordBudgets(DetailLevel.AUTO, 6)!
+    const high = slideWordBudgets(DetailLevel.HIGH, 6)!
+    brief.forEach((b, i) => {
+      expect(b).toBeLessThan(auto[i])
+      expect(auto[i]).toBeLessThan(high[i])
+    })
   })
 
   it('never drops below one word per slide', () => {
-    expect(Math.min(...slideWordBudgets(5, 5000)!)).toBe(1)
-  })
-
-  it('is null when there are no slides yet', () => {
-    expect(slideWordBudgets(15, 0)).toBeNull()
+    expect(Math.min(...slideWordBudgets(DetailLevel.BRIEF, 3)!)).toBeGreaterThanOrEqual(1)
   })
 })
 
-describe('clampTargetDuration', () => {
-  it('passes null through as auto', () => {
-    expect(clampTargetDuration(null)).toBeNull()
-    expect(clampTargetDuration(Number.NaN)).toBeNull()
+describe('expectedDurationSec', () => {
+  it('grows with the detail level', () => {
+    expect(expectedDurationSec(DetailLevel.BRIEF, 10))
+      .toBeLessThan(expectedDurationSec(DetailLevel.AUTO, 10))
+    expect(expectedDurationSec(DetailLevel.AUTO, 10))
+      .toBeLessThan(expectedDurationSec(DetailLevel.HIGH, 10))
   })
 
-  it('accepts any whole minute inside the range', () => {
-    expect(clampTargetDuration(7)).toBe(7)
-    expect(clampTargetDuration(42)).toBe(42)
+  it('grows with the deck', () => {
+    expect(expectedDurationSec(DetailLevel.AUTO, 10))
+      .toBeLessThan(expectedDurationSec(DetailLevel.AUTO, 20))
   })
 
-  it('rounds fractional input', () => {
-    expect(clampTargetDuration(12.4)).toBe(12)
+  it('is zero without slides', () => {
+    expect(expectedDurationSec(DetailLevel.AUTO, 0)).toBe(0)
   })
 
-  it('clamps to the bounds the backend accepts', () => {
-    expect(clampTargetDuration(0)).toBe(LESSON_DURATION_MIN_MINUTES)
-    expect(clampTargetDuration(9999)).toBe(LESSON_DURATION_MAX_MINUTES)
+  it('matches the budgets it hands out', () => {
+    const budgets = slideWordBudgets(DetailLevel.HIGH, 8)!
+    const total = budgets.reduce((a, b) => a + b, 0)
+    expect(expectedDurationSec(DetailLevel.HIGH, 8)).toBe(estimateDurationSec(total))
   })
 })
 
-describe('LESSON_DURATION_PRESETS_MIN', () => {
-  it('offers the usual lesson lengths as quick picks', () => {
-    expect([...LESSON_DURATION_PRESETS_MIN]).toEqual([5, 10, 15, 20, 30])
+describe('expectedDurationLabel', () => {
+  it('is null until the deck is known', () => {
+    expect(expectedDurationLabel(DetailLevel.AUTO, 0)).toBeNull()
+  })
+
+  it('rounds to whole minutes', () => {
+    expect(expectedDurationLabel(DetailLevel.AUTO, 10)).toMatch(/^≈ \d+ мин$/)
+  })
+
+  it('never shows "0 мин" for a deck that does have slides', () => {
+    expect(expectedDurationLabel(DetailLevel.BRIEF, 1)).toBe('≈ 1 мин')
+  })
+})
+
+describe('DETAIL_LEVEL_OPTIONS', () => {
+  it('offers exactly the three levels, shallowest first', () => {
+    expect(DETAIL_LEVEL_OPTIONS.map(o => o.value)).toEqual(['brief', 'auto', 'high'])
+  })
+
+  it('defaults to the middle one', () => {
+    expect(DEFAULT_DETAIL_LEVEL).toBe(DetailLevel.AUTO)
   })
 })

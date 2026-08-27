@@ -26,6 +26,18 @@ class LessonStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
+class DetailLevel(str, enum.Enum):
+    """How deeply the vision LLM should cover each slide.
+
+    Drives the per-slide word budget, and through it the lesson's length —
+    duration is an OUTPUT of this choice, not an input (docs/DECISIONS.md).
+    """
+
+    brief = "brief"
+    auto = "auto"
+    high = "high"
+
+
 class CreationMode(str, enum.Enum):
     presentation_and_text = "presentation_and_text"
     presentation_auto = "presentation_auto"
@@ -88,11 +100,15 @@ class Lesson(Base):
         default=CreationMode.presentation_and_text,
         nullable=False,
     )
-    # Teacher-chosen target length in minutes (one of
-    # constants.LESSON_DURATION_OPTIONS_MIN); NULL = "auto", narration length
-    # follows the source material. duration_sec is the ffprobe-measured length
-    # of the most recent successful generation.
-    target_duration_min = Column(Integer, nullable=True)
+    # How deeply the narration covers each slide; 'auto' is the middle setting
+    # and the default. duration_sec is the ffprobe-measured length of the most
+    # recent successful generation.
+    detail_level = Column(
+        SAEnum(DetailLevel, name="detail_level"),
+        default=DetailLevel.auto,
+        server_default=DetailLevel.auto.value,
+        nullable=False,
+    )
     duration_sec = Column(Integer, nullable=True)
     status = Column(
         SAEnum(LessonStatus, name="lesson_status"),

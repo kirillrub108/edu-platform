@@ -112,10 +112,10 @@ async def analyze_lesson_slides(
     if lesson.status in (LessonStatus.processing, LessonStatus.analyzing):
         raise HTTPException(status_code=409, detail={"code": "generation_in_progress"})
 
-    # Priced by the volume of narration this run will write, so a long target
-    # duration costs more than a short one (see docs/DECISIONS.md).
+    # Priced by the volume of narration this run will write, so covering the
+    # deck in depth costs more than a brief pass (see docs/DECISIONS.md).
     slides = await _count_slides_offloop(lesson.pptx_path)
-    estimate = billing_service.estimate_vision_analyze(slides, lesson.target_duration_min)
+    estimate = billing_service.estimate_vision_analyze(slides, lesson.detail_level)
     balance = await billing_service.get_balance(db, user.id)
     billing_ref = f"{lesson.id}:{uuid4().hex[:12]}"
 

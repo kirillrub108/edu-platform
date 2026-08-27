@@ -68,40 +68,52 @@ def test_estimate_video_auto(slides: int, expected: int) -> None:
 
 
 @pytest.mark.parametrize(
-    "slides, target, expected",
-    [
-        # 5 min  -> 650 words * 7 = 4550 chars -> ceil(4550/3000) = 2
-        (3, 5, 3 + 3 + 2),
-        # 50 min -> 6500 words * 7 = 45500 chars -> ceil(45500/3000) = 16
-        (3, 50, 3 + 3 + 16),
-    ],
+    "level, expected_credits",
+    [("brief", 3 + 6 + 1), ("auto", 3 + 6 + 2), ("high", 3 + 6 + 3)],
 )
-def test_estimate_video_auto_scales_with_target(slides: int, target: int, expected: int) -> None:
-    """Same deck, ten times the lesson: the TTS part of the bill follows."""
-    assert estimate_video_auto(slides, target) == expected
+def test_estimate_video_auto_scales_with_detail(level: str, expected_credits: int) -> None:
+    """Covering a deck in depth voices more text and costs more."""
+    assert estimate_video_auto(6, level) == expected_credits
 
 
-def test_estimate_video_auto_without_target_keeps_legacy_price() -> None:
-    assert estimate_video_auto(7, None) == estimate_video_auto(7)
+def test_estimate_video_auto_auto_level_keeps_legacy_price() -> None:
+    """'auto' is priced at the historical per-slide norm, so the default level
+    costs exactly what it did before detail levels existed."""
+    for slides in (1, 5, 6, 20):
+        assert estimate_video_auto(slides, "auto") == estimate_video_auto(slides)
+
+
+def test_estimate_video_auto_orders_the_levels() -> None:
+    brief = estimate_video_auto(20, "brief")
+    auto = estimate_video_auto(20, "auto")
+    high = estimate_video_auto(20, "high")
+    assert brief < auto < high
 
 
 @pytest.mark.parametrize(
-    "slides, target, expected",
+    "slides, level, expected",
     [
-        # No target: 10 * 600 = 6000 chars -> 2 + ceil(6000/2000) = 5, the old flat weight.
+        # 'auto' on a 10-slide deck lands on the old flat weight of 5.
+        (10, "auto", 5),
         (10, None, 5),
-        (3, None, 2 + 1),
-        # 15 min -> 1950 words * 7 = 13650 chars -> 2 + ceil(13650/2000) = 9
-        (3, 15, 9),
-        (3, 50, 2 + 23),
+        (3, "auto", 2 + 1),
+        (20, "high", 2 + 11),
     ],
 )
-def test_estimate_vision_analyze(slides: int, target: int | None, expected: int) -> None:
-    assert estimate_vision_analyze(slides, target) == expected
+def test_estimate_vision_analyze(slides: int, level: str | None, expected: int) -> None:
+    assert estimate_vision_analyze(slides, level) == expected
+
+
+def test_estimate_vision_analyze_orders_the_levels() -> None:
+    assert (
+        estimate_vision_analyze(20, "brief")
+        < estimate_vision_analyze(20, "auto")
+        < estimate_vision_analyze(20, "high")
+    )
 
 
 def test_estimate_vision_analyze_falls_back_when_slides_unknown() -> None:
-    assert estimate_vision_analyze(None, None) == CREDIT_WEIGHTS["vision_analyze"]
+    assert estimate_vision_analyze(None, "high") == CREDIT_WEIGHTS["vision_analyze"]
 
 
 def test_auto_formula_constants_match_spec() -> None:
