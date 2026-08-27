@@ -4,7 +4,6 @@ import type { Comment } from '~/stores/comments'
 import {
   DETAIL_LEVEL_OPTIONS,
   DETAIL_LEVEL_OPTIONS_MANUAL,
-  type DetailLevelValue,
   countWords,
   detailRatio,
   estimateDurationSec,
@@ -94,12 +93,10 @@ const {
   load, onModeSelect, uploadPptx, uploadScriptFile, uploadVideo, flushScript,
 } = useLessonData(lessonId)
 
-// A directly uploaded MP4 has no narration to shape, so the choice is hidden
-// there; both generating modes have one — they just act on different material.
-const showDetailPicker = computed(() => isAuto.value || isManual.value)
-
 // Same three levels, different subject: auto mode writes narration from the
-// slides, manual mode reshapes the text the teacher already wrote.
+// slides, manual mode reshapes the text the teacher already wrote. Shown next
+// to the material each one acts on — the presentation step in auto mode, the
+// script step in manual mode.
 const detailOptions = computed(() =>
   isManual.value ? DETAIL_LEVEL_OPTIONS_MANUAL : DETAIL_LEVEL_OPTIONS,
 )
@@ -665,72 +662,22 @@ watch(lessonId, (newId, oldId) => {
               @slide-back="showSlideEditor = false"
               @slide-ready="showSlideEditor = false; activeStep = 'generate'"
             >
-              <section
-                v-if="showDetailPicker"
-                class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft"
-              >
-                <h3 class="text-sm font-medium text-gray-700">Степень раскрытия темы</h3>
-                <p class="text-xs text-gray-400 mt-1 mb-3">
-                  {{ isManual
-                    ? 'Что сделать с вашим текстом лекции перед озвучкой. «Как есть» ничего не меняет — остальные варианты сжимают или дополняют его.'
-                    : 'Насколько подробно LLM разберёт каждый слайд. От этого зависит длительность урока — титульный и заключительный слайды в любом случае короче остальных.' }}
-                </p>
-
-                <div class="grid gap-2 sm:grid-cols-3">
-                  <button
-                    v-for="opt in detailOptions"
-                    :key="opt.value"
-                    type="button"
-                    class="text-left px-3 py-2.5 rounded-xl border transition"
-                    :class="detailLevel === opt.value
-                      ? 'border-violet-400 bg-violet-50'
-                      : 'border-gray-200 hover:bg-gray-50'"
-                    @click="setDetailLevel(opt.value as DetailLevelValue)"
-                  >
-                    <span class="flex items-baseline justify-between gap-2">
-                      <span
-                        class="text-sm font-medium"
-                        :class="detailLevel === opt.value ? 'text-violet-700' : 'text-gray-700'"
-                      >{{ opt.label }}</span>
-                      <span
-                        v-if="detailDurationLabels[opt.value]"
-                        class="text-xs tabular-nums shrink-0"
-                        :class="detailLevel === opt.value ? 'text-violet-600' : 'text-gray-400'"
-                      >{{ detailDurationLabels[opt.value] }}</span>
-                    </span>
-                    <span class="block text-xs text-gray-400 mt-1">{{ opt.hint }}</span>
-                  </button>
-                </div>
-
-                <p v-if="isManual && !script.trim()" class="text-xs text-gray-400 mt-3">
-                  Добавьте текст лекции — и рядом с каждым вариантом появится примерная
-                  длительность урока.
-                </p>
-                <p v-else-if="!isManual && !slideCount" class="text-xs text-gray-400 mt-3">
-                  Загрузите презентацию — и рядом с каждым вариантом появится примерная
-                  длительность урока.
-                </p>
-                <p v-if="actualDurationLabel" class="text-sm text-gray-500 mt-3">
-                  Фактическая длительность:
-                  <span class="font-medium text-gray-800">{{ actualDurationLabel }}</span>
-                </p>
-                <p v-if="!isManual" class="text-xs text-amber-700 mt-3">
-                  Применяется во время анализа презентации. Если тексты слайдов уже
-                  сгенерированы — запустите анализ заново, иначе ничего не изменится.
-                </p>
-                <p v-else class="text-xs text-gray-400 mt-3">
-                  Применяется при генерации видео. Сам текст лекции остаётся нетронутым —
-                  меняется только то, что будет озвучено.
-                </p>
-                <p v-if="detailLevelError" class="text-sm text-rose-600 mt-2">
-                  {{ detailLevelError }}
-                </p>
-              </section>
+              <LessonDetailLevelPicker
+                v-if="isAuto"
+                :is-manual="false"
+                :options="detailOptions"
+                :detail-level="detailLevel"
+                :duration-labels="detailDurationLabels"
+                :actual-duration-label="actualDurationLabel"
+                :has-content="slideCount > 0"
+                :error="detailLevelError"
+                @select="setDetailLevel"
+              />
             </LessonUploadSection>
 
           </div>
 
-          <div v-show="activeStep === 'script'">
+          <div v-show="activeStep === 'script'" class="space-y-6">
             <LessonScriptSection
               v-if="isManual"
               v-model="script"
@@ -741,13 +688,19 @@ watch(lessonId, (newId, oldId) => {
               @script-file-change="scriptFile = $event; scriptUploadError = ''"
               @upload-script="uploadScriptFile"
             />
-            <p v-if="isManual && script.trim()" class="text-xs text-gray-500 mt-2">
-              При выбранной степени раскрытия урок займёт
-              <span class="font-medium text-gray-700">{{ detailDurationLabels[detailLevel] }}</span>
-              <span v-if="actualDurationLabel" class="text-gray-400">
-                · фактически {{ actualDurationLabel }}
-              </span>
-            </p>
+            <!-- Acts on the text just above, so it lives on this step, not on
+                 the presentation step it used to share with the auto-mode picker. -->
+            <LessonDetailLevelPicker
+              v-if="isManual"
+              :is-manual="true"
+              :options="detailOptions"
+              :detail-level="detailLevel"
+              :duration-labels="detailDurationLabels"
+              :actual-duration-label="actualDurationLabel"
+              :has-content="!!script.trim()"
+              :error="detailLevelError"
+              @select="setDetailLevel"
+            />
           </div>
 
           <div v-show="activeStep === 'generate'">
