@@ -582,7 +582,7 @@ curl -fsS --resolve edllm.ru:443:127.0.0.1 https://edllm.ru/health
 | `blue` | `backend_blue`, `frontend_blue` | нет (стартует обычным `up -d`) | `edllm-backend-blue`, `edllm-frontend-blue` |
 | `green` | `backend_green`, `frontend_green` | `green` | `edllm-backend-green`, `edllm-frontend-green` |
 
-Трафик в каждый момент обслуживает **ровно один** слот. Наружу слоты портов не публикуют — до них дотягивается только nginx по `edu-network`. Кто именно активен, записано в `nginx/upstreams/active.conf`, который подключается из [nginx/prod.conf.template](../nginx/prod.conf.template) строкой `include /etc/nginx/upstreams/*.conf;`. Переключение = перезапись этого файла + `nginx -t` + **`nginx -s reload`** (не `restart`: reload оставляет уже установленные соединения дожить на старых worker-процессах). Слоты сознательно НЕ заведены в `envsubst` — `NGINX_ENVSUBST_FILTER` остаётся ограниченным `${DOMAIN}`.
+Трафик в каждый момент обслуживает **ровно один** слот. Отсюда следуют неочевидные ограничения на ручные `docker compose` над прод-стеком — см. 7.7. Наружу слоты портов не публикуют — до них дотягивается только nginx по `edu-network`. Кто именно активен, записано в `nginx/upstreams/active.conf`, который подключается из [nginx/prod.conf.template](../nginx/prod.conf.template) строкой `include /etc/nginx/upstreams/*.conf;`. Переключение = перезапись этого файла + `nginx -t` + **`nginx -s reload`** (не `restart`: reload оставляет уже установленные соединения дожить на старых worker-процессах). Слоты сознательно НЕ заведены в `envsubst` — `NGINX_ENVSUBST_FILTER` остаётся ограниченным `${DOMAIN}`.
 
 Тем же переключением обновляется `monitoring/targets/backend.json` — Prometheus в проде discover'ит живой слот через `file_sd_configs` и перечитывает файл сам (reload не нужен).
 
@@ -621,6 +621,8 @@ curl -fsS --resolve edllm.ru:443:127.0.0.1 https://edllm.ru/health
 Job красный в любом из этих случаев — даже если откат прошёл успешно.
 
 ### 7.3 Ручные операции
+
+Перед тем как руками трогать контейнеры активного слота, воркеров или `redis`, прочитайте 7.7 — там перечислено, что при этом ломается.
 
 ```bash
 # ── Ручной деплой (эквивалент шагов 1/3/4 автодеплоя, без guard'а и авто-отката).
@@ -721,6 +723,74 @@ echo "non-200: $fails / $total"
 | ✅ **S3-бекенд (код)** | `storage_service` умеет `STORAGE_BACKEND=s3` (Yandex OS/совместимый, presigned URLs). Остался операционный шаг: перенос существующих файлов + `PUBLIC_FILES_BASE_URL` |
 | **Secret manager** | `SECRET_KEY`, `REDIS_PASSWORD`, ключи провайдеров — сейчас в `.env.prod` (и `DEPLOY_SSH_KEY`/`DEPLOY_HOST`/`DEPLOY_USER` в GitHub Secrets). При росте: Yandex Lockbox / Vault |
 | **Вынос локального inference** | актуально только при возврате на Ollama: отдельный inference-хост/контейнер с GPU. Облачный дефолт (Polza/Yandex AI Studio) снимает вопрос |
+
+### 7.7 Грабли ручных операций над прод-контейнерами
+
+Прод-стек устроен не так, как dev, и «привычные» команды здесь ломают работающий сайт. Всё ниже — про [docker-compose.prod.yml](../docker-compose.prod.yml); dev-файл в прод-командах не участвует и оверрайдить его нельзя.
+
+**Сервиса `backend` (и `frontend`) не существует.** Есть только слоты:
+
+```bash
+# ❌ упадёт: no such service: backend
+docker compose -f docker-compose.prod.yml --env-file .env.prod up -d backend
+
+# ✅ имена сервисов — со слотом
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile green up -d backend_blue frontend_blue
+```
+
+Полный список сервисов, которые бегут на образе `edllm-backend`: `backend_blue`, `backend_green`, `celery_video`, `celery_vision`, `celery_quiz`, `celery_email_worker`, `flower`, `migrate` (one-shot, профиль `migrate`). **Воркер писем — `celery_email_worker`**; `celery_email` — это имя *очереди*, а не сервиса, и `up -d celery_email` тоже упадёт с `no such service`.
+
+**Зелёный слот скрыт профилем, синий — нет.** Профиль объявлен только у `backend_green`/`frontend_green` (`profiles: ["green"]`), поэтому `backend_blue`/`frontend_blue` видны всегда, а зелёные — только с `--profile green` (или `COMPOSE_PROFILES=green` в окружении). Это касается и `ps`, и `config --services`, и `stop`, и `--remove-orphans`:
+
+```bash
+# зелёных слотов в выводе НЕТ
+docker compose -f docker-compose.prod.yml --env-file .env.prod config --services
+
+# а тут есть
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile green config --services
+```
+
+Именно поэтому `compose()` в [deploy/lib.sh](../deploy/lib.sh) передаёт `--profile green` безусловно: включённый профиль сам ничего не поднимает, но без него `compose stop backend_green` не найдёт сервис.
+
+**Какой слот живой — не угадывать, а посмотреть.** Источник истины — include, который читает nginx; `~/.edllm-deploy/active_slot` его зеркалит:
+
+```bash
+grep 'server backend_' nginx/upstreams/active.conf   # backend_blue или backend_green
+cat ~/.edllm-deploy/active_slot                      # фолбэк-зеркало
+```
+
+Если контейнер с нужным именем есть, но непонятно, тот ли это compose-проект (например, остался от старой схемы) — проверить по лейблам:
+
+```bash
+docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}} {{index .Config.Labels "com.docker.compose.service"}}' edllm-backend-blue
+```
+
+**Воркеров пересоздавать только с `--no-deps`.** У всех `celery_*` и `flower` объявлен `depends_on: redis (service_healthy)`, поэтому без `--no-deps` Compose возьмётся и за `redis` — а он в проде broker Celery, result backend, хранилище refresh-семейств и чекпоинтов пайплайна (см. [AUTH_FLOW.md](AUTH_FLOW.md), [ARCHITECTURE.md](ARCHITECTURE.md)). Его пересоздание выбивает все сессии и задевает очередь и незавершённые генерации:
+
+```bash
+docker compose -f docker-compose.prod.yml --env-file .env.prod --profile green \
+  up -d --force-recreate --no-deps celery_video celery_vision celery_quiz celery_email_worker flower
+```
+
+**Активный слот backend руками не пересоздавать.** nginx резолвит `backend_<slot>`/`frontend_<slot>` один раз при загрузке конфига; пересозданный контейнер получает новый IP, и апстрим начинает указывать в никуда — 502 до тех пор, пока nginx не перечитает конфиг. Варианты, по возрастанию предпочтительности:
+
+```bash
+# приемлемо: пересоздать и сразу перечитать конфиг (несколько секунд 502)
+deploy/deploy.sh --switch "$(grep -o 'blue\|green' nginx/upstreams/active.conf | head -n1)"
+
+# правильно: штатный прогон — поднимет ВТОРОЙ слот и переключит трафик без разрыва
+bash deploy/deploy.sh <short_sha>
+```
+
+`--switch` на тот же слот перерисовывает include и делает `nginx -t` + `nginx -s reload` — это ровно тот же путь, что и настоящее переключение, только без смены цвета.
+
+**Изменения `.env.prod` применяются пересозданием, а не рестартом.** `.env.prod` подключён через `env_file`, то есть читается в момент создания контейнера. Штатный путь — прогнать деплой (веб-слой переедет без простоя), воркеры при этом пересоздаст сам скрипт:
+
+```bash
+bash deploy/deploy.sh <short_sha>
+```
+
+Если деплоить нечего (менялся только `.env.prod`), тот же эффект без сборки: пересоздать воркеров с `--no-deps` (команда выше), а веб-слой — через подъём противоположного слота и `--switch` на него, как в ручном откате из 7.3. `docker compose restart` здесь бесполезен — он не перечитывает `env_file`.
 
 ---
 

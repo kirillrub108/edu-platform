@@ -167,6 +167,13 @@
    - Возвращает `{task_id, lesson_id}`.
 4. Frontend запоминает `taskId.value = res.task_id`, ставит `setInterval(pollStatus, 3000)`.
 
+> **Глубина раскрытия темы.** `lesson.detail_level` (`brief`/`auto`/`high`, default `auto`) уже
+> выставлен заранее через `PUT /lessons/{id}` (селектор на этом же экране). В manual-режиме он
+> читается здесь, при генерации: `auto` озвучивает авторский текст дословно, `brief`/`high` дают LLM
+> инструкцию сжать или дополнить его (не переписать факты) на конкретное число слов
+> (`len(script.split()) × detail_ratio`). Смены длительности «на глаз» больше нет — она считается
+> из выбранного уровня. См. [ARCHITECTURE.md](ARCHITECTURE.md) §9b, [DECISIONS.md](DECISIONS.md) §57.
+
 ### 5.2 Что делает Celery worker
 
 Внутри [tasks/video_pipeline.py:generate_video_lesson](../backend/app/tasks/video_pipeline.py):
@@ -269,6 +276,12 @@
    - `lesson.analyze_task_id = task.id` → commit.
    - Возвращает `{task_id, lesson_id, status: "analyzing"}`.
 7. Frontend ставит `setInterval(pollAnalyzeStatus, 2000)` → `GET /lessons/{id}/analysis-status/{task_id}`.
+
+> **Глубина раскрытия темы.** В auto-режиме `lesson.detail_level` применяется именно на этом шаге
+> (анализ), а не при генерации видео — он задаёт бюджет слов на содержательный слайд
+> (`DETAIL_LEVEL_BODY_WORDS`), который читает vision LLM в §6.2. Поэтому селектор уровня стоит
+> **до** кнопки «Запустить анализ», и смена уровня требует повторного анализа. См.
+> [DECISIONS.md](DECISIONS.md) §57.
 
 ### 6.2 Что делает воркер
 

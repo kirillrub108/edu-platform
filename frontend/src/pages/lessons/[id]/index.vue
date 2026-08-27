@@ -316,8 +316,39 @@ const workflowSteps = computed(() => {
 
 const activeStep = ref<StepKey>('mode')
 
+const ALL_STEP_KEYS: StepKey[] = ['mode', 'video', 'presentation', 'script', 'generate', 'history']
+
+// Clamp a requested step to the last one actually unlocked by lesson data —
+// the same "first incomplete step" rule pickInitialStep falls back to below —
+// so a stale or hand-edited ?step= can't skip ahead of what's been done.
+const clampToUnlocked = (key: StepKey, steps: { key: string }[]): StepKey => {
+  const keys = steps.map((s) => s.key as StepKey)
+  const requestedIdx = keys.indexOf(key)
+  if (requestedIdx === -1) return keys[0] ?? 'mode'
+  const firstIncompleteIdx = keys.findIndex((k) => !isStepDone(k))
+  const maxIdx = firstIncompleteIdx === -1 ? keys.length - 1 : firstIncompleteIdx
+  return keys[Math.min(requestedIdx, maxIdx)]
+}
+
+// Keeps ?step= in sync with activeStep so a reload lands back on the same
+// step. router.replace (no history entry), same idiom as the `tab` query.
+const syncStepQuery = (key: StepKey) => {
+  if (route.query.step === key) return
+  router.replace({ query: { ...route.query, step: key } })
+}
+watch(activeStep, syncStepQuery)
+
 const pickInitialStep = () => {
   const keys = workflowSteps.value.map((s) => s.key as StepKey)
+
+  // ?step= is the source of truth across a reload — restore it (clamped to
+  // what's actually unlocked) instead of always defaulting.
+  const queryStep = route.query.step as string
+  if ((ALL_STEP_KEYS as readonly string[]).includes(queryStep)) {
+    activeStep.value = clampToUnlocked(queryStep as StepKey, workflowSteps.value)
+    return
+  }
+
   // Fresh draft (nothing uploaded yet) → open the very first step so the teacher
   // confirms the creation method, instead of jumping ahead to "Презентация".
   const hasProgress =
@@ -330,10 +361,12 @@ const pickInitialStep = () => {
 }
 
 let stepAutoPicked = false
-// Auto-select the first incomplete step once the lesson finishes loading.
+// Auto-select the step once the lesson finishes loading: from ?step= if
+// present and unlocked, otherwise the first incomplete step.
 watch(loading, (l) => {
   if (!l && lesson.value && !stepAutoPicked) {
     pickInitialStep()
+    syncStepQuery(activeStep.value) // covers the case where the resolved step equals the ref default and no watcher fires
     stepAutoPicked = true
   }
 })

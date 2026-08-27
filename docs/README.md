@@ -10,8 +10,15 @@
 > **2026-08-18** (переход LLM/vision/TTS на Yandex AI Studio + SpeechKit v3, удаление контейнера
 > `silero-tts` из compose — dev-дефолт `TTS_PROVIDER=silero` теперь ломается из коробки, см.
 > [KNOWN_PROBLEMS §5.6](KNOWN_PROBLEMS.md), автодеплой по SSH через `deploy/deploy.sh`,
-> уникальные коды доступа курса, speed/pitch для генерации видео; `CLAUDE.md` в корне ещё не
-> синхронизирован с этим проходом).
+> уникальные коды доступа курса, speed/pitch для генерации видео) ·
+> **2026-08-27** (база знаний урока, метеринг AI-проверки + платное продление хранения,
+> `POST /quiz/ai-review` без кредитов, uploads на `require_teacher`, архивация курса без отзыва
+> доступа, подсистема уведомлений, zero-downtime blue-green деплой — см. [DEPLOYMENT.md](DEPLOYMENT.md) §7,
+> PPTX pre-processing + шрифтопак, мобильное меню, глубина раскрытия темы `detail_level` вместо
+> целевой длительности, одноразовые email-домены при регистрации; ADR по каждому — DECISIONS.md
+> §47–57. `CLAUDE.md` в корне **не** синхронизирован с этим проходом — описывает старый
+> single-slot автодеплой без blue-green и не упоминает базу знаний урока, метеринг AI-проверки,
+> `detail_level` или подсистему уведомлений).
 
 ## С чего начать
 
@@ -62,7 +69,7 @@ Celery workers (sync, psycopg2):
    • vision  — vision-LLM анализ слайдов
    • quiz    — тесты + платежи; beat: purge, reconcile платежей, 2×disk-GC
    • email   — транзакционные письма
-   │   внешнее: LibreOffice · pdftoppm · FFmpeg · LLM+vision (Polza AI облако по умолчанию / Ollama локально) · Silero TTS
+   │   внешнее: LibreOffice · pdftoppm · FFmpeg · LLM+vision (Polza AI облако по умолчанию / Ollama локально) · TTS (Polza/Yandex SpeechKit v3 — dev-дефолт `TTS_PROVIDER=silero` из коробки не работает, контейнера нет с 2026-08-12, см. KNOWN_PROBLEMS §5.6)
    ▼
 Local/S3 storage (PPTX, PNG, WAV, MP4)   ·   Monitoring: Prometheus/Grafana/Flower/Sentry
 ```
@@ -82,9 +89,13 @@ Local/S3 storage (PPTX, PNG, WAV, MP4)   ·   Monitoring: Prometheus/Grafana/Flo
 - **Стриминг видео** (S3 presigned / X-Accel / dev-302) → [DECISIONS.md](DECISIONS.md) §41, `routers/lessons.py:/stream`
 - **Soft-delete + суточный purge + дисковый GC** → [DECISIONS.md](DECISIONS.md), [KNOWN_PROBLEMS.md](KNOWN_PROBLEMS.md), `app/tasks/purge_pipeline.py`
 - **Прогресс задач (SSE)** → `app/routers/lessons.py:progress-stream`, `composables/useProgressStream.ts`
-- **Деплой и эксплуатация** (dev + prod-compose) → [DEPLOYMENT.md](DEPLOYMENT.md)
+- **Деплой и эксплуатация** (dev + prod-compose, zero-downtime blue-green) → [DEPLOYMENT.md](DEPLOYMENT.md) §7
+- **Глубина раскрытия темы** (`detail_level` вместо целевой длительности) → [DATA_FLOW.md](DATA_FLOW.md) §5.1/§6.1, [ARCHITECTURE.md](ARCHITECTURE.md) §9b, [DECISIONS.md](DECISIONS.md) §57
+- **База знаний урока** (материалы + markdown-заметки) → [ARCHITECTURE.md](ARCHITECTURE.md) §9b, [DECISIONS.md](DECISIONS.md) §47, `app/routers/lesson_materials.py`
+- **Подсистема уведомлений** (urgent/digest, гейт присутствия по SSE) → [ARCHITECTURE.md](ARCHITECTURE.md) §9b, [DECISIONS.md](DECISIONS.md) §54, `app/services/notification_service.py`
+- **Архивация курса** (без отзыва доступа у записанных) → [ARCHITECTURE.md](ARCHITECTURE.md) §9b, [DECISIONS.md](DECISIONS.md) §51
 
 > Для повседневной работы в репозитории также см. [CLAUDE.md](../CLAUDE.md) в корне (команды,
-> грабли, конвенции). Синхронизирован с кодом и этими доками при сверке 2026-07-30;
+> грабли, конвенции) — по состоянию отставания см. заметку 2026-08-27 в шапке этого файла;
 > по аутентификации канонический источник — [AUTH_FLOW.md](AUTH_FLOW.md).
 </content>

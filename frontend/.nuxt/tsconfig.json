@@ -116,7 +116,7 @@
         "./imports"
       ],
       "#app-manifest": [
-        "./manifest/meta/dev"
+        "./manifest/meta/a8e71cfb-c3d0-404f-be06-18f499c127ca.json"
       ],
       "#components": [
         "./components"
@@ -175,6 +175,6 @@
     "../node_modules/@pinia/nuxt/node_modules",
     "../node_modules/runtime/server",
     "../node_modules/dist/runtime/server",
-    "dev"
+    "../.output"
   ]
 }

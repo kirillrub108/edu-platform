@@ -172,7 +172,7 @@ claim'ов и сроком жизни.
 |---|---|
 | `require_teacher` | роль == teacher |
 | `require_student` | роль == student |
-| `require_verified_teacher` | teacher **и** `email_verified` — гейт на создание/изменение контента |
+| `require_verified_teacher` | teacher **и** `email_verified` — гейт **только** на AI-операции (`analyze`, `generate-video`). Обычное создание/загрузка контента (курсы, модули, уроки, PPTX/скрипт/видео/обложка в `routers/uploads.py`) сидит на `require_teacher` без проверки почты — см. [DECISIONS.md](DECISIONS.md) §50 |
 | `require_verified_email` | любой залогиненный с подтверждённой почтой — гейт на AI-операции |
 | `require_admin` | shared-secret в заголовке `X-Admin-Token` == `ADMIN_API_TOKEN` (биллинг-админка; пустой токен = доступ выключен) |
 | `require_lesson_access` | teacher-владелец **или** записанный на курс student → `(user, lesson, is_owner)` |
@@ -200,7 +200,10 @@ AI-роут и забыть его туда внести. Проверка ст�
 - `POST /auth/resend-verification` — повторная отправка залогиненному; per-user Redis-cooldown
   (`EMAIL_VERIFY_RESEND_COOLDOWN_SECONDS`) поверх slowapi per-IP лимита.
 
-На фронте непроверенному юзеру `useAiGuard` открывает `VerifyEmailModal` при клике на AI-действие.
+На фронте непроверенному юзеру `useAiGuard` открывает `VerifyEmailModal` при клике на AI-действие
+(generate-video, analyze, slide regenerate, quiz generate/regenerate/ai-review). С 2026-08-20 тем же
+`ensureVerified` обёрнута и покупка кредитного пакета на `pages/billing.vue` — не AI-операция и не
+входит в `AI_GATED_ENDPOINTS`, гейт добавлен только на фронте ради консистентности UX.
 
 ### Согласия при регистрации (152-ФЗ)
 
@@ -209,6 +212,13 @@ AI-роут и забыть его туда внести. Проверка ст�
 `marketing_consent(_at)` (опционально), `consent_policy_version` (= `CONSENT_POLICY_VERSION` из
 `constants.py`, бампается при изменении документов) и `consent_ip`. У старых пользователей поля
 пустые — «не значит согласился», значит «регистрировался до внедрения».
+
+### Одноразовые почтовые домены (2026-08-26)
+
+`UserRegister._reject_disposable_email` (тот же `schemas/auth.py`) отклоняет регистрацию 422-й, если
+домен письма (или один из родительских доменов) входит в блок-лист пакета
+[`disposable-email-domains`](../backend/requirements.txt). Чисто валидатор Pydantic, без сети и без
+собственной БД — обновление списка одноразовых доменов приходит через обновление зависимости.
 
 ---
 
