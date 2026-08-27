@@ -13,7 +13,7 @@ from app.constants import (
     QUIZ_LLM_TEMPERATURE,
 )
 from app.schemas.quiz import FlagKind, QuestionFlag, RegenerateMode
-from app.services import usage_service
+from app.services import duration_service, usage_service
 
 logger = structlog.get_logger()
 
@@ -88,6 +88,50 @@ Output format — strictly a JSON object:
 {"chunks": ["<p>...</p>", "<p>...</p>"]}
 with exactly N string items.
 """
+
+
+# Manual mode (presentation_and_text) only. 'auto' is absent on purpose: it
+# leaves _SSML_SYSTEM's verbatim contract exactly as it was before detail levels
+# existed, so the default never touches the author's wording. The two entries
+# below explicitly name the rules they supersede — appending a contradicting
+# instruction without saying which rule loses makes the prompt ambiguous.
+_SSML_DETAIL_OVERRIDE: dict[str, str] = {
+    "brief": """
+
+OVERRIDE FOR THIS RUN — CONDENSE. This section supersedes the "You DO NOT rewrite
+or paraphrase" header and the "preserving the original word order and wording"
+clause of rule A. Everything else (rules B, C, D and the output format) applies
+unchanged, to the condensed text.
+   - Compress the script to roughly {target_words} words total.
+   - Keep every factual claim, definition, term, name, figure and conclusion.
+     Cut repetition, filler, digressions, and rhetorical padding.
+   - Condense by shortening the author's own sentences, not by summarising them
+     from the outside. Never invent content that is not in the script.
+""",
+    "high": """
+
+OVERRIDE FOR THIS RUN — EXPAND. This section supersedes the "You DO NOT add new
+sentences" header and the "preserving the original word order and wording"
+clause of rule A. Everything else (rules B, C, D and the output format) applies
+unchanged, to the expanded text.
+   - Expand the script to roughly {target_words} words total.
+   - Keep the author's sentences and their order; build around them — explain
+     why a point matters, unpack terms the script names, add a concrete example
+     where one clarifies a claim.
+   - Additions must follow from the script and the slide anchors. Never
+     contradict the author, and never introduce facts, figures, dates, names or
+     citations that are not derivable from the material you were given.
+""",
+}
+
+
+def _detail_system_prompt(base: str, detail_level: str | None, script: str) -> str:
+    """_SSML_SYSTEM (or the single-chunk prompt) plus the level's override."""
+    override = _SSML_DETAIL_OVERRIDE.get(detail_level or "")
+    if not override:
+        return base
+    target = max(1, round(len(script.split()) * duration_service.detail_ratio(detail_level)))
+    return base + override.format(target_words=target)
 
 
 class LLMService:
@@ -186,15 +230,19 @@ class LLMService:
         script: str,
         slides_count: int,
         slide_texts: list[str] | None = None,
+        detail_level: str | None = None,
     ) -> tuple[list[str], str | None]:
         """Split script into N chunks aligned with slides, with SSML annotation.
+
+        detail_level condenses ('brief') or expands ('high') the authored script;
+        the default level leaves its wording verbatim. See docs/DECISIONS.md.
 
         Returns (chunks, warning) where warning is non-None when the LLM returned
         the wrong number of chunks and fallback splitting was used.
         """
         # Single slide — nothing to split, annotate the whole script directly.
         if slides_count == 1:
-            return [await self._annotate_ssml(script)], None
+            return [await self._annotate_ssml(script, detail_level)], None
 
         anchors = ""
         if slide_texts:
@@ -211,7 +259,8 @@ class LLMService:
             f"{anchors}"
             f"Lecture script (preserve wording verbatim):\n{script}"
         )
-        raw = await self._chat(_SSML_SYSTEM, user, json_mode=True)
+        system = _detail_system_prompt(_SSML_SYSTEM, detail_level, script)
+        raw = await self._chat(system, user, json_mode=True)
         try:
             data = json.loads(self._strip_code_fences(raw))
             chunks = data.get("chunks", [])
@@ -229,10 +278,10 @@ class LLMService:
 
         # Mechanical split, then annotate each chunk so SSML markup is preserved.
         raw_chunks = self._split_sentences(script, slides_count)
-        annotated = [await self._annotate_ssml(c) for c in raw_chunks]
+        annotated = [await self._annotate_ssml(c, detail_level) for c in raw_chunks]
         return annotated, warning
 
-    async def _annotate_ssml(self, text: str) -> str:
+    async def _annotate_ssml(self, text: str, detail_level: str | None = None) -> str:
         """Apply the same cleanup + number-to-words + SSML rules as the main
         split-and-annotate pipeline, but for a single pre-split chunk."""
         if not text.strip():
@@ -266,7 +315,7 @@ C) SSML annotation — wrap the cleaned text with semantic markup. DO NOT wrap i
    Do NOT add prosody pitch, do NOT add <s>, do NOT add anything else.
 
 Output ONLY the annotated text — no JSON, no explanations, no wrapper tags."""
-        result = await self._chat(_ANNOTATE_SYSTEM, text)
+        result = await self._chat(_detail_system_prompt(_ANNOTATE_SYSTEM, detail_level, text), text)
         return result.strip() if result.strip() else f"<p>{text}</p>"
 
     def _split_sentences(self, text: str, n: int) -> list[str]:

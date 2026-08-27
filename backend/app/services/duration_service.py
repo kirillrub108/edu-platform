@@ -38,6 +38,16 @@ def body_words(detail_level: str | None) -> int:
     )
 
 
+def detail_ratio(detail_level: str | None) -> float:
+    """How much narration this level asks for, relative to the default one.
+
+    1.0 at 'auto'. Manual mode multiplies the authored script by this to get a
+    word target; pricing multiplies the per-slide norm by the same figure, so
+    the two never disagree about how much text a level buys.
+    """
+    return body_words(detail_level) / DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
+
+
 def _slide_weights(slide_count: int) -> list[float]:
     """Relative share of the word budget per slide.
 

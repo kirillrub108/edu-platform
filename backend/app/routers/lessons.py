@@ -319,7 +319,7 @@ async def _video_estimate(
         credits = (
             billing_service.estimate_video_auto(slides, lesson.detail_level)
             if is_auto
-            else billing_service.estimate_video_text(slides, script_chars)
+            else billing_service.estimate_video_text(slides, script_chars, lesson.detail_level)
         )
     return ("auto" if is_auto else "text"), slides, script_chars, credits
 
@@ -595,9 +595,13 @@ async def generation_estimate(
             duration_service.expected_duration_sec(lesson.detail_level, slides) if slides else None
         )
     else:
+        # Text mode: the authored script, condensed or expanded by the level.
         authored = lesson.script or lesson.text_content or ""
         estimated_sec = duration_service.estimate_duration_sec(
-            duration_service.count_words(authored)
+            round(
+                duration_service.count_words(authored)
+                * duration_service.detail_ratio(lesson.detail_level)
+            )
         )
     return GenerationEstimateOut(
         video=EstimateVideoOut(

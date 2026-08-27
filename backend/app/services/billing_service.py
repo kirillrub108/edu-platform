@@ -29,8 +29,6 @@ from app.constants import (
     AUTO_CHARS_PER_SLIDE,
     CREDIT_CARRYOVER_RATIO,
     CREDIT_WEIGHTS,
-    DEFAULT_DETAIL_LEVEL,
-    DETAIL_LEVEL_BODY_WORDS,
     PLAN_CONFIGS,
     RETENTION_EXTEND_BASE_CREDITS,
     RETENTION_MB_PER_CREDIT,
@@ -43,6 +41,7 @@ from app.constants import (
 from app.models.credit import CreditAccount, CreditOperation, CreditPlan, CreditTransaction
 from app.models.lesson import Lesson
 from app.models.payment import Payment, PaymentStatus
+from app.services import duration_service
 
 _RENEWAL_PERIOD = timedelta(days=30)
 
@@ -54,9 +53,15 @@ def _to_operation(operation: "str | CreditOperation") -> CreditOperation:
 # ── Pricing formulas (pure — safe to import anywhere, including tasks) ────────
 
 
-def estimate_video_text(slides: int, script_chars: int) -> int:
-    """COST_VIDEO_TEXT: 2 + slides + ceil(script_chars / 3000)."""
-    return VIDEO_TEXT_BASE_CREDITS + slides + math.ceil(script_chars / TTS_CHARS_PER_CREDIT)
+def estimate_video_text(slides: int, script_chars: int, detail_level: str | None = None) -> int:
+    """COST_VIDEO_TEXT: 2 + slides + ceil(voiced chars / 3000).
+
+    'auto' voices the authored script verbatim, so its price is the historical
+    one. 'brief' condenses it and 'high' expands it, and the TTS bill follows —
+    the same ratio the narration prompt is given.
+    """
+    voiced = round(script_chars * duration_service.detail_ratio(detail_level))
+    return VIDEO_TEXT_BASE_CREDITS + slides + math.ceil(voiced / TTS_CHARS_PER_CREDIT)
 
 
 def expected_narration_chars(slides: int, detail_level: str | None = None) -> int:
@@ -66,11 +71,7 @@ def expected_narration_chars(slides: int, detail_level: str | None = None) -> in
     kept verbatim so the default level costs exactly what it always did; the
     other levels scale by how much more (or less) narration they ask for.
     """
-    words = DETAIL_LEVEL_BODY_WORDS.get(
-        detail_level or DEFAULT_DETAIL_LEVEL, DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
-    )
-    ratio = words / DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
-    return round(slides * AUTO_CHARS_PER_SLIDE * ratio)
+    return round(slides * AUTO_CHARS_PER_SLIDE * duration_service.detail_ratio(detail_level))
 
 
 def estimate_video_auto(slides: int, detail_level: str | None = None) -> int:

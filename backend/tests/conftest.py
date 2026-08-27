@@ -455,12 +455,16 @@ def mock_llm_split(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
     """
     from app.services import llm_service as llm_mod
 
-    state: dict[str, Any] = {"calls": 0, "chunks": None, "raise": None}
+    state: dict[str, Any] = {"calls": 0, "chunks": None, "raise": None, "detail_level": None}
 
     async def _fake_split(
-        script: str, slides_count: int, slide_texts: list[str] | None = None
+        script: str,
+        slides_count: int,
+        slide_texts: list[str] | None = None,
+        detail_level: str | None = None,
     ) -> tuple[list[str], str | None]:
         state["calls"] += 1
+        state["detail_level"] = detail_level
         if state["raise"] is not None:
             raise state["raise"]
         chunks = state["chunks"]

@@ -173,7 +173,7 @@ onUnmounted(clearConfirmTimer)
         <SlideTextEditor
           ref="slideEditorRef"
           :lesson-id="lessonId"
-          :target-duration-min="detailLevel"
+          :detail-level="detailLevel"
           @back="emit('slide-back')"
           @ready="emit('slide-ready')"
         />

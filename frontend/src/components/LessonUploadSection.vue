@@ -57,6 +57,11 @@ defineExpose({
       @file-change="emit('file-change', $event)"
       @upload="emit('upload')"
     />
+
+    <!-- The detail picker lives here: after the upload it applies to, before
+         the analysis button that spends it. Owned by the page. -->
+    <slot />
+
     <LessonVisionPanel
       v-if="mode === CreationMode.PRESENTATION_AUTO"
       ref="innerVisionRef"
@@ -71,7 +76,7 @@ defineExpose({
       :lesson-status="lessonStatus"
       :show-slide-editor="showSlideEditor"
       :lesson-id="lessonId"
-      :target-duration-min="detailLevel"
+      :detail-level="detailLevel"
       :cancelling-analysis="cancellingAnalysis"
       :credits-spent="creditsSpent"
       :credits-reserved="creditsReserved"

@@ -186,3 +186,75 @@ async def test_split_injects_provider_pin_into_request(
     monkeypatch.setattr(llm_service, "_provider_extra", {})
     await llm_service.split_and_annotate_ssml(script="A. B.", slides_count=2)
     assert "extra_body" not in captured
+
+
+# ── Detail levels (manual mode) ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_auto_level_leaves_the_verbatim_contract_intact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The default must not add a rewrite instruction — that is the whole point
+    of 'auto': the author's wording is passed through untouched."""
+    from app.services.llm_service import _SSML_SYSTEM
+
+    seen: dict[str, str] = {}
+
+    async def _fake_chat(system: str, user: str, **_kw: object) -> str:
+        seen["system"] = system
+        return '{"chunks": ["<p>a</p>", "<p>b</p>"]}'
+
+    monkeypatch.setattr(llm_service, "_chat", _fake_chat)
+    await llm_service.split_and_annotate_ssml("A. B.", 2, detail_level="auto")
+    assert seen["system"] == _SSML_SYSTEM
+
+    await llm_service.split_and_annotate_ssml("A. B.", 2, detail_level=None)
+    assert seen["system"] == _SSML_SYSTEM
+
+
+@pytest.mark.parametrize("level, marker", [("brief", "CONDENSE"), ("high", "EXPAND")])
+@pytest.mark.asyncio
+async def test_brief_and_high_append_an_override(
+    monkeypatch: pytest.MonkeyPatch, level: str, marker: str
+) -> None:
+    from app.services.llm_service import _SSML_SYSTEM
+
+    seen: dict[str, str] = {}
+
+    async def _fake_chat(system: str, user: str, **_kw: object) -> str:
+        seen["system"] = system
+        return '{"chunks": ["<p>a</p>", "<p>b</p>"]}'
+
+    monkeypatch.setattr(llm_service, "_chat", _fake_chat)
+    await llm_service.split_and_annotate_ssml("A. B.", 2, detail_level=level)
+
+    system = seen["system"]
+    assert system.startswith(_SSML_SYSTEM)  # base rules still lead
+    assert marker in system
+    assert "supersedes" in system  # names the rule it overrides
+
+
+@pytest.mark.asyncio
+async def test_override_carries_a_concrete_word_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The target is derived from the script, so the model gets a number rather
+    than a vague 'shorter'/'longer'."""
+    seen: dict[str, str] = {}
+
+    async def _fake_chat(system: str, user: str, **_kw: object) -> str:
+        seen["system"] = system
+        return '{"chunks": ["<p>a</p>", "<p>b</p>"]}'
+
+    monkeypatch.setattr(llm_service, "_chat", _fake_chat)
+    script = " ".join(["word"] * 100)
+
+    await llm_service.split_and_annotate_ssml(script, 2, detail_level="brief")
+    brief_system = seen["system"]
+    await llm_service.split_and_annotate_ssml(script, 2, detail_level="high")
+    high_system = seen["system"]
+
+    # brief: 100 * 120/225 ≈ 53 words; high: 100 * 400/225 ≈ 178 words
+    assert "53 words" in brief_system
+    assert "178 words" in high_system

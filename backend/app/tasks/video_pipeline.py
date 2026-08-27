@@ -216,7 +216,10 @@ def _enqueue_video_ready_email(lesson: Lesson, owner_id: UUID, task_id: str) -> 
 
 
 def _split_and_annotate(
-    script: str, slides_count: int, slide_texts: list[str] | None = None
+    script: str,
+    slides_count: int,
+    slide_texts: list[str] | None = None,
+    detail_level: str | None = None,
 ) -> tuple[list[str], str | None]:
     """Call async LLM service from sync Celery context to get SSML-annotated chunks.
 
@@ -225,7 +228,7 @@ def _split_and_annotate(
     """
     try:
         chunks, warning = asyncio.run(
-            llm_service.split_and_annotate_ssml(script, slides_count, slide_texts)
+            llm_service.split_and_annotate_ssml(script, slides_count, slide_texts, detail_level)
         )
         if len(chunks) == slides_count and all(chunks):
             return chunks, warning
@@ -470,8 +473,10 @@ def generate_video_lesson(
             else:
                 base_script = (lesson.script or lesson.text_content or "").strip()
                 if base_script and len(base_script.split()) > 5:
+                    # Manual mode: the detail level condenses or expands the
+                    # authored script; 'auto' keeps its wording verbatim.
                     slide_scripts, llm_warning = _split_and_annotate(
-                        base_script, total_slides, slide_summaries or None
+                        base_script, total_slides, slide_summaries or None, lesson.detail_level
                     )
                     if llm_warning:
                         llm_lesson = session.get(Lesson, lesson_uuid)

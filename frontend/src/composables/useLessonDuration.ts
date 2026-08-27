@@ -22,17 +22,35 @@ const DETAIL_LEVEL_BODY_WORDS: Record<DetailLevelValue, number> = {
 
 const EDGE_SLIDE_BUDGET_WEIGHT = 0.4
 
+function bodyWords(level: DetailLevelValue | null): number {
+  return DETAIL_LEVEL_BODY_WORDS[level ?? DEFAULT_DETAIL_LEVEL]
+    ?? DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
+}
+
 export interface DetailLevelOption {
   value: DetailLevelValue
   label: string
   hint: string
 }
 
+/** Auto mode: the LLM writes the narration from scratch. */
 export const DETAIL_LEVEL_OPTIONS: DetailLevelOption[] = [
   { value: DetailLevel.BRIEF, label: 'Кратко', hint: 'Тезисно, только суть каждого слайда' },
   { value: DetailLevel.AUTO, label: 'Авто', hint: 'Обычное объяснение — подходит большинству' },
   { value: DetailLevel.HIGH, label: 'Подробно', hint: 'Максимальное раскрытие: примеры, контекст' },
 ]
+
+/** Manual mode: the same levels act on the text the teacher already wrote. */
+export const DETAIL_LEVEL_OPTIONS_MANUAL: DetailLevelOption[] = [
+  { value: DetailLevel.BRIEF, label: 'Кратко', hint: 'Сжать ваш текст до главной сути' },
+  { value: DetailLevel.AUTO, label: 'Как есть', hint: 'Озвучить ваш текст дословно' },
+  { value: DetailLevel.HIGH, label: 'Подробно', hint: 'Дополнить ваш текст пояснениями и примерами' },
+]
+
+/** How much narration a level asks for, relative to the default one. */
+export function detailRatio(level: DetailLevelValue | null): number {
+  return bodyWords(level) / DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
+}
 
 export function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length
@@ -47,11 +65,6 @@ export function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = Math.round(seconds % 60)
   return `${m}:${s.toString().padStart(2, '0')}`
-}
-
-function bodyWords(level: DetailLevelValue | null): number {
-  return DETAIL_LEVEL_BODY_WORDS[level ?? DEFAULT_DETAIL_LEVEL]
-    ?? DETAIL_LEVEL_BODY_WORDS[DEFAULT_DETAIL_LEVEL]
 }
 
 function slideWeights(slideCount: number): number[] {
