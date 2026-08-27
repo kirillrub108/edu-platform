@@ -51,6 +51,20 @@ const snapshot = ref<SlideText[] | null>(null)
 const restoreNotice = ref('')
 let restoreNoticeTimer: ReturnType<typeof setTimeout> | null = null
 
+const pendingRegen = ref<{ slideId: string; text: string } | null>(null)
+
+// persistCurrent and regenerate both write slides.value[idx]; regenerate takes
+// 30-60s so a plain "last response wins" lets a fast, stale autosave clobber a
+// fresh regeneration (or vice versa). Each writer claims a ticket before its
+// request and only applies the response if it's still the latest one issued.
+const writeTicket = new Map<string, number>()
+const beginWrite = (id: string) => {
+  const t = (writeTicket.get(id) ?? 0) + 1
+  writeTicket.set(id, t)
+  return t
+}
+const isLatestWrite = (id: string, ticket: number) => writeTicket.get(id) === ticket
+
 const current = computed<SlideText | null>(() => slides.value[currentIdx.value] ?? null)
 
 const wordCount = computed(() => countWords(buffer.value))
@@ -106,14 +120,17 @@ const persistCurrent = async () => {
   const slide = current.value
   if (!slide) return
   if (buffer.value === (slide.edited_text ?? slide.generated_text)) return
+  const ticket = beginWrite(slide.id)
   savingIds.value.add(slide.id)
   try {
     const updated = await apiFetch<SlideText>(
       `/lessons/${props.lessonId}/slides/${slide.id}`,
       { method: 'PATCH', body: { edited_text: buffer.value } },
     )
-    const idx = slides.value.findIndex(s => s.id === slide.id)
-    if (idx >= 0) slides.value[idx] = updated
+    if (isLatestWrite(slide.id, ticket)) {
+      const idx = slides.value.findIndex(s => s.id === slide.id)
+      if (idx >= 0) slides.value[idx] = updated
+    }
   } finally {
     savingIds.value.delete(slide.id)
   }
@@ -144,9 +161,26 @@ const revertText = () => {
   scheduleSave()
 }
 
+const applyPendingRegen = () => {
+  const pending = pendingRegen.value
+  if (!pending) return
+  previousText.value = buffer.value
+  buffer.value = pending.text
+  canRevert.value = true
+  pendingRegen.value = null
+  scheduleSave()
+}
+
+const dismissPendingRegen = () => {
+  pendingRegen.value = null
+}
+
 const regenerate = async () => {
   const slide = current.value
   if (!slide) return
+  // A repeat click while this slide's regen is still in flight must not fire
+  // a second request — UiButton already disables on :loading, this is the guard.
+  if (regenIds.value.has(slide.id)) return
   // Abort any in-flight regen for this slot before starting a new one
   regenController.value?.abort()
   previousText.value = buffer.value
@@ -155,16 +189,25 @@ const regenerate = async () => {
   regenController.value = controller
   regenIds.value.add(slide.id)
   regenError.value = ''
+  const ticket = beginWrite(slide.id)
   try {
     const updated = await apiFetch<SlideText>(
       `/lessons/${props.lessonId}/slides/${slide.id}/regenerate`,
       { method: 'POST', signal: controller.signal },
     )
-    const idx = slides.value.findIndex(s => s.id === slide.id)
-    if (idx >= 0) slides.value[idx] = updated
+    if (isLatestWrite(slide.id, ticket)) {
+      const idx = slides.value.findIndex(s => s.id === slide.id)
+      if (idx >= 0) slides.value[idx] = updated
+    }
     if (slide.id === current.value?.id) {
-      buffer.value = updated.edited_text ?? updated.generated_text ?? ''
-      canRevert.value = true
+      if (buffer.value === previousText.value) {
+        // untouched while waiting — safe to apply straight into the textarea
+        buffer.value = updated.edited_text ?? updated.generated_text ?? ''
+        canRevert.value = true
+      } else {
+        // user typed a fresh draft during the 30-60s wait — don't clobber it silently
+        pendingRegen.value = { slideId: slide.id, text: updated.edited_text ?? updated.generated_text ?? '' }
+      }
     }
     void billing.refresh()
   } catch (err: any) {
@@ -229,10 +272,12 @@ const restoreFromSnapshot = async () => {
 }
 
 watch(currentIdx, () => {
-  regenController.value?.abort()
-  regenController.value = null
+  // Don't abort here: an in-flight regen must keep running (and land on its
+  // slide by id) even if the user switches away — only the per-slide "revert"
+  // display state resets when the viewed slide changes.
   canRevert.value = false
   previousText.value = ''
+  pendingRegen.value = null
 })
 
 onMounted(() => {
@@ -410,6 +455,28 @@ defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot 
             >
               Пополнить →
             </NuxtLink>
+          </div>
+          <div
+            v-if="pendingRegen && current && pendingRegen.slideId === current.id"
+            class="mx-5 mt-3 flex items-center justify-between gap-3 text-sm text-violet-700 bg-violet-50 border border-violet-200 rounded-xl px-3 py-2"
+          >
+            <span>Новый текст готов, но не применён — у вас есть несохранённые правки.</span>
+            <div class="flex gap-2 shrink-0">
+              <button
+                type="button"
+                class="text-xs font-medium text-violet-700 hover:text-violet-800 whitespace-nowrap"
+                @click="applyPendingRegen"
+              >
+                Показать новый текст
+              </button>
+              <button
+                type="button"
+                class="text-xs text-gray-500 hover:text-gray-700 whitespace-nowrap"
+                @click="dismissPendingRegen"
+              >
+                Отклонить
+              </button>
+            </div>
           </div>
           <div class="px-5 py-3 flex flex-wrap gap-2 justify-between items-center">
             <div class="flex gap-2 items-center">
