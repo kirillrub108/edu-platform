@@ -7,6 +7,7 @@ defineExpose({
   takeSnapshot: () => slideEditorRef.value?.takeSnapshot(),
   clearSnapshot: () => slideEditorRef.value?.clearSnapshot(),
   restoreFromSnapshot: () => slideEditorRef.value?.restoreFromSnapshot(),
+  reloadSlides: () => slideEditorRef.value?.reloadSlides(),
 })
 
 defineProps<{

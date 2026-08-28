@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import { fileURLToPath } from 'node:url'
+import vue from '@vitejs/plugin-vue'
 import type { Plugin } from 'vite'
 
 // Nuxt provides `import.meta.client` via build-time replacement. Vite's
@@ -23,7 +24,9 @@ const importMetaClientPlugin: Plugin = {
 }
 
 export default defineConfig({
-  plugins: [importMetaClientPlugin],
+  // plugin-vue lets component tests mount real SFCs instead of asserting on
+  // source strings. It ships with nuxt/vite already — nothing new installed.
+  plugins: [importMetaClientPlugin, vue()],
   test: {
     environment: 'happy-dom',
     globals: true,

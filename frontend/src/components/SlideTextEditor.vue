@@ -53,17 +53,11 @@ let restoreNoticeTimer: ReturnType<typeof setTimeout> | null = null
 
 const pendingRegen = ref<{ slideId: string; text: string } | null>(null)
 
-// persistCurrent and regenerate both write slides.value[idx]; regenerate takes
-// 30-60s so a plain "last response wins" lets a fast, stale autosave clobber a
-// fresh regeneration (or vice versa). Each writer claims a ticket before its
-// request and only applies the response if it's still the latest one issued.
-const writeTicket = new Map<string, number>()
-const beginWrite = (id: string) => {
-  const t = (writeTicket.get(id) ?? 0) + 1
-  writeTicket.set(id, t)
-  return t
-}
-const isLatestWrite = (id: string, ticket: number) => writeTicket.get(id) === ticket
+// A regenerate commits server-side after any autosave that overlapped it, so its
+// response is the fresher truth. An autosave already in flight when a regen
+// lands still carries the pre-regen text, so it must not write over it.
+const regenEpoch = new Map<string, number>()
+const epochOf = (id: string) => regenEpoch.get(id) ?? 0
 
 const current = computed<SlideText | null>(() => slides.value[currentIdx.value] ?? null)
 
@@ -120,14 +114,14 @@ const persistCurrent = async () => {
   const slide = current.value
   if (!slide) return
   if (buffer.value === (slide.edited_text ?? slide.generated_text)) return
-  const ticket = beginWrite(slide.id)
+  const epoch = epochOf(slide.id)
   savingIds.value.add(slide.id)
   try {
     const updated = await apiFetch<SlideText>(
       `/lessons/${props.lessonId}/slides/${slide.id}`,
       { method: 'PATCH', body: { edited_text: buffer.value } },
     )
-    if (isLatestWrite(slide.id, ticket)) {
+    if (epochOf(slide.id) === epoch) {
       const idx = slides.value.findIndex(s => s.id === slide.id)
       if (idx >= 0) slides.value[idx] = updated
     }
@@ -189,16 +183,14 @@ const regenerate = async () => {
   regenController.value = controller
   regenIds.value.add(slide.id)
   regenError.value = ''
-  const ticket = beginWrite(slide.id)
   try {
     const updated = await apiFetch<SlideText>(
       `/lessons/${props.lessonId}/slides/${slide.id}/regenerate`,
       { method: 'POST', signal: controller.signal },
     )
-    if (isLatestWrite(slide.id, ticket)) {
-      const idx = slides.value.findIndex(s => s.id === slide.id)
-      if (idx >= 0) slides.value[idx] = updated
-    }
+    regenEpoch.set(slide.id, epochOf(slide.id) + 1)
+    const idx = slides.value.findIndex(s => s.id === slide.id)
+    if (idx >= 0) slides.value[idx] = updated
     if (slide.id === current.value?.id) {
       if (buffer.value === previousText.value) {
         // untouched while waiting — safe to apply straight into the textarea
@@ -292,7 +284,10 @@ onUnmounted(() => {
   regenController.value?.abort()
 })
 
-defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot })
+// reloadSlides: a finished re-analysis rewrites every slide's text server-side,
+// but the editor only fetches on mount — and it stays mounted across an analysis
+// run, so without this the panel keeps showing pre-analysis text until a reload.
+defineExpose({ persistCurrent, takeSnapshot, clearSnapshot, restoreFromSnapshot, reloadSlides: loadSlides })
 </script>
 
 <template>

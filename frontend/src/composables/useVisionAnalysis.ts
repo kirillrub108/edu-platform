@@ -4,6 +4,8 @@ interface SnapshotPanel {
   takeSnapshot(): void
   clearSnapshot(): void
   restoreFromSnapshot(): void
+  /** Re-fetch slide texts — the editor stays mounted across an analysis run. */
+  reloadSlides(): void
 }
 
 export function useVisionAnalysis(
@@ -83,6 +85,8 @@ export function useVisionAnalysis(
       apiFetch<any>(`/lessons/${lessonId.value}`).then(d => {
         lesson.value = d
         showSlideEditor.value = true
+        // Already-open editor won't remount on this flag, so pull the new texts.
+        panelRef.value?.reloadSlides()
       })
       void billing.refresh()
     } else if (data.status === 'error') {
@@ -115,6 +119,7 @@ export function useVisionAnalysis(
         lesson.value = data
         if (data.status === 'ready_for_edit') {
           showSlideEditor.value = true
+          panelRef.value?.reloadSlides()
         } else if (data.status === 'cancelled') {
           cancellingAnalysis.value = false
           panelRef.value?.restoreFromSnapshot()
@@ -149,6 +154,7 @@ export function useVisionAnalysis(
         const data = await apiFetch<any>(`/lessons/${lessonId.value}`)
         lesson.value = data
         showSlideEditor.value = true
+        panelRef.value?.reloadSlides()
         void billing.refresh()
       } else if (res.status === 'FAILURE' || res.error) {
         stopPolling()

@@ -38,12 +38,14 @@ const innerVisionRef = ref<{
   takeSnapshot(): void
   clearSnapshot(): void
   restoreFromSnapshot(): void
+  reloadSlides(): void
 } | null>(null)
 
 defineExpose({
   takeSnapshot: () => innerVisionRef.value?.takeSnapshot(),
   clearSnapshot: () => innerVisionRef.value?.clearSnapshot(),
   restoreFromSnapshot: () => innerVisionRef.value?.restoreFromSnapshot(),
+  reloadSlides: () => innerVisionRef.value?.reloadSlides(),
 })
 </script>
 
