@@ -1,5 +1,6 @@
 import { CreationMode, type CreationModeValue } from '~/composables/useCreationMode'
 import { friendlyApiError, friendlyTaskError } from '~/composables/useBillingMeta'
+import { parseApiError } from '~/composables/useApi'
 
 export function useVideoGeneration(
   lessonId: Readonly<Ref<string>>,
@@ -363,11 +364,60 @@ export function useVideoGeneration(
     return false
   })
 
+  // ── Voice sample preview ────────────────────────────────────────────────────
+  // One shared <audio> element so switching voices never overlaps two clips.
+  const sampleAudioEl = import.meta.client ? new Audio() : null
+  let sampleAbort: AbortController | null = null
+  let sampleObjectUrl: string | null = null
+  const sampleLoading = ref(false)
+  const sampleError = ref('')
+
+  const stopSample = () => {
+    sampleAbort?.abort()
+    sampleAbort = null
+    sampleAudioEl?.pause()
+  }
+
+  // Changing voice/role mid-flight must cut off the previous request/clip —
+  // otherwise the user hears the old voice after picking a new one.
+  watch(selectedVoice, stopSample)
+
+  const playVoiceSample = async () => {
+    stopSample()
+    sampleError.value = ''
+    sampleLoading.value = true
+    const controller = new AbortController()
+    sampleAbort = controller
+    const [voice, role] = selectedVoice.value.split(':')
+    try {
+      const params = new URLSearchParams({ voice })
+      if (role) params.set('role', role)
+      const blob = await apiFetch<Blob>(`/tts/sample?${params.toString()}`, {
+        responseType: 'blob',
+        signal: controller.signal,
+      } as any)
+      if (controller.signal.aborted || !sampleAudioEl) return
+      if (sampleObjectUrl) URL.revokeObjectURL(sampleObjectUrl)
+      sampleObjectUrl = URL.createObjectURL(blob)
+      sampleAudioEl.src = sampleObjectUrl
+      await sampleAudioEl.play()
+    } catch (e: any) {
+      if (controller.signal.aborted || e?.name === 'AbortError') return
+      sampleError.value = parseApiError(e).general
+    } finally {
+      if (sampleAbort === controller) {
+        sampleAbort = null
+        sampleLoading.value = false
+      }
+    }
+  }
+
   return {
     voices, selectedVoice, selectedSpeed, selectedPitch,
     generating, cancellingVideo, taskError,
     creditsSpent, creditsReserved, billedVia, needTopup, cancelled,
     generateVideo, cancelVideo, stopPolling,
     showPipeline, pipelineStages, currentStageIdx, canGenerateVideo,
+    playVoiceSample, sampleLoading, sampleError,
   }
 }

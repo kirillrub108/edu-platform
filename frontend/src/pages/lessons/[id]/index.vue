@@ -132,6 +132,7 @@ const {
   selectedVoice, selectedSpeed, selectedPitch, voices, canGenerateVideo, showPipeline,
   pipelineStages, currentStageIdx, cancellingVideo, stopPolling: stopVideoPolling,
   creditsSpent, creditsReserved, billedVia, needTopup, cancelled,
+  playVoiceSample, sampleLoading, sampleError,
 } = useVideoGeneration(lessonId, lesson, mode, script, flushScript, isAuto, showSlideEditor)
 
 // Block AI actions behind email verification — opens the verify prompt and
@@ -184,6 +185,7 @@ const generateVideo = () =>
   )
 const guardedStartAnalysis = () =>
   ensureVerified(() => openCostModal('analyze', startAnalysis))
+const playSample = () => ensureVerified(playVoiceSample)
 
 const lessonStatusForBadge = computed(() => {
   if (analyzing.value) return 'analyzing'
@@ -731,11 +733,14 @@ watch(lessonId, (newId, oldId) => {
               :cancelled="cancelled"
               :latest-published="latestVideo?.is_published ?? false"
               :publishing="!!latestVideo && publishingVideoId === latestVideo.id"
+              :sample-loading="sampleLoading"
+              :sample-error="sampleError"
               @generate="generateVideo"
               @cancel="cancelVideo"
               @publish="publishLatest"
               @view-history="activeStep = 'history'"
               @video-url-expired="loadVideos"
+              @play-sample="playSample"
             />
           </div>
 

@@ -146,6 +146,7 @@ AI_GATED_ENDPOINTS: frozenset[tuple[str, str]] = frozenset(
         ("POST", "/api/v1/lessons/{lesson_id}/quiz/generate"),
         ("POST", "/api/v1/lessons/{lesson_id}/quiz/questions/{question_id}/regenerate"),
         ("POST", "/api/v1/lessons/{lesson_id}/quiz/ai-review"),
+        ("GET", "/api/v1/tts/sample"),
     }
 )
 

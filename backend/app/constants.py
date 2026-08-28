@@ -42,6 +42,9 @@ POLZA_MAX_CHARS: int = 4000
 # character count, so chunks stay far below the documented 5000-char limit.
 YANDEX_TTS_MAX_CHARS: int = 200  # v3 hard-caps ~250 chars/request; kept under with margin
 YANDEX_TTS_MAX_RETRIES: int = 3
+# Fixed sentence for the "preview this voice" sample in the generation form —
+# short enough to stay under every provider's per-chunk cap above.
+TTS_SAMPLE_TEXT: str = "Это пример голоса для озвучки вашего урока."
 # Ceiling for a pause translated from <break time="..."/> into sil<[ms]> — an LLM
 # that emits time="60s" must not stall a slide for a minute.
 YANDEX_TTS_MAX_PAUSE_MS: int = 5000

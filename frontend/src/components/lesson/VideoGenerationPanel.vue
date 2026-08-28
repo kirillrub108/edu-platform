@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowDown, Video, Square, AlertCircle } from 'lucide-vue-next'
+import { ArrowDown, Video, Square, AlertCircle, Play, Loader2 } from 'lucide-vue-next'
 
 const props = defineProps<{
   voices: Array<{ value: string; label: string }>
@@ -27,6 +27,8 @@ const props = defineProps<{
   cancelled: boolean
   latestPublished: boolean
   publishing: boolean
+  sampleLoading: boolean
+  sampleError: string
 }>()
 
 const emit = defineEmits<{
@@ -38,6 +40,7 @@ const emit = defineEmits<{
   publish: []
   viewHistory: []
   'video-url-expired': []
+  'play-sample': []
 }>()
 
 const isProcessing = computed(() => props.generating || props.lessonStatus === 'processing')
@@ -112,17 +115,30 @@ const hint = computed(() => {
 
       <div class="mb-5 max-w-xs">
         <label class="block text-sm font-medium text-gray-700 mb-1.5">Голос озвучки</label>
-        <div class="relative">
-          <select
-            :value="selectedVoice"
-            :disabled="isProcessing"
-            class="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm appearance-none pr-9 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 disabled:opacity-50 transition"
-            @change="emit('update:selectedVoice', ($event.target as HTMLSelectElement).value)"
+        <div class="flex items-center gap-2">
+          <div class="relative flex-1">
+            <select
+              :value="selectedVoice"
+              :disabled="isProcessing"
+              class="w-full bg-white border border-gray-200 rounded-xl px-4 py-2.5 text-sm appearance-none pr-9 focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 disabled:opacity-50 transition"
+              @change="emit('update:selectedVoice', ($event.target as HTMLSelectElement).value)"
+            >
+              <option v-for="v in voices" :key="v.value" :value="v.value">{{ v.label }}</option>
+            </select>
+            <ArrowDown class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          </div>
+          <button
+            type="button"
+            :disabled="sampleLoading"
+            title="Прослушать пример"
+            class="shrink-0 w-10 h-10 flex items-center justify-center rounded-xl border border-gray-200 text-violet-600 hover:bg-violet-50 disabled:opacity-50 transition"
+            @click="emit('play-sample')"
           >
-            <option v-for="v in voices" :key="v.value" :value="v.value">{{ v.label }}</option>
-          </select>
-          <ArrowDown class="w-4 h-4 absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+            <Loader2 v-if="sampleLoading" class="w-4 h-4 animate-spin" />
+            <Play v-else class="w-4 h-4" />
+          </button>
         </div>
+        <p v-if="sampleError" class="mt-1.5 text-xs text-red-600">{{ sampleError }}</p>
       </div>
 
       <div class="mb-5 rounded-xl border border-gray-200 bg-gray-50/70 p-4">

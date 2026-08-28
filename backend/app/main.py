@@ -41,6 +41,7 @@ from app.routers import (
     slides,
     students,
     system,
+    tts,
     uploads,
 )
 from app.services import yookassa_service
@@ -392,6 +393,7 @@ app.include_router(assignment_student.router)
 app.include_router(lesson_materials.router)
 app.include_router(notifications.router)
 app.include_router(system.router)
+app.include_router(tts.router)
 
 
 @app.get("/", tags=["meta"])

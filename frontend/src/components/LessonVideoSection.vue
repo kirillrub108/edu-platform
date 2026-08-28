@@ -25,6 +25,8 @@ defineProps<{
   cancelled: boolean
   latestPublished: boolean
   publishing: boolean
+  sampleLoading: boolean
+  sampleError: string
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +38,7 @@ const emit = defineEmits<{
   publish: []
   viewHistory: []
   'video-url-expired': []
+  'play-sample': []
 }>()
 </script>
 
@@ -66,6 +69,8 @@ const emit = defineEmits<{
     :cancelled="cancelled"
     :latest-published="latestPublished"
     :publishing="publishing"
+    :sample-loading="sampleLoading"
+    :sample-error="sampleError"
     @update:selected-voice="emit('update:selectedVoice', $event)"
     @update:selected-speed="emit('update:selectedSpeed', $event)"
     @update:selected-pitch="emit('update:selectedPitch', $event)"
@@ -74,5 +79,6 @@ const emit = defineEmits<{
     @publish="emit('publish')"
     @view-history="emit('viewHistory')"
     @video-url-expired="emit('video-url-expired')"
+    @play-sample="emit('play-sample')"
   />
 </template>
