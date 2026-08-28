@@ -38,6 +38,7 @@ const {
 } = storeToRefs(billing)
 
 const route = useRoute()
+const { reachGoalOnce } = useMetrika()
 
 // ── Buying a credit package ────────────────────────────────────────────────────
 
@@ -90,6 +91,13 @@ const handlePaymentReturn = async () => {
 
   if (payment?.status === 'succeeded') {
     paymentBanner.value = { kind: 'success', text: `Кредиты зачислены: +${payment.credits} CR` }
+    // reachGoalOnce keyed by paymentId — guards a refresh landing back on this
+    // return URL before the ?payment_id drop below takes effect.
+    reachGoalOnce(METRIKA_GOALS.paymentSucceeded, paymentId, {
+      package_key: payment.package_key,
+      credits: payment.credits,
+      amount_rub: payment.amount_rub,
+    })
   } else if (payment?.status === 'canceled') {
     paymentBanner.value = { kind: 'fail', text: 'Платёж не прошёл' }
   } else {

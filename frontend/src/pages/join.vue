@@ -4,6 +4,7 @@
 const route = useRoute()
 const { apiFetch } = useApi()
 const auth = useAuthStore()
+const { reachGoalOnce } = useMetrika()
 
 interface CoursePreview {
   id: string
@@ -74,6 +75,11 @@ const enroll = async () => {
       '/students/enroll',
       { method: 'POST', body }
     )
+    // reachGoalOnce keyed by enrollment_id — re-visiting this join link after
+    // already enrolling must not recount the goal.
+    reachGoalOnce(METRIKA_GOALS.courseEnrolled, result.enrollment_id, {
+      course_id: result.course_id,
+    })
     await navigateTo(`/student/courses/${result.course_id}`)
   } catch (e: any) {
     enrollError.value = e?.data?.detail ?? 'Ошибка при записи на курс'

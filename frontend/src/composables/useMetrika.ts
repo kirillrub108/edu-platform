@@ -13,12 +13,17 @@ declare global {
   }
 }
 
-// The four business goals configured in the Metrika counter (type "JavaScript-событие").
+// Business goals configured in the Metrika counter (type "JavaScript-событие").
+// Core activation funnel: signup → pptxUpload → videoReady → lessonPublish.
+// Plus other conversion points worth tracking on their own.
 export const METRIKA_GOALS = {
   signup: 'signup',
   pptxUpload: 'pptx_upload',
   videoReady: 'video_ready',
   lessonPublish: 'lesson_publish',
+  paymentSucceeded: 'payment_succeeded',
+  courseEnrolled: 'course_enrolled',
+  quizCompleted: 'quiz_completed',
 } as const
 
 export type MetrikaGoal = (typeof METRIKA_GOALS)[keyof typeof METRIKA_GOALS]

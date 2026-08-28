@@ -3,7 +3,7 @@ import { DEFAULT_DETAIL_LEVEL, type DetailLevelValue } from '~/composables/useLe
 
 export function useLessonData(lessonId: Readonly<Ref<string>>) {
   const { apiFetch } = useApi()
-  const { reachGoal } = useMetrika()
+  const { reachGoalOnce } = useMetrika()
 
   const lesson = ref<any>(null)
   const loading = ref(true)
@@ -138,7 +138,9 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
         body: form,
       })
       lesson.value = { ...lesson.value, pptx_path: result.file_path }
-      reachGoal(METRIKA_GOALS.pptxUpload, {
+      // reachGoalOnce keyed by lessonId — a teacher replacing the deck later
+      // in the same lesson must not recount the goal.
+      reachGoalOnce(METRIKA_GOALS.pptxUpload, lessonId.value, {
         lesson_id: lessonId.value,
         size_mb: Math.round(fileSizeMb * 100) / 100,
       })

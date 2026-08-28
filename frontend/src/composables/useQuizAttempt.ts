@@ -62,6 +62,7 @@ const AUTOSAVE_DELAY_MS = 500
 
 export function useQuizAttempt(lessonId: Readonly<Ref<string>>) {
   const { apiFetch } = useApi()
+  const { reachGoalOnce } = useMetrika()
 
   const info = ref<QuizInfo | null>(null)
   const attemptId = ref<string | null>(null)
@@ -223,6 +224,9 @@ export function useQuizAttempt(lessonId: Readonly<Ref<string>>) {
         { method: 'POST' },
       )
       await loadResult()
+      // reachGoalOnce keyed by attemptId — resuming/reloading this screen after
+      // submit must not recount the goal.
+      reachGoalOnce(METRIKA_GOALS.quizCompleted, res.attempt_id)
       if (res.status === 'submitted' && res.grading_task_id) {
         gradingPending.value = true
         pollGrading()
