@@ -1,4 +1,4 @@
-export type SocialKey = 'youtube' | 'rutube' | 'vk' | 'telegram' | 'habr'
+export type SocialKey = 'youtube' | 'rutube' | 'vk' | 'telegram' | 'instagram'
 
 export interface SocialLink {
   key: SocialKey
@@ -34,9 +34,9 @@ export const SOCIAL_LINKS: SocialLink[] = [
     brandColor: '#2aabee',
   },
   {
-    key: 'habr',
-    label: 'Habr',
-    href: 'https://habr.com/ru/users/kirillrub108/',
-    brandColor: '#65a3be',
+    key: 'instagram',
+    label: 'Instagram',
+    href: 'https://www.instagram.com/edllm.support/',
+    brandColor: '#e1306c',
   },
 ]
