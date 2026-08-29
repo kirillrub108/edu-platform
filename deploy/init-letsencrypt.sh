@@ -33,8 +33,10 @@ DOMAIN="${DOMAIN:?Set DOMAIN in .env.prod (or inline) — e.g. DOMAIN=edllm.ru}"
 EMAIL="${CERTBOT_EMAIL:-$(read_env_var CERTBOT_EMAIL)}"
 EMAIL="${EMAIL:?Set CERTBOT_EMAIL in .env.prod (or inline) for Lets Encrypt expiry notices}"
 COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env.prod"
-# Path INSIDE the certbot/nginx containers (the letsencrypt volume).
+# Paths INSIDE the certbot/nginx containers (the letsencrypt volume).
 LIVE="/etc/letsencrypt/live/${DOMAIN}"
+ARCHIVE="/etc/letsencrypt/archive/${DOMAIN}"
+RENEWAL="/etc/letsencrypt/renewal/${DOMAIN}.conf"
 # Set STAGING=1 while testing to avoid Let's Encrypt rate limits.
 STAGING_FLAG=""
 if [ "${STAGING:-0}" = "1" ]; then
@@ -42,7 +44,7 @@ if [ "${STAGING:-0}" = "1" ]; then
   echo ">> Using Let's Encrypt STAGING environment"
 fi
 
-echo ">> [1/4] Creating a temporary self-signed cert so nginx can start..."
+echo ">> [1/5] Creating a temporary self-signed cert so nginx can start..."
 $COMPOSE --profile certbot run --rm --entrypoint sh certbot -c "\
   mkdir -p '${LIVE}' && \
   openssl req -x509 -nodes -newkey rsa:2048 -days 1 \
@@ -50,19 +52,29 @@ $COMPOSE --profile certbot run --rm --entrypoint sh certbot -c "\
     -out '${LIVE}/fullchain.pem' \
     -subj '/CN=${DOMAIN}'"
 
-echo ">> [2/4] Starting nginx (and its deps) with the dummy cert..."
+echo ">> [2/5] Starting nginx (and its deps) with the dummy cert..."
 $COMPOSE up -d nginx
 
-echo ">> [3/4] Requesting the real certificate via the webroot challenge..."
-# --force-renewal overwrites the dummy. The webroot path matches nginx's
-# /.well-known/acme-challenge/ root in nginx/prod.conf.
+echo ">> [3/5] Removing the dummy cert so certbot treats this domain as new..."
+# certbot refuses to overwrite live/archive dirs it didn't create itself
+# (no matching renewal/${DOMAIN}.conf) even with --force-renewal, so this
+# matters both on a fresh VM and when moving the stack to a new server.
+$COMPOSE --profile certbot run --rm --entrypoint sh certbot -c "\
+  rm -Rf '${LIVE}' && \
+  rm -Rf '${ARCHIVE}' && \
+  rm -Rf '${RENEWAL}'"
+
+echo ">> [4/5] Requesting the real certificate via the webroot challenge..."
+# --force-renewal is belt-and-suspenders for reruns of this script; the
+# webroot path matches nginx's /.well-known/acme-challenge/ root in
+# nginx/prod.conf.
 $COMPOSE --profile certbot run --rm certbot certonly \
   --webroot -w /var/www/certbot \
   --email "${EMAIL}" --agree-tos --no-eff-email \
   --force-renewal ${STAGING_FLAG} \
   -d "${DOMAIN}"
 
-echo ">> [4/4] Reloading nginx to pick up the real certificate..."
+echo ">> [5/5] Reloading nginx to pick up the real certificate..."
 $COMPOSE exec -T nginx nginx -s reload
 
 echo ">> Done. https://${DOMAIN} is now serving a real certificate."
