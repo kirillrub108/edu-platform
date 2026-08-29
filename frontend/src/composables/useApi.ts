@@ -27,8 +27,15 @@ function mapPydanticMessage(item: Pydantic422Item): string {
     const min = ctx?.min_length
     return typeof min === 'number' ? `Минимум ${min} символов` : 'Слишком короткое значение'
   }
+  if (type === 'string_too_long') {
+    const max = ctx?.max_length
+    return typeof max === 'number' ? `Максимум ${max} символов` : 'Слишком длинное значение'
+  }
   if (type === 'value_error' && (msg.includes('@') || msg.toLowerCase().includes('email'))) {
     return 'Некорректный email'
+  }
+  if (type === 'value_error' && msg.toLowerCase().includes('password_blank')) {
+    return 'Пароль не может состоять только из пробелов'
   }
   return msg
 }

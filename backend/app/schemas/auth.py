@@ -1,14 +1,26 @@
 from typing import Annotated
 
 from disposable_email_domains import blocklist
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import AfterValidator, BaseModel, EmailStr, Field, model_validator
 
 from app.models.user import UserRole
 from app.schemas.user import UserOut
 
+
+def _reject_blank_password(value: str) -> str:
+    """A password made entirely of whitespace is not a password. Checked after
+    the length constraint below, so it catches e.g. 8 spaces too — raw length
+    alone would let it through."""
+    if not value.strip():
+        raise ValueError("password_blank")
+    return value
+
+
 # Shared password constraint — the single source of truth for "what counts as an
 # acceptable password" across registration, reset, and change.
-PasswordStr = Annotated[str, Field(min_length=8, max_length=128)]
+PasswordStr = Annotated[
+    str, Field(min_length=8, max_length=128), AfterValidator(_reject_blank_password)
+]
 
 
 def is_disposable_domain(domain: str) -> bool:
@@ -20,7 +32,9 @@ def is_disposable_domain(domain: str) -> bool:
 class UserRegister(BaseModel):
     email: EmailStr
     password: PasswordStr
-    full_name: str | None = None
+    # Mirrors the User.full_name column (String(255)) — a longer value must be a
+    # 422, not a 500 from a truncated INSERT.
+    full_name: str | None = Field(default=None, max_length=255)
     role: UserRole = UserRole.teacher
     # Consents. The two required ones must be explicitly true — the server never
     # trusts the client alone, so missing/false here is a 422 and no user is

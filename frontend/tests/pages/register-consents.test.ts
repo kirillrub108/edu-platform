@@ -30,7 +30,12 @@ describe('register consent gating', () => {
     )
     expect(source).not.toContain('acceptedMarketing.value && ')
     expect(source).not.toContain('&& acceptedMarketing.value')
-    expect(source).toContain(':disabled="!consentsGiven"')
+    // Gated inside submit() rather than via a disabled button, so a failed
+    // attempt can also drive the inline consent-error UI (red checkboxes +
+    // message) instead of silently doing nothing.
+    expect(source).toMatch(
+      /if \(!consentsGiven\.value\) \{\s*consentAttempted\.value = true\s*return\s*\}/,
+    )
   })
 
   it('binds each checkbox to its own consent flag', () => {

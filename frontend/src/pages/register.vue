@@ -17,10 +17,41 @@ const acceptedMarketing = ref(false)
 const error = ref<string | null>(null)
 const fieldErrors = ref<Record<string, string>>({})
 const loading = ref(false)
+const { remaining: cooldownRemaining, triggerFrom429 } = useRateLimitCooldown()
 
 // Both mandatory consents must be ticked before the form may be submitted;
 // the marketing opt-in is optional and never gates submission.
 const consentsGiven = computed(() => acceptedPrivacy.value && acceptedTerms.value)
+// Set only after a failed submit attempt, so the checkboxes don't start red.
+const consentAttempted = ref(false)
+
+const fullNameHint = computed(() => {
+  const remaining = FULL_NAME_MAX_LENGTH - fullName.value.length
+  return remaining <= 50 ? `Осталось ${remaining} симв.` : undefined
+})
+
+const normalizeEmail = () => {
+  email.value = normalizeEmailDomain(email.value)
+}
+
+// Client-side pass so errors show inline in every browser (not just via a
+// native :invalid tooltip, which Firefox renders differently and which
+// firing at submit-time bypasses our own submit handler). The server 422
+// path (parseApiError above) stays the authoritative fallback.
+const validate = (): boolean => {
+  fieldErrors.value = {}
+  if (!email.value.trim()) {
+    fieldErrors.value.email = 'Обязательное поле'
+  } else if (!isValidEmail(email.value)) {
+    fieldErrors.value.email = 'Некорректный email'
+  }
+  if (!password.value.trim()) {
+    fieldErrors.value.password = 'Пароль не может состоять только из пробелов'
+  } else if (password.value.length < PASSWORD_MIN_LENGTH) {
+    fieldErrors.value.password = `Минимум ${PASSWORD_MIN_LENGTH} символов`
+  }
+  return Object.keys(fieldErrors.value).length === 0
+}
 
 // Coming back from an OAuth callback with an unknown identity: the account does
 // not exist yet, only a one-shot ticket. Role + consents are still ours to
@@ -42,21 +73,32 @@ const completeOauth = async (ticket: string) => {
 }
 
 const submit = async () => {
-  if (!consentsGiven.value) return
+  if (loading.value || cooldownRemaining.value > 0) return
+  if (!consentsGiven.value) {
+    consentAttempted.value = true
+    return
+  }
+  const ticket = oauthTicket.value
+  if (!ticket && !validate()) return
+
   error.value = null
-  fieldErrors.value = {}
   loading.value = true
   try {
-    const ticket = oauthTicket.value
     if (ticket) {
       await completeOauth(ticket)
       return
     }
-    await auth.register(email.value, password.value, role.value, fullName.value || undefined, {
-      accepted_privacy: acceptedPrivacy.value,
-      accepted_terms: acceptedTerms.value,
-      accepted_marketing: acceptedMarketing.value,
-    })
+    await auth.register(
+      email.value,
+      password.value,
+      role.value,
+      fullName.value.trim() || undefined,
+      {
+        accepted_privacy: acceptedPrivacy.value,
+        accepted_terms: acceptedTerms.value,
+        accepted_marketing: acceptedMarketing.value,
+      },
+    )
     reachGoal(METRIKA_GOALS.signup, { role: role.value })
     await navigateTo(role.value === 'teacher' ? '/dashboard' : '/student/dashboard')
   } catch (e: unknown) {
@@ -67,6 +109,9 @@ const submit = async () => {
       error.value = null
       fieldErrors.value = {}
       return
+    }
+    if ((e as { response?: { status?: number } })?.response?.status === 429) {
+      triggerFrom429(e)
     }
     const parsed = parseApiError(e)
     fieldErrors.value = parsed.fields
@@ -140,12 +185,15 @@ onMounted(restoreScroll)
           <template v-else>Проходите курсы по ссылке от автора</template>
         </p>
 
-        <form class="space-y-4" @submit.prevent="submit">
+        <form class="space-y-4" novalidate @submit.prevent="submit">
           <UiInput
             v-if="!oauthTicket"
             v-model="fullName"
             label="Имя"
-            placeholder="Необязательно"
+            optional
+            placeholder="Иван Иванов"
+            :maxlength="FULL_NAME_MAX_LENGTH"
+            :hint="fieldErrors.full_name ? undefined : fullNameHint"
             :error="fieldErrors.full_name"
             @update:model-value="delete fieldErrors['full_name']"
           />
@@ -158,6 +206,7 @@ onMounted(restoreScroll)
             autocomplete="email"
             :error="fieldErrors.email"
             @update:model-value="delete fieldErrors['email']"
+            @blur="normalizeEmail"
           />
           <UiInput
             v-if="!oauthTicket"
@@ -166,17 +215,23 @@ onMounted(restoreScroll)
             type="password"
             placeholder="••••••••"
             autocomplete="new-password"
-            :hint="fieldErrors.password ? undefined : 'Минимум 8 символов'"
+            :hint="fieldErrors.password ? undefined : `Минимум ${PASSWORD_MIN_LENGTH} символов`"
             :error="fieldErrors.password"
             @update:model-value="delete fieldErrors['password']"
           />
 
           <div class="space-y-2.5 pt-1">
-            <label class="flex items-start gap-2.5 text-xs leading-relaxed text-gray-600">
+            <label
+              class="flex items-start gap-2.5 text-xs leading-relaxed"
+              :class="consentAttempted && !acceptedPrivacy ? 'text-rose-700' : 'text-gray-600'"
+            >
               <input
                 v-model="acceptedPrivacy"
                 type="checkbox"
-                class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500/30"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded focus:ring-violet-500/30"
+                :class="consentAttempted && !acceptedPrivacy
+                  ? 'border-rose-400 text-rose-600'
+                  : 'border-gray-300 text-violet-600'"
               />
               <span>
                 Я даю
@@ -195,11 +250,17 @@ onMounted(restoreScroll)
                 >Политику конфиденциальности</NuxtLink>
               </span>
             </label>
-            <label class="flex items-start gap-2.5 text-xs leading-relaxed text-gray-600">
+            <label
+              class="flex items-start gap-2.5 text-xs leading-relaxed"
+              :class="consentAttempted && !acceptedTerms ? 'text-rose-700' : 'text-gray-600'"
+            >
               <input
                 v-model="acceptedTerms"
                 type="checkbox"
-                class="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-violet-600 focus:ring-violet-500/30"
+                class="mt-0.5 h-4 w-4 shrink-0 rounded focus:ring-violet-500/30"
+                :class="consentAttempted && !acceptedTerms
+                  ? 'border-rose-400 text-rose-600'
+                  : 'border-gray-300 text-violet-600'"
               />
               <span>
                 Я принимаю условия
@@ -219,6 +280,13 @@ onMounted(restoreScroll)
               />
               <span>Согласен(на) получать новостные и рекламные рассылки</span>
             </label>
+            <p
+              v-if="consentAttempted && !consentsGiven"
+              class="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700"
+            >
+              <AlertCircle class="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>Отметьте оба обязательных согласия, чтобы продолжить</span>
+            </p>
           </div>
 
           <p
@@ -275,16 +343,13 @@ onMounted(restoreScroll)
             size="lg"
             block
             :loading="loading"
-            :disabled="!consentsGiven"
+            :disabled="cooldownRemaining > 0"
           >
             <template v-if="loading">Создание…</template>
+            <template v-else-if="cooldownRemaining > 0">Подождите {{ cooldownRemaining }} с</template>
             <template v-else-if="oauthTicket">Завершить регистрацию</template>
             <template v-else>Зарегистрироваться</template>
           </UiButton>
-
-          <p v-if="!consentsGiven" class="text-center text-xs text-gray-400">
-            Отметьте оба обязательных согласия, чтобы продолжить
-          </p>
         </form>
 
         <AuthOauthButtons v-if="!oauthTicket" class="mt-5" />

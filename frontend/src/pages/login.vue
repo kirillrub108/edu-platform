@@ -10,6 +10,27 @@ const password = ref('')
 const rememberMe = ref(true)
 const error = ref<string | null>(null)
 const loading = ref(false)
+const fieldErrors = ref<Record<string, string>>({})
+const { remaining: cooldownRemaining, triggerFrom429 } = useRateLimitCooldown()
+
+const normalizeEmail = () => {
+  email.value = normalizeEmailDomain(email.value)
+}
+
+// Same client-side pass as register.vue: inline errors in every browser
+// instead of relying on the native :invalid tooltip.
+const validate = (): boolean => {
+  fieldErrors.value = {}
+  if (!email.value.trim()) {
+    fieldErrors.value.email = 'Обязательное поле'
+  } else if (!isValidEmail(email.value)) {
+    fieldErrors.value.email = 'Некорректный email'
+  }
+  if (!password.value) {
+    fieldErrors.value.password = 'Обязательное поле'
+  }
+  return Object.keys(fieldErrors.value).length === 0
+}
 
 // Reason codes the OAuth callback appends when sign-in could not complete.
 const justDeleted = ref(false)
@@ -45,6 +66,9 @@ const pendingDeletionUntil = ref<string | null>(null)
 const showRestoreCta = ref(false)
 
 const submit = async () => {
+  if (loading.value || cooldownRemaining.value > 0) return
+  if (!validate()) return
+
   error.value = null
   showRestoreCta.value = false
   loading.value = true
@@ -54,6 +78,11 @@ const submit = async () => {
     const dest = redirect || (auth.user?.role === 'student' ? '/student/dashboard' : '/dashboard')
     await navigateTo(dest)
   } catch (e: any) {
+    if (e?.response?.status === 429) {
+      triggerFrom429(e)
+      error.value = 'Слишком много попыток, попробуйте позже'
+      return
+    }
     const pending = parsePendingDeletion(e, 403)
     if (pending) {
       showRestoreCta.value = true
@@ -89,13 +118,16 @@ onMounted(restoreScroll)
           Аккаунт удалён. Мы отправили на почту ссылку для восстановления — она действует 30 дней.
         </p>
 
-        <form class="space-y-4" @submit.prevent="submit">
+        <form class="space-y-4" novalidate @submit.prevent="submit">
           <UiInput
             v-model="email"
             label="Email"
             type="email"
             placeholder="you@example.com"
             autocomplete="email"
+            :error="fieldErrors.email"
+            @update:model-value="delete fieldErrors['email']"
+            @blur="normalizeEmail"
           />
           <UiInput
             v-model="password"
@@ -103,6 +135,8 @@ onMounted(restoreScroll)
             type="password"
             placeholder="••••••••"
             autocomplete="current-password"
+            :error="fieldErrors.password"
+            @update:model-value="delete fieldErrors['password']"
           />
 
           <div class="flex items-center justify-between">
@@ -142,8 +176,17 @@ onMounted(restoreScroll)
             </NuxtLink>
           </div>
 
-          <UiButton type="submit" variant="primary" size="lg" block :loading="loading">
-            {{ loading ? 'Вход…' : 'Войти' }}
+          <UiButton
+            type="submit"
+            variant="primary"
+            size="lg"
+            block
+            :loading="loading"
+            :disabled="cooldownRemaining > 0"
+          >
+            <template v-if="loading">Вход…</template>
+            <template v-else-if="cooldownRemaining > 0">Подождите {{ cooldownRemaining }} с</template>
+            <template v-else>Войти</template>
           </UiButton>
         </form>
 

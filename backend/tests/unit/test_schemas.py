@@ -7,7 +7,7 @@ from uuid import uuid4
 import pytest
 from pydantic import ValidationError
 
-from app.schemas.auth import UserRegister
+from app.schemas.auth import ChangePasswordRequest, UserRegister
 from app.schemas.course import CourseCreate
 from app.schemas.lesson import (
     LessonCreate,
@@ -80,6 +80,40 @@ def test_user_register_rejects_disposable_email(email: str) -> None:
 def test_user_register_accepts_legitimate_email(email: str) -> None:
     u = UserRegister(email=email, password="password123", **CONSENTS)
     assert u.email == email
+
+
+def test_user_register_accepts_full_name_at_column_limit() -> None:
+    u = UserRegister(email="x@y.com", password="password123", full_name="a" * 255, **CONSENTS)
+    assert len(u.full_name) == 255
+
+
+def test_user_register_rejects_full_name_over_column_limit() -> None:
+    """User.full_name is String(255) — over the limit must be a 422, not a
+    500 from a truncated INSERT."""
+    with pytest.raises(ValidationError):
+        UserRegister(email="x@y.com", password="password123", full_name="a" * 256, **CONSENTS)
+
+
+@pytest.mark.parametrize("password", ["        ", "\t\n\t\n\t\n\t\n"])
+def test_user_register_rejects_whitespace_only_password(password: str) -> None:
+    # Both cases are >= min_length=8 raw chars, so this exercises the blank
+    # check itself rather than the length constraint firing first.
+    with pytest.raises(ValidationError, match="password_blank"):
+        UserRegister(email="x@y.com", password=password, **CONSENTS)
+
+
+def test_user_register_accepts_password_with_meaningful_spaces() -> None:
+    """Only whitespace-only passwords are rejected — spaces inside a real
+    password are untouched (not trimmed, not rejected)."""
+    u = UserRegister(email="x@y.com", password=" pass word ", **CONSENTS)
+    assert u.password == " pass word "
+
+
+def test_change_password_rejects_whitespace_only_new_password() -> None:
+    """The blank-password rule lives on the shared PasswordStr, so it also
+    covers ChangePasswordRequest.new_password without a second validator."""
+    with pytest.raises(ValidationError, match="password_blank"):
+        ChangePasswordRequest(old_password="whatever", new_password="        ")
 
 
 # ── CourseCreate ────────────────────────────────────────────────────────────
