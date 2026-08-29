@@ -11,7 +11,7 @@ from app.schemas.user import UserOut
 PasswordStr = Annotated[str, Field(min_length=8, max_length=128)]
 
 
-def _is_disposable_domain(domain: str) -> bool:
+def is_disposable_domain(domain: str) -> bool:
     """True if `domain` or any of its parent domains is a known disposable provider."""
     labels = domain.lower().split(".")
     return any(".".join(labels[i:]) in blocklist for i in range(len(labels) - 1))
@@ -45,7 +45,7 @@ class UserRegister(BaseModel):
 
     @model_validator(mode="after")
     def _reject_disposable_email(self) -> "UserRegister":
-        if _is_disposable_domain(self.email.split("@")[-1]):
+        if is_disposable_domain(self.email.split("@")[-1]):
             raise ValueError("disposable_email_not_allowed")
         return self
 
@@ -91,4 +91,5 @@ __all__ = [
     "ResetPasswordRequest",
     "ChangePasswordRequest",
     "UserOut",
+    "is_disposable_domain",
 ]

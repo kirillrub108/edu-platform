@@ -11,6 +11,26 @@ const rememberMe = ref(true)
 const error = ref<string | null>(null)
 const loading = ref(false)
 
+// Reason codes the OAuth callback appends when sign-in could not complete.
+const OAUTH_REASONS: Record<string, string> = {
+  access_denied: 'Вы отменили вход через провайдера',
+  email_unverified: 'Провайдер не подтвердил ваш email — войдите по паролю',
+  no_email: 'Провайдер не передал email — войдите по паролю',
+  email_not_allowed: 'Этот почтовый домен не поддерживается',
+  account_disabled: 'Аккаунт отключён. Обратитесь в поддержку',
+  account_conflict: 'К этому email уже привязан другой аккаунт провайдера',
+  invalid_state: 'Сессия входа устарела, попробуйте ещё раз',
+  invalid_request: 'Некорректный ответ провайдера, попробуйте ещё раз',
+  provider_unreachable: 'Провайдер недоступен, попробуйте позже',
+  provider_error: 'Провайдер вернул ошибку, попробуйте позже',
+  internal_error: 'Не удалось завершить вход, попробуйте позже',
+}
+
+if (route.query.oauth === '0') {
+  const reason = route.query.reason as string | undefined
+  error.value = (reason && OAUTH_REASONS[reason]) || 'Не удалось войти через провайдера'
+}
+
 const submit = async () => {
   error.value = null
   loading.value = true
@@ -79,6 +99,8 @@ onMounted(restoreScroll)
             {{ loading ? 'Вход…' : 'Войти' }}
           </UiButton>
         </form>
+
+        <AuthOauthButtons class="mt-5" :next="(route.query.redirect as string | undefined)" />
       </div>
 
       <p class="mt-5 text-center text-sm text-gray-500">

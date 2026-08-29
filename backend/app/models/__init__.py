@@ -27,6 +27,7 @@ from app.models.lesson import (
 )
 from app.models.lesson_material import LessonMaterial, LessonNote
 from app.models.lesson_video import LessonVideo
+from app.models.oauth_account import OAuthAccount
 from app.models.password_reset_token import PasswordResetToken
 from app.models.payment import Payment, PaymentStatus
 from app.models.quiz import (
@@ -45,6 +46,7 @@ from app.models.user import User, UserRole
 __all__ = [
     "User",
     "UserRole",
+    "OAuthAccount",
     "Course",
     "AccessMode",
     "Module",

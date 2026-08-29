@@ -28,7 +28,10 @@ class User(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String(255), unique=True, index=True, nullable=False)
-    hashed_password = Column(String(255), nullable=False)
+    # Nullable: an account created purely through an OAuth provider has no
+    # local password. Such users log in via the provider; reset-password can
+    # later set one (see services/oauth_service.py).
+    hashed_password = Column(String(255), nullable=True)
     full_name = Column(String(255), nullable=True)
     role = Column(
         SAEnum(UserRole, name="user_role"),

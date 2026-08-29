@@ -227,6 +227,17 @@ class Settings(BaseSettings):
     SLIDES_CACHE_TTL_SECONDS: int = 86400
     SLIDES_CACHE_MAX_SIZE: int = 256
 
+    # OAuth social sign-in (Google, Yandex). Empty client_id/secret = provider
+    # disabled; the app boots normally and its endpoints answer 404.
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    YANDEX_CLIENT_ID: str = ""
+    YANDEX_CLIENT_SECRET: str = ""
+    # Public origin the provider redirects the browser back to; the callback
+    # path is appended. Empty falls back to BASE_URL (dev). Must match the
+    # redirect URI registered in the provider's console byte for byte.
+    OAUTH_REDIRECT_BASE_URL: str = ""
+
     # Cookies
     COOKIE_SECURE: bool = False  # set True in production (HTTPS only)
     COOKIE_SAMESITE: str = "Lax"  # Lax works with same-origin dev proxy

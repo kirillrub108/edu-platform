@@ -220,7 +220,12 @@ class AuthService:
 
     async def login(self, email: str, password: str, remember_me: bool = True) -> TokenResponse:
         user = await self.db.scalar(select(User).where(User.email == email))
-        if not user or not verify_password(password, user.hashed_password):
+        # A social-only account has no local hash. It collapses into the same
+        # opaque 401 as a wrong password — the response must not disclose that
+        # this mailbox exists and signs in through a provider.
+        if not user or not user.hashed_password:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        if not verify_password(password, user.hashed_password):
             raise HTTPException(status_code=401, detail="Invalid credentials")
         if not user.is_active:
             raise HTTPException(status_code=403, detail="User is inactive")
@@ -373,6 +378,10 @@ class AuthService:
         """Verify the current password, set the new hash, then revoke every
         session and reissue a fresh one for the caller — so other devices are
         logged out while this request stays authenticated on a rotated pair."""
+        # Social-only account: there is no current password to verify against.
+        # Such a user sets one through the reset-password flow instead.
+        if not user.hashed_password:
+            raise HTTPException(status_code=400, detail="password_not_set")
         if not verify_password(old_password, user.hashed_password):
             raise HTTPException(status_code=400, detail="Invalid current password")
         user.hashed_password = hash_password(new_password)

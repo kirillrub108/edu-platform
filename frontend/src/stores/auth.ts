@@ -10,6 +10,8 @@ interface UserOut {
   created_at: string
 }
 
+export type OAuthProvider = 'google' | 'yandex'
+
 export const useAuthStore = defineStore('auth', () => {
   const { apiFetch } = useApi()
   const user = ref<UserOut | null>(null)
@@ -63,6 +65,32 @@ export const useAuthStore = defineStore('auth', () => {
     await login(email, password, true)
   }
 
+  // Social sign-in. The server parks state + PKCE verifier and hands back the
+  // provider's authorize URL; we leave the SPA with a full page load (no popup,
+  // no fetch to the provider) and come back on the cookie-setting callback.
+  const oauthStart = async (provider: OAuthProvider, next?: string) => {
+    const { authorize_url } = await apiFetch<{ authorize_url: string }>(
+      `/auth/oauth/${provider}/start`,
+      { method: 'POST', body: { remember_me: true, next: next ?? null } },
+    )
+    window.location.href = authorize_url
+  }
+
+  // Finish a social registration: the ticket is one-shot, so a second submit
+  // (another tab) fails instead of creating a duplicate account.
+  const oauthComplete = async (
+    ticket: string,
+    role: 'teacher' | 'student',
+    consents: { pdn_consent: boolean; offer_consent: boolean; marketing_consent: boolean },
+  ): Promise<string> => {
+    const { redirect } = await apiFetch<{ redirect: string }>('/auth/oauth/complete', {
+      method: 'POST',
+      body: { ticket, role, ...consents },
+    })
+    await fetchMe()
+    return redirect
+  }
+
   const logout = async () => {
     try {
       await apiFetch('/auth/logout', { method: 'POST' })
@@ -112,5 +140,7 @@ export const useAuthStore = defineStore('auth', () => {
     forgotPassword,
     resetPassword,
     changePassword,
+    oauthStart,
+    oauthComplete,
   }
 })

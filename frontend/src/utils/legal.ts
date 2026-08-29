@@ -78,8 +78,8 @@ export interface LegalDocumentMeta {
 // LEGAL_DOCS_VERSION is the policy revision key and MUST match the backend's
 // CONSENT_POLICY_VERSION (app/constants.py), so recorded consents reference the
 // exact revision shown to the user.
-export const LEGAL_DOCS_VERSION = '2026-07-01'
-export const LEGAL_DOCS_UPDATED_AT = '01.07.2026'
+export const LEGAL_DOCS_VERSION = '2026-08-29'
+export const LEGAL_DOCS_UPDATED_AT = '29.08.2026'
 
 export const LEGAL_DOCUMENTS: LegalDocumentMeta[] = [
   {

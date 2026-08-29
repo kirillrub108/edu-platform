@@ -213,6 +213,50 @@ AI-роут и забыть его туда внести. Проверка ст�
 `constants.py`, бампается при изменении документов) и `consent_ip`. У старых пользователей поля
 пустые — «не значит согласился», значит «регистрировался до внедрения».
 
+### OAuth-вход: почта провайдера считается подтверждённой (2026-08-28)
+
+Код: [services/oauth_service.py](../backend/app/services/oauth_service.py),
+[routers/oauth.py](../backend/app/routers/oauth.py),
+[schemas/oauth.py](../backend/app/schemas/oauth.py),
+[models/oauth_account.py](../backend/app/models/oauth_account.py); фронт —
+[AuthOauthButtons.vue](../frontend/src/components/AuthOauthButtons.vue) на `login.vue`/`register.vue`.
+
+Вход через **Google** и **Яндекс ID** по Authorization Code + PKCE (S256). Аккаунт, созданный или
+слинкованный через провайдера, получает `email_verified=True` сразу — то есть проходит
+`require_verified_email` / `require_verified_teacher` без письма. Отдельной сессионной механики нет:
+успешная ветка заканчивается тем же `AuthService.issue_session` и теми же тремя куками
+(`_set_auth_cookies`), refresh-цикл не меняется.
+
+| Эндпоинт | Метод | Что делает |
+|---|---|---|
+| `/auth/oauth/{provider}/start` | POST | кладёт `state` + PKCE-verifier в Redis (`oauth:state:{state}`, TTL `OAUTH_STATE_TTL_SECONDS` = 10 мин) и возвращает `{authorize_url}`; SPA уходит туда полным редиректом |
+| `/auth/oauth/{provider}/callback` | GET | публичный, без CSRF; `state` потребляется атомарно (`GETDEL`), код меняется на токен, читается профиль |
+| `/auth/oauth/complete` | POST | добивает регистрацию новой identity по одноразовому тикету (роль + согласия) |
+
+`provider` ∈ `google|yandex`. Незнакомый или **не сконфигурированный** (пустые `*_CLIENT_ID/SECRET`)
+провайдер → **404** во всех точках. Callback **никогда не отдаёт 500**: любая ошибка — это `302` на
+`FRONTEND_URL/login?oauth=0&reason=…` (`access_denied`, `invalid_state`, `email_unverified`,
+`account_disabled`, `account_conflict`, `provider_unreachable`, `provider_error`, `internal_error`).
+
+Три ветки в callback:
+- **A** — identity `(provider, provider_user_id)` уже известна → сессия, 302 на дашборд по роли.
+- **B** — identity новая, но почта (сравнение по `lower()`) принадлежит существующему аккаунту →
+  линкуем `OAuthAccount`, при необходимости поднимаем `email_verified`, логиним. Дубль не создаём.
+- **C** — новых и identity, и почты нет → **пользователь не создаётся** (нет роли и согласий).
+  В Redis кладётся одноразовый тикет (`oauth:pending:{ticket}`, TTL `OAUTH_PENDING_TICKET_TTL_SECONDS`),
+  302 на `/register?oauth_pending=…&provider=…`; `POST /auth/oauth/complete` его сжигает (`GETDEL`,
+  поэтому две вкладки не создадут двух юзеров) и заводит `User` с `hashed_password=NULL`,
+  `email_verified=True` и тем же набором согласий, что и обычная регистрация.
+
+Почта провайдера прогоняется через тот же чек одноразовых доменов (`is_disposable_domain`).
+Google без `email_verified=true` отклоняется (`reason=email_unverified`); у Яндекса такого флага нет
+и `default_email` считается подтверждённым — допущение зафиксировано в [DECISIONS.md](DECISIONS.md) §58.
+
+**Аккаунт без пароля** (`users.hashed_password` стал nullable): `POST /auth/login` по такой почте →
+обычный непрозрачный **401** («Invalid credentials», факт социального входа не раскрывается);
+`change-password` → **400 `password_not_set`**; `forgot-password` работает как раньше (всегда 204,
+письмо уходит) — `reset-password` по такому аккаунту допустим и просто **задаёт** пароль.
+
 ### Одноразовые почтовые домены (2026-08-26)
 
 `UserRegister._reject_disposable_email` (тот же `schemas/auth.py`) отклоняет регистрацию 422-й, если
@@ -259,7 +303,9 @@ AI-роут и забыть его туда внести. Проверка ст�
 
 `slowapi` (см. [limiter.py](../backend/app/limiter.py)) с per-route декораторами:
 `register` 3/min, `login` 5/min, `refresh` 10/min, `resend-verification` 3/min,
-`forgot-password` 3/min, `reset-password` 5/min, `change-password` 5/min. Превышение → 429
+`forgot-password` 3/min, `reset-password` 5/min, `change-password` 5/min,
+`oauth/{provider}/start` 5/min, `oauth/{provider}/callback` 10/min, `oauth/complete` 5/min.
+Превышение → 429
 (отдельный handler в `main.py`).
 
 ---

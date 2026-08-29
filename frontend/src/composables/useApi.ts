@@ -35,6 +35,12 @@ function mapPydanticMessage(item: Pydantic422Item): string {
 
 const KNOWN_DETAIL_RU: Record<string, string> = {
   'Email already registered': 'Email уже зарегистрирован',
+  // OAuth reason codes surfaced as a 400 detail by /auth/oauth/complete.
+  invalid_ticket: 'Ссылка устарела — начните вход через провайдера заново',
+  email_not_allowed: 'Этот почтовый домен не поддерживается',
+  account_disabled: 'Аккаунт отключён. Обратитесь в поддержку',
+  account_conflict: 'К этому email уже привязан другой аккаунт провайдера',
+  password_not_set: 'У аккаунта нет пароля — задайте его через «Забыли пароль?»',
 }
 
 function mapGeneralError(err: unknown): string {

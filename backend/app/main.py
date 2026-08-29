@@ -36,6 +36,7 @@ from app.routers import (
     lesson_materials,
     lessons,
     notifications,
+    oauth,
     quiz_student,
     quiz_teacher,
     slides,
@@ -370,6 +371,7 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
 
 
 app.include_router(auth.router)
+app.include_router(oauth.router)
 app.include_router(courses.router)
 app.include_router(gradebook.router)
 app.include_router(lessons.router)

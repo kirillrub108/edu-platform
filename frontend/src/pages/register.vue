@@ -4,6 +4,7 @@ import { parseApiError } from '~/composables/useApi'
 
 definePageMeta({ middleware: ['guest'] })
 
+const route = useRoute()
 const auth = useAuthStore()
 const { reachGoal } = useMetrika()
 const email = ref('')
@@ -21,12 +22,36 @@ const loading = ref(false)
 // the marketing opt-in is optional and never gates submission.
 const consentsGiven = computed(() => acceptedPrivacy.value && acceptedTerms.value)
 
+// Coming back from an OAuth callback with an unknown identity: the account does
+// not exist yet, only a one-shot ticket. Role + consents are still ours to
+// collect, so the same form runs without the email/password fields.
+const oauthTicket = computed(() => (route.query.oauth_pending as string | undefined) || null)
+const oauthProvider = computed(() => (route.query.provider as string | undefined) || null)
+const providerLabel = computed(() =>
+  oauthProvider.value === 'yandex' ? 'Яндекс ID' : 'Google',
+)
+
+const completeOauth = async (ticket: string) => {
+  const redirect = await auth.oauthComplete(ticket, role.value, {
+    pdn_consent: acceptedPrivacy.value,
+    offer_consent: acceptedTerms.value,
+    marketing_consent: acceptedMarketing.value,
+  })
+  reachGoal(METRIKA_GOALS.signup, { role: role.value })
+  await navigateTo(redirect)
+}
+
 const submit = async () => {
   if (!consentsGiven.value) return
   error.value = null
   fieldErrors.value = {}
   loading.value = true
   try {
+    const ticket = oauthTicket.value
+    if (ticket) {
+      await completeOauth(ticket)
+      return
+    }
     await auth.register(email.value, password.value, role.value, fullName.value || undefined, {
       accepted_privacy: acceptedPrivacy.value,
       accepted_terms: acceptedTerms.value,
@@ -53,8 +78,15 @@ onMounted(restoreScroll)
         <div class="mb-3 flex justify-center">
           <AppLogo :with-text="false" size="lg" />
         </div>
-        <h1 class="text-xl font-semibold text-gray-900">Создать аккаунт</h1>
-        <p class="mt-1 text-sm text-gray-500">Начните создавать видеолекции бесплатно</p>
+        <h1 class="text-xl font-semibold text-gray-900">
+          {{ oauthTicket ? 'Почти готово' : 'Создать аккаунт' }}
+        </h1>
+        <p class="mt-1 text-sm text-gray-500">
+          <template v-if="oauthTicket">
+            Вы вошли через {{ providerLabel }}. Осталось выбрать роль и принять условия
+          </template>
+          <template v-else>Начните создавать видеоуроки бесплатно</template>
+        </p>
       </div>
 
       <div class="rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
@@ -84,6 +116,7 @@ onMounted(restoreScroll)
 
         <form class="space-y-4" @submit.prevent="submit">
           <UiInput
+            v-if="!oauthTicket"
             v-model="fullName"
             label="Имя"
             placeholder="Необязательно"
@@ -91,6 +124,7 @@ onMounted(restoreScroll)
             @update:model-value="delete fieldErrors['full_name']"
           />
           <UiInput
+            v-if="!oauthTicket"
             v-model="email"
             label="Email"
             type="email"
@@ -100,6 +134,7 @@ onMounted(restoreScroll)
             @update:model-value="delete fieldErrors['email']"
           />
           <UiInput
+            v-if="!oauthTicket"
             v-model="password"
             label="Пароль"
             type="password"
@@ -176,13 +211,17 @@ onMounted(restoreScroll)
             :loading="loading"
             :disabled="!consentsGiven"
           >
-            {{ loading ? 'Создание…' : 'Зарегистрироваться' }}
+            <template v-if="loading">Создание…</template>
+            <template v-else-if="oauthTicket">Завершить регистрацию</template>
+            <template v-else>Зарегистрироваться</template>
           </UiButton>
 
           <p v-if="!consentsGiven" class="text-center text-xs text-gray-400">
             Отметьте оба обязательных согласия, чтобы продолжить
           </p>
         </form>
+
+        <AuthOauthButtons v-if="!oauthTicket" class="mt-5" />
       </div>
 
       <p class="mt-5 text-center text-sm text-gray-500">

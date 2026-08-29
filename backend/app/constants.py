@@ -774,11 +774,32 @@ PASSWORD_RESET_TOKEN_BYTES: int = 32
 # SPA route that consumes the reset token; the raw token is appended as ?token=.
 PASSWORD_RESET_PATH: str = "/reset-password"
 
+# OAuth (social sign-in — see services/oauth_service.py)
+# Lifetime of the Redis-held authorization state + PKCE verifier. Only has to
+# survive one round trip through the provider's consent screen.
+OAUTH_STATE_TTL_SECONDS: int = 60 * 10
+# Lifetime of the pending-registration ticket handed to the SPA when a social
+# identity has no local account yet (role + consents still missing).
+OAUTH_PENDING_TICKET_TTL_SECONDS: int = 60 * 10
+# Entropy (bytes handed to secrets.token_urlsafe) of the state, PKCE verifier
+# and pending ticket. The verifier is larger — RFC 7636 wants 43-128 chars.
+OAUTH_STATE_BYTES: int = 32
+OAUTH_PKCE_VERIFIER_BYTES: int = 48
+OAUTH_TICKET_BYTES: int = 32
+# Per-request timeout for the two server-to-server provider calls (token
+# exchange, userinfo). Short: the user is waiting on a blocked redirect.
+OAUTH_HTTP_TIMEOUT_SECONDS: float = 10.0
+# SPA route the callback bounces to when sign-in could not complete; the failure
+# reason is appended as ?oauth=0&reason=...
+OAUTH_FAILURE_PATH: str = "/login"
+# SPA route that finishes registration for a brand-new social identity.
+OAUTH_REGISTER_PATH: str = "/register"
+
 # Registration consents (personal-data processing)
 # Version of the legal documents the user is consenting to at registration time.
 # Bump this whenever the privacy policy / terms change so we can tell which
 # revision each user agreed to.
-CONSENT_POLICY_VERSION: str = "2026-07-01"
+CONSENT_POLICY_VERSION: str = "2026-08-29"
 
 # Access code generation
 ACCESS_CODE_LENGTH: int = 6
