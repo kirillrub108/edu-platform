@@ -4,6 +4,7 @@ export interface CommentAuthor {
   id: string
   full_name: string | null
   role: 'teacher' | 'student'
+  avatar_url: string | null
 }
 
 export interface Comment {

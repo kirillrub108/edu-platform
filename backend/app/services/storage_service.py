@@ -299,6 +299,16 @@ class StorageService:
             return unquote(parsed.path[len(prefix) :])
         return None
 
+    async def save_bytes(self, relative_path: str, data: bytes) -> str:
+        """Store bytes the caller already holds, under a path the caller chose.
+
+        The save_upload* pair both derive their own random filename from an
+        UploadFile; this is the primitive for content produced server-side (a
+        re-encoded avatar), where the bytes are not the uploaded bytes and the
+        path carries meaning."""
+        await asyncio.to_thread(self._backend.save, relative_path, data)
+        return relative_path
+
     def get_full_path(self, relative_path: str) -> str:
         return self._backend.get_full_path(relative_path)
 

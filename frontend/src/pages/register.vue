@@ -60,11 +60,37 @@ const submit = async () => {
     reachGoal(METRIKA_GOALS.signup, { role: role.value })
     await navigateTo(role.value === 'teacher' ? '/dashboard' : '/student/dashboard')
   } catch (e: unknown) {
+    // The address belongs to an account still inside its restore window, so it
+    // is not free yet. Offer the release flow instead of a dead-end error.
+    if (parsePendingDeletion(e, 409)) {
+      pendingDeletion.value = true
+      error.value = null
+      fieldErrors.value = {}
+      return
+    }
     const parsed = parseApiError(e)
     fieldErrors.value = parsed.fields
     error.value = parsed.general || null
   } finally {
     loading.value = false
+  }
+}
+
+const pendingDeletion = ref(false)
+const releaseRequested = ref(false)
+const releasing = ref(false)
+
+// Always 204 server-side, so there is no failure branch worth showing: the
+// message is the same whether or not a letter actually went out.
+const requestRelease = async () => {
+  releasing.value = true
+  try {
+    await auth.requestEmailRelease(email.value)
+  } catch {
+    /* noop - the endpoint is deliberately opaque */
+  } finally {
+    releasing.value = false
+    releaseRequested.value = true
   }
 }
 
@@ -202,6 +228,46 @@ onMounted(restoreScroll)
             <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
             <span>{{ error }}</span>
           </p>
+
+          <div
+            v-if="pendingDeletion"
+            class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900"
+          >
+            <p class="flex items-start gap-2">
+              <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Этот адрес занят удалённым аккаунтом, который ещё можно восстановить.
+              </span>
+            </p>
+
+            <p v-if="releaseRequested" class="mt-2">
+              Если адрес действительно ваш, мы отправили на него письмо со ссылкой для
+              освобождения. После подтверждения старый аккаунт восстановить будет нельзя.
+            </p>
+            <template v-else>
+              <p class="mt-2">
+                Если это ваш аккаунт, войдите и восстановите его — или освободите адрес, чтобы
+                зарегистрировать новый.
+              </p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <NuxtLink
+                  to="/restore-account"
+                  class="inline-block rounded-xl border border-amber-300 px-4 py-2 text-sm font-medium text-amber-900 transition hover:bg-amber-100"
+                >
+                  Восстановить аккаунт
+                </NuxtLink>
+                <UiButton
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  :loading="releasing"
+                  @click="requestRelease"
+                >
+                  Это мой адрес, освободить его
+                </UiButton>
+              </div>
+            </template>
+          </div>
 
           <UiButton
             type="submit"

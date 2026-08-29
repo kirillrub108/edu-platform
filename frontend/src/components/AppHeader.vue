@@ -24,10 +24,6 @@ watch(() => user.value?.role, (role) => {
   if (role === 'teacher') billing.fetchBalance()
 })
 
-const initials = computed(() =>
-  (user.value?.full_name || user.value?.email || '?').slice(0, 2).toUpperCase(),
-)
-
 const { isOpen, triggerRef, close, toggle } = useMobileMenu()
 
 interface NavItem {
@@ -112,9 +108,7 @@ const handleLogout = () => {
           Почта не подтверждена
         </button>
         <div class="flex items-center gap-2.5">
-          <div class="w-8 h-8 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-xs font-semibold">
-            {{ initials }}
-          </div>
+          <UserAvatar :user="user" size="sm" linked />
           <div class="leading-tight">
             <div class="text-sm font-medium text-gray-900">{{ user?.full_name || user?.email }}</div>
             <div class="text-[11px] text-gray-500">
@@ -234,9 +228,7 @@ const handleLogout = () => {
             v-if="isAuthenticated"
             class="shrink-0 px-4 py-3 flex items-center gap-3 border-b border-gray-100"
           >
-            <div class="w-10 h-10 shrink-0 rounded-full bg-violet-100 text-violet-700 grid place-items-center text-sm font-semibold">
-              {{ initials }}
-            </div>
+            <UserAvatar :user="user" size="md" linked />
             <div class="min-w-0 leading-tight">
               <div class="text-sm font-medium text-gray-900 truncate">
                 {{ user?.full_name || user?.email }}

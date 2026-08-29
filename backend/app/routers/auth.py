@@ -18,14 +18,17 @@ from app.models.user import User
 from app.redis_client import get_redis
 from app.schemas.auth import (
     ChangePasswordRequest,
+    ConfirmReleaseRequest,
     ForgotPasswordRequest,
+    ReleaseEmailRequest,
     ResetPasswordRequest,
+    RestoreAccountRequest,
     UserLogin,
     UserOut,
     UserRegister,
     VerifyEmailRequest,
 )
-from app.services import email_token_service, password_reset_service
+from app.services import account_service, email_token_service, password_reset_service
 from app.services.auth_service import (
     AuthService,
     decode_token,
@@ -353,3 +356,55 @@ async def change_password(
     tokens = await service.change_password(user, data.old_password, data.new_password)
     _set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
     return {}
+
+
+# ── Account restore / email release (see services/account_service.py) ─────────
+
+
+@router.post("/restore-account", status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
+async def restore_account(
+    request: Request,
+    response: Response,
+    data: RestoreAccountRequest,
+    service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Anonymous: undo a soft delete via the mailed token or the original
+    credentials, then sign the user straight back in. Every failure mode is one
+    opaque 400 — distinguishing them would enumerate accounts."""
+    user = await account_service.restore_account(
+        db, token=data.token, email=data.email, password=data.password
+    )
+    tokens = await service.issue_session(user)
+    _set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
+    return {}
+
+
+@router.post("/release-email", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("3/minute")
+async def release_email(
+    request: Request,
+    data: ReleaseEmailRequest,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Anonymous: mail the "free this address" link, but only if the address is
+    really held by an account inside its restore window. Always 204 — the
+    response must not reveal whether it was."""
+    await account_service.request_email_release(db, data.email)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/confirm-release", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("5/minute")
+async def confirm_release(
+    request: Request,
+    data: ConfirmReleaseRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> Response:
+    """Anonymous: burn the one-time token and anonymize the account immediately,
+    freeing the address. Restore is impossible afterwards — by construction, not
+    by a flag: the hash and the email the restore paths match on are gone."""
+    await account_service.confirm_email_release(db, redis, data.token)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

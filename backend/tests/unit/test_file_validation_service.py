@@ -188,3 +188,75 @@ async def test_file_pointer_is_rewound_for_the_caller() -> None:
     await validate_upload(upload, [".pptx"])
 
     assert await upload.read() == content
+
+
+# ── Image signatures ─────────────────────────────────────────────────────────
+# Added with avatar upload: before this, .png/.jpg/.webp had NO magic branch at
+# all, so an SVG (or anything else) renamed to .png sailed through — and
+# /files/* serves it inline, which makes that stored XSS.
+
+
+class _FakeUpload:
+    """Minimal UploadFile stand-in: validate_upload only uses these three."""
+
+    def __init__(self, filename: str, content: bytes) -> None:
+        self.filename = filename
+        self._buf = BytesIO(content)
+        self.size = len(content)
+
+    async def read(self, size: int = -1) -> bytes:
+        return self._buf.read(size) if size != -1 else self._buf.read()
+
+    async def seek(self, offset: int) -> None:
+        self._buf.seek(offset)
+
+
+_AVATAR_EXTS = [".jpg", ".jpeg", ".png", ".webp"]
+
+_PNG = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 64
+_WEBP = b"RIFF" + (100).to_bytes(4, "little") + b"WEBP" + b"\x00" * 64
+_SVG = b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [("a.png", _PNG), ("a.jpg", _JPEG), ("a.jpeg", _JPEG), ("a.webp", _WEBP)],
+)
+async def test_real_images_accepted(name: str, content: bytes) -> None:
+    await validate_upload(_FakeUpload(name, content), _AVATAR_EXTS, enforce_size_limits=False)
+
+
+@pytest.mark.asyncio
+async def test_svg_extension_rejected() -> None:
+    with pytest.raises(HTTPException) as exc:
+        await validate_upload(_FakeUpload("x.svg", _SVG), _AVATAR_EXTS, enforce_size_limits=False)
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_svg_renamed_to_png_rejected_by_signature() -> None:
+    """The extension whitelist alone would pass this; the magic check is what
+    actually stops it."""
+    with pytest.raises(HTTPException) as exc:
+        await validate_upload(_FakeUpload("x.png", _SVG), _AVATAR_EXTS, enforce_size_limits=False)
+    assert exc.value.status_code == 400
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("name", "content"),
+    [("a.png", _JPEG), ("a.jpg", _PNG), ("a.webp", _PNG), ("a.png", b"MZ\x90\x00binary")],
+)
+async def test_mismatched_content_rejected(name: str, content: bytes) -> None:
+    with pytest.raises(HTTPException):
+        await validate_upload(_FakeUpload(name, content), _AVATAR_EXTS, enforce_size_limits=False)
+
+
+@pytest.mark.asyncio
+async def test_riff_that_is_not_webp_rejected() -> None:
+    """A WAV is also a RIFF container — the WEBP fourcc is the discriminator."""
+    wav = b"RIFF" + (100).to_bytes(4, "little") + b"WAVE" + b"\x00" * 64
+    with pytest.raises(HTTPException):
+        await validate_upload(_FakeUpload("a.webp", wav), _AVATAR_EXTS, enforce_size_limits=False)

@@ -44,6 +44,7 @@ from app.routers import (
     system,
     tts,
     uploads,
+    users,
 )
 from app.services import yookassa_service
 
@@ -380,6 +381,7 @@ app.include_router(quiz_teacher.router)
 app.include_router(quiz_student.router)
 app.include_router(uploads.router)
 app.include_router(students.router)
+app.include_router(users.router)
 if settings.STORAGE_BACKEND == "local":
     if settings.SERVE_STATIC_VIA_NGINX:
         # nginx serves /files/* directly from disk; FastAPI only verifies sigs.

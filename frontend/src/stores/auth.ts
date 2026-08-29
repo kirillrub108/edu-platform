@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 
-interface UserOut {
+export interface UserOut {
   id: string
   email: string
   full_name: string | null
@@ -8,9 +8,23 @@ interface UserOut {
   is_active: boolean
   email_verified: boolean
   created_at: string
+  /** Single computed field: uploaded avatar wins, else the provider's. */
+  avatar_url: string | null
 }
 
 export type OAuthProvider = 'google' | 'yandex'
+export type ProfileVisibility = 'public' | 'authenticated' | 'private'
+
+export interface ProfileSettings {
+  full_name: string | null
+  bio: string | null
+  avatar_url: string | null
+}
+
+export interface PrivacySettings {
+  profile_visibility: ProfileVisibility
+  show_profile_stats: boolean
+}
 
 export const useAuthStore = defineStore('auth', () => {
   const { apiFetch } = useApi()
@@ -125,6 +139,70 @@ export const useAuthStore = defineStore('auth', () => {
     })
   }
 
+  // ── Own profile / privacy / account ────────────────────────────────────────
+  // These mutate the signed-in identity, so the header avatar and name have to
+  // follow: every writer mirrors the fresh values onto `user`.
+
+  const fetchProfileSettings = () => apiFetch<ProfileSettings>('/users/me/profile')
+
+  const applyProfile = (settings: ProfileSettings) => {
+    if (user.value) {
+      user.value.full_name = settings.full_name
+      user.value.avatar_url = settings.avatar_url
+    }
+    return settings
+  }
+
+  const updateProfile = async (patch: Partial<Pick<ProfileSettings, 'full_name' | 'bio'>>) =>
+    applyProfile(await apiFetch<ProfileSettings>('/users/me/profile', {
+      method: 'PATCH',
+      body: patch,
+    }))
+
+  const uploadAvatar = async (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return applyProfile(await apiFetch<ProfileSettings>('/users/me/avatar', {
+      method: 'POST',
+      body: form,
+    }))
+  }
+
+  // Removes the uploaded file only. A provider-supplied picture, if any, comes
+  // back — that is what "revert to my Google avatar" means.
+  const deleteAvatar = async () =>
+    applyProfile(await apiFetch<ProfileSettings>('/users/me/avatar', { method: 'DELETE' }))
+
+  const fetchPrivacy = () => apiFetch<PrivacySettings>('/users/me/privacy')
+
+  const updatePrivacy = (patch: Partial<PrivacySettings>) =>
+    apiFetch<PrivacySettings>('/users/me/privacy', { method: 'PATCH', body: patch })
+
+  // Soft delete. The server clears the cookies, so the local session goes too.
+  const deleteAccount = async (password: string) => {
+    await apiFetch('/users/me/delete', { method: 'POST', body: { password } })
+    clearSession()
+  }
+
+  // Anonymous: undo a soft delete by token or by credentials, then sign in.
+  const restoreAccount = async (payload: {
+    token?: string
+    email?: string
+    password?: string
+  }) => {
+    await apiFetch('/auth/restore-account', { method: 'POST', body: payload })
+    await fetchMe()
+  }
+
+  // Anonymous, always 204 — never branch on the outcome.
+  const requestEmailRelease = async (email: string) => {
+    await apiFetch('/auth/release-email', { method: 'POST', body: { email } })
+  }
+
+  const confirmEmailRelease = async (token: string) => {
+    await apiFetch('/auth/confirm-release', { method: 'POST', body: { token } })
+  }
+
   return {
     user,
     isAuthenticated,
@@ -142,5 +220,15 @@ export const useAuthStore = defineStore('auth', () => {
     changePassword,
     oauthStart,
     oauthComplete,
+    fetchProfileSettings,
+    updateProfile,
+    uploadAvatar,
+    deleteAvatar,
+    fetchPrivacy,
+    updatePrivacy,
+    deleteAccount,
+    restoreAccount,
+    requestEmailRelease,
+    confirmEmailRelease,
   }
 })

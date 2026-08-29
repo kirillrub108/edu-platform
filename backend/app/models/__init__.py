@@ -41,11 +41,12 @@ from app.models.quiz import (
 )
 from app.models.slide_text import SlideText
 from app.models.usage_counter import UsageCounter
-from app.models.user import User, UserRole
+from app.models.user import ProfileVisibility, User, UserRole
 
 __all__ = [
     "User",
     "UserRole",
+    "ProfileVisibility",
     "OAuthAccount",
     "Course",
     "AccessMode",

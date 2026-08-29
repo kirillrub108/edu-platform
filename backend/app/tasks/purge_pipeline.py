@@ -5,13 +5,21 @@ SOFT_DELETE_PURGE_DAYS, together with their files in storage. Runs on the
 `quiz` queue (served by the celery_quiz worker) and is triggered by Celery beat
 (see app/celery_app.py).
 
-One carve-out: an archived Course with at least one Enrollment is NEVER purged,
-no matter how old `deleted_at` is (`_course_purge_guard`). Archiving is a
-teacher-side action that does not revoke access for an already-enrolled student,
-so deleting the row — which cascades to modules, lessons, enrollments,
-lesson_progress, quiz attempts and submissions — would silently take away that
-student's own record. Only never-enrolled archived courses are purged, on the
-usual timing.
+Two carve-outs, both guarding the same cascade
+`users → courses → modules → lessons → enrollments/lesson_progress` (+ quiz
+attempts and submissions), all declared ondelete=CASCADE:
+
+* an archived Course with at least one Enrollment is NEVER purged, no matter how
+  old `deleted_at` is (`_course_purge_guard`). Archiving is a teacher-side action
+  that does not revoke access for an already-enrolled student, so deleting the
+  row would silently take away that student's own record. Only never-enrolled
+  archived courses are purged, on the usual timing;
+
+* a User who carries learning data — their own enrolments, or students enrolled
+  on courses they own — is **anonymized in place rather than deleted**
+  (`_user_purge_guard`, DECISIONS §59). The right to erasure is satisfied by
+  destroying the personal data, not by destroying other people's grades. An
+  account with nothing attached is still physically removed.
 
 Sync-only: like every task here it uses the psycopg2 `SyncSession`, never an
 AsyncSession. Because the global soft-delete filter (app/database.py) also
@@ -55,6 +63,7 @@ from app.models.lesson_material import LessonMaterial
 from app.models.lesson_video import LessonVideo
 from app.models.slide_text import SlideText
 from app.models.user import User
+from app.services import account_service, profile_service
 from app.services.billing_service import estimate_retention_extension
 from app.services.retention_service import (
     effective_deadline,
@@ -328,6 +337,81 @@ def _course_purge_guard(cutoff: datetime) -> Callable[[Session, object], bool]:
     return guard
 
 
+def _user_purge_guard(cutoff: datetime) -> Callable[[Session, object], bool]:
+    """Build the veto `_purge_model` applies to each candidate User.
+
+    Direct continuation of the Course carve-out (DECISIONS §51). Deleting a user
+    cascades `users → courses → modules → lessons → enrollments/lesson_progress`
+    plus quiz attempts and submissions, so hard-deleting a teacher would erase
+    their students' own grades and history, and hard-deleting a student would
+    erase the rows their teachers grade against.
+
+    So this guard has three outcomes, not two:
+
+      * row still locked / restored since the scan → skip, try again tomorrow;
+      * row carries learning data (theirs or other people's) → **anonymize in
+        place and keep it**, veto the DELETE;
+      * genuinely empty account → allow the physical delete, as before.
+
+    Same locking discipline as _course_purge_guard: FOR UPDATE SKIP LOCKED with
+    the predicate re-read inside the transaction that will do the DELETE, so a
+    restore racing the scan cannot lose.
+    """
+
+    def guard(session: Session, obj: object) -> bool:
+        user = cast(User, obj)
+        locked = session.execute(
+            select(User.id)
+            .where(
+                User.id == user.id,
+                User.deleted_at.isnot(None),
+                User.deleted_at < cutoff,
+            )
+            .with_for_update(skip_locked=True)
+            .execution_options(include_deleted=True)
+        ).one_or_none()
+        if locked is None:
+            logger.info("purge_user_skipped", id=str(user.id), reason="locked_or_restored")
+            return False
+
+        if _has_learning_data(session, user):
+            if not account_service.is_anonymized(user):
+                account_service.anonymize_user_fields(user)
+                profile_service.drop_avatar_file(user.id)
+                session.commit()
+                logger.info("purge_user_anonymized", id=str(user.id))
+            return False
+
+        # Nothing of anyone's depends on this row — remove it for real.
+        profile_service.drop_avatar_file(user.id)
+        return True
+
+    return guard
+
+
+def _has_learning_data(session: Session, user: User) -> bool:
+    """True when dropping this user would take somebody's coursework with it —
+    their own enrolment history, or students enrolled on courses they own."""
+    own_enrollments = (
+        session.scalar(
+            select(func.count()).select_from(Enrollment).where(Enrollment.student_id == user.id)
+        )
+        or 0
+    )
+    if own_enrollments:
+        return True
+    students_taught = (
+        session.scalar(
+            select(func.count())
+            .select_from(Enrollment)
+            .join(Course, Enrollment.course_id == Course.id)
+            .where(Course.owner_id == user.id)
+        )
+        or 0
+    )
+    return bool(students_taught)
+
+
 # ── Generic purge driver ──────────────────────────────────────────────────────
 
 
@@ -389,7 +473,9 @@ def purge_soft_deleted() -> dict:
             session, Course, cutoff, _purge_course_files, guard=_course_purge_guard(cutoff)
         )
         counts["lessons"] = _purge_model(session, Lesson, cutoff, _purge_lesson_files)
-        counts["users"] = _purge_model(session, User, cutoff, _purge_user_files)
+        counts["users"] = _purge_model(
+            session, User, cutoff, _purge_user_files, guard=_user_purge_guard(cutoff)
+        )
         # Retention sweep for graded submissions (independent of soft-delete).
         counts["expired_attachments"] = _purge_expired_submission_attachments(session)
     logger.info("purge_soft_deleted_done", **counts)

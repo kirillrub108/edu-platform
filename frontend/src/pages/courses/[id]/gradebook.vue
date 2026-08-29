@@ -33,6 +33,7 @@ interface GradebookStudentRow {
   student_id: string
   student_name: string
   student_email: string
+  student_avatar_url: string | null
   lessons: GradebookCell[]
   assignments: GradebookAssignmentCell[]
 }
@@ -310,8 +311,21 @@ onMounted(load)
               scope="row"
               class="sticky left-0 z-10 bg-inherit border-b border-r border-gray-100 px-3 sm:px-4 py-2 text-left whitespace-nowrap max-w-[9rem] sm:max-w-none"
             >
-              <div class="font-medium text-gray-900 truncate">{{ row.student_name }}</div>
-              <div class="text-xs text-gray-500 truncate">{{ row.student_email }}</div>
+              <div class="flex items-center gap-2">
+                <UserAvatar
+                  :user="{ id: row.student_id, full_name: row.student_name, avatar_url: row.student_avatar_url }"
+                  size="sm"
+                />
+                <div class="min-w-0">
+                  <NuxtLink
+                    :to="`/u/${row.student_id}`"
+                    class="block font-medium text-gray-900 truncate hover:underline"
+                  >
+                    {{ row.student_name }}
+                  </NuxtLink>
+                  <div class="text-xs text-gray-500 truncate">{{ row.student_email }}</div>
+                </div>
+              </div>
             </th>
 
             <td

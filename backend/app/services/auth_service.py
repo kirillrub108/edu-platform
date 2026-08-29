@@ -32,19 +32,24 @@ from typing import Any
 
 import jwt
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import Depends, HTTPException, status
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from redis.asyncio import Redis
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.constants import CONSENT_POLICY_VERSION, EMAIL_VERIFICATION_TTL_SECONDS
+from app.constants import (
+    ACCOUNT_PENDING_DELETION_CODE,
+    CONSENT_POLICY_VERSION,
+    EMAIL_VERIFICATION_TTL_SECONDS,
+)
 from app.database import get_db
 from app.models.user import User, UserRole
 from app.redis_client import get_redis
 from app.schemas.auth import TokenResponse
+from app.services import profile_service
 
 # ── Password hashing (argon2id — OWASP-recommended defaults from argon2-cffi).
 # Memory-hard, no 72-byte input limit, no pre-hash hacks.
@@ -61,16 +66,26 @@ def verify_password(plain: str, hashed: str) -> bool:
         return _ph.verify(hashed, plain)
     except VerifyMismatchError:
         return False
+    except InvalidHashError:
+        # The stored value is not an argon2 hash at all — an anonymized account
+        # carries a deliberately unusable placeholder (account_service). "Cannot
+        # verify" is a failed check, not a 500, so every caller keeps its normal
+        # opaque credential error.
+        return False
 
 
 def soft_delete_user(user: User) -> None:
-    """Soft-delete a user in place: mark deleted, deactivate (so existing tokens
-    fail get_current_user's is_active check → 401), and anonymize PII. The row
-    is physically removed later by the purge_soft_deleted task. Caller commits."""
+    """Soft-delete a user in place: mark deleted and deactivate, so existing
+    tokens fail get_current_user's is_active check → 401. Caller commits.
+
+    Identity is deliberately NOT anonymized here. During the restore window the
+    account must remain restorable by its owner and its address must stay
+    occupied (a re-registration answers 409), so email and name survive.
+    Anonymization is the *end* of the lifecycle — account_service.
+    anonymize_user_fields, applied by purge or by an early email release.
+    """
     user.deleted_at = datetime.now(timezone.utc)
     user.is_active = False
-    user.email = f"deleted_{uuid.uuid4().hex}@anon.invalid"
-    user.full_name = None
 
 
 # ── JWT primitives ───────────────────────────────────────────────────────────
@@ -199,13 +214,27 @@ class AuthService:
         existing = await self.db.scalar(select(User).where(User.email == email))
         if existing:
             raise HTTPException(status_code=409, detail="Email already registered")
+        # A soft-deleted account still owns its address for the restore window,
+        # so the mailbox is not free yet. Distinct code, because the answer is
+        # actionable ("release it") rather than "pick another address". No new
+        # leak: this endpoint already discloses existence with its 409.
+        pending = await self.db.scalar(
+            select(User)
+            .where(func.lower(User.email) == email.strip().lower(), User.deleted_at.isnot(None))
+            .execution_options(include_deleted=True)
+        )
+        if pending is not None:
+            raise HTTPException(status_code=409, detail=ACCOUNT_PENDING_DELETION_CODE)
 
         now = datetime.now(timezone.utc)
+        visibility, show_stats = profile_service.profile_defaults_for_role(role)
         user = User(
             email=email,
             hashed_password=hash_password(password),
             full_name=full_name,
             role=role,
+            profile_visibility=visibility,
+            show_profile_stats=show_stats,
             pdn_consent_at=now,
             terms_accepted_at=now,
             marketing_consent=accepted_marketing,
@@ -220,6 +249,15 @@ class AuthService:
 
     async def login(self, email: str, password: str, remember_me: bool = True) -> TokenResponse:
         user = await self.db.scalar(select(User).where(User.email == email))
+        if user is None:
+            # The global filter hides soft-deleted rows, so an account inside
+            # its restore window looks like "no such user". Re-read it explicitly
+            # — but only to answer AFTER the password checks out, below.
+            user = await self.db.scalar(
+                select(User)
+                .where(User.email == email, User.deleted_at.isnot(None))
+                .execution_options(include_deleted=True)
+            )
         # A social-only account has no local hash. It collapses into the same
         # opaque 401 as a wrong password — the response must not disclose that
         # this mailbox exists and signs in through a provider.
@@ -227,6 +265,22 @@ class AuthService:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         if not verify_password(password, user.hashed_password):
             raise HTTPException(status_code=401, detail="Invalid credentials")
+        if user.deleted_at is not None:
+            # Password proven first, so this never widens enumeration: a wrong
+            # password or an unknown address still gets the opaque 401 above.
+            # Only the real owner learns the account is pending deletion.
+            # Local import: account_service imports this module, so a
+            # module-level import here would be a cycle.
+            from app.services.account_service import restore_deadline
+
+            deadline = restore_deadline(user)
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": ACCOUNT_PENDING_DELETION_CODE,
+                    "restore_until": deadline.isoformat() if deadline else None,
+                },
+            )
         if not user.is_active:
             raise HTTPException(status_code=403, detail="User is inactive")
         return await self.issue_session(user, remember_me=remember_me)

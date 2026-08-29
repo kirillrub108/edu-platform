@@ -558,3 +558,104 @@ def test_reconcile_alerts_stuck_once(
     payment_pipeline.reconcile_pending_payments()
     sync_session.expire_all()
     assert sync_session.get(Payment, payment.id).alerted_at == first_alert
+
+
+# ── Soft-deleted payer (DECISIONS §59) ───────────────────────────────────────
+
+
+def _yk_succeeded(payment_id: uuid.UUID, amount: str = "190.00") -> YooKassaPayment:
+    return YooKassaPayment.model_validate(
+        {
+            "id": f"yk-{uuid.uuid4().hex[:12]}",
+            "status": "succeeded",
+            "paid": True,
+            "amount": {"value": amount, "currency": "RUB"},
+            "metadata": {"payment_id": str(payment_id)},
+        }
+    )
+
+
+def test_settle_credits_a_soft_deleted_user(sync_session: Session) -> None:
+    """A payment that lands after the payer deleted their account must still be
+    credited: the money was taken, and the account is restorable for 30 days.
+
+    This holds because the settlement path touches no User row at all — it locks
+    `Payment` and credits `CreditAccount` by payment.user_id, and neither model
+    is covered by the global soft-delete filter (that filter is User + Lesson).
+    Asserted here so the invariant cannot be broken by "just joining User" later.
+    """
+    user = User(
+        email=f"{uuid.uuid4().hex}@example.com",
+        hashed_password=hash_password("password123"),
+        role=UserRole.teacher,
+        is_active=False,
+        deleted_at=datetime.now(timezone.utc),  # inside the restore window
+    )
+    sync_session.add(user)
+    sync_session.flush()
+
+    credits = CREDIT_PACKAGES["pack_50"]["credits"]
+    payment = Payment(
+        user_id=user.id,
+        package_key="pack_50",
+        amount_rub=CREDIT_PACKAGES["pack_50"]["price_rub"],
+        credits=credits,
+        status=PaymentStatus.pending,
+        idempotence_key=uuid.uuid4().hex,
+    )
+    sync_session.add(payment)
+    sync_session.commit()
+    payment_id, user_id = payment.id, user.id
+
+    # Sanity: the filter really would hide this user from an ordinary select.
+    assert sync_session.scalar(select(User).where(User.id == user_id)) is None
+
+    outcome = payment_pipeline._settle_payment(
+        sync_session, _yk_succeeded(payment_id), "payment.succeeded"
+    )
+
+    assert outcome == "succeeded"
+    sync_session.expire_all()
+    assert sync_session.get(Payment, payment_id).status == PaymentStatus.succeeded
+    account = sync_session.scalar(select(CreditAccount).where(CreditAccount.owner_id == user_id))
+    assert account is not None
+    assert account.balance == credits
+    ledger = sync_session.scalars(
+        select(CreditTransaction).where(CreditTransaction.account_id == account.id)
+    ).all()
+    assert [t.operation for t in ledger] == [CreditOperation.PURCHASE]
+
+
+def test_settle_is_idempotent_for_a_soft_deleted_user(sync_session: Session) -> None:
+    """Webhook redelivery on a deleted payer must not double-credit."""
+    user = User(
+        email=f"{uuid.uuid4().hex}@example.com",
+        hashed_password=hash_password("password123"),
+        role=UserRole.teacher,
+        is_active=False,
+        deleted_at=datetime.now(timezone.utc),
+    )
+    sync_session.add(user)
+    sync_session.flush()
+    credits = CREDIT_PACKAGES["pack_50"]["credits"]
+    payment = Payment(
+        user_id=user.id,
+        package_key="pack_50",
+        amount_rub=CREDIT_PACKAGES["pack_50"]["price_rub"],
+        credits=credits,
+        status=PaymentStatus.pending,
+        idempotence_key=uuid.uuid4().hex,
+    )
+    sync_session.add(payment)
+    sync_session.commit()
+    payment_id, user_id = payment.id, user.id
+
+    payment_pipeline._settle_payment(sync_session, _yk_succeeded(payment_id), "payment.succeeded")
+    second = payment_pipeline._settle_payment(
+        sync_session, _yk_succeeded(payment_id), "payment.succeeded"
+    )
+
+    assert second == "noop"
+    sync_session.expire_all()
+    account = sync_session.scalar(select(CreditAccount).where(CreditAccount.owner_id == user_id))
+    assert account.balance == credits

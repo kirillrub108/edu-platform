@@ -41,6 +41,7 @@ class GradebookStudentRow(BaseModel):
     student_id: UUID
     student_name: str
     student_email: str
+    student_avatar_url: str | None = None
     lessons: list[GradebookCellRead]
     assignments: list[GradebookAssignmentCell] = []
 

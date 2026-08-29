@@ -18,6 +18,7 @@ from app.schemas.gradebook import (
     GradebookRead,
     GradebookStudentRow,
 )
+from app.services import profile_service
 
 
 def compute_effective_score(
@@ -134,6 +135,7 @@ async def get_gradebook(
                 student_id=enrollment.student.id,
                 student_name=enrollment.student.full_name,
                 student_email=enrollment.student.email,
+                student_avatar_url=profile_service.avatar_url(enrollment.student),
                 lessons=cells,
                 assignments=assignment_cells,
             )

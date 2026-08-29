@@ -53,6 +53,16 @@ _DANGEROUS_INNER_EXTS: set[str] = {
 _ZIP_EXTS = {".pptx", ".docx", ".odt"}
 _TEXT_EXTS = {".txt", ".md", ".markdown", ".html", ".htm", ".rtf"}
 
+# Raster image signatures. The point is not format trivia: without these, an SVG
+# (or anything else) renamed to .png passes validation, and /files/* serves it
+# inline — a stored-XSS vector. The declared Content-Type is never consulted.
+_IMAGE_MAGIC: dict[str, tuple[bytes, ...]] = {
+    ".jpg": (b"\xff\xd8\xff",),
+    ".jpeg": (b"\xff\xd8\xff",),
+    ".png": (b"\x89PNG\r\n\x1a\n",),
+    ".gif": (b"GIF87a", b"GIF89a"),
+}
+
 _MAX_ZIP_UNCOMPRESSED = 500 * 1024 * 1024
 _MAX_ZIP_ENTRIES = 10_000
 
@@ -101,6 +111,13 @@ def _check_magic(head: bytes, sample: bytes, ext: str) -> None:
             raise _bad(f"File content does not match {ext}")
     elif ext == ".mp4":
         if head[4:8] != b"ftyp":
+            raise _bad(f"File content does not match {ext}")
+    elif ext in _IMAGE_MAGIC:
+        if not any(head.startswith(prefix) for prefix in _IMAGE_MAGIC[ext]):
+            raise _bad(f"File content does not match {ext}")
+    elif ext == ".webp":
+        # RIFF container: "RIFF" <4-byte size> "WEBP".
+        if head[:4] != b"RIFF" or head[8:12] != b"WEBP":
             raise _bad(f"File content does not match {ext}")
     elif ext in _TEXT_EXTS:
         # Plain-text formats: first 512 bytes must decode under some common

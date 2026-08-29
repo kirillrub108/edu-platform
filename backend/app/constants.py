@@ -801,6 +801,64 @@ OAUTH_REGISTER_PATH: str = "/register"
 # revision each user agreed to.
 CONSENT_POLICY_VERSION: str = "2026-08-29"
 
+# ── Public profile, avatar, privacy (see services/profile_service.py) ────────
+# Default visibility per role. A teacher is a public-facing author — their
+# profile is the page a prospective student lands on, so it defaults open with
+# stats. A student is not selling anything and their progress is nobody's
+# business by default, so they start at "authenticated" with stats off.
+PROFILE_DEFAULT_VISIBILITY_TEACHER: str = "public"
+PROFILE_DEFAULT_VISIBILITY_STUDENT: str = "authenticated"
+PROFILE_DEFAULT_STATS_TEACHER: bool = True
+PROFILE_DEFAULT_STATS_STUDENT: bool = False
+PROFILE_MAX_BIO_CHARS: int = 1000
+PROFILE_MAX_FULL_NAME_CHARS: int = 255  # mirrors User.full_name String(255)
+# Name shown wherever an anonymized (purged) user still appears as an author or
+# a gradebook row. Also the tombstone written by anonymize_user_fields.
+PROFILE_DELETED_USER_NAME: str = "Удалённый пользователь"
+
+# Avatar upload. 2 MB is generous for a square that gets downscaled to
+# AVATAR_SIZE_PX anyway; the cap exists to bound the pre-normalization buffer.
+AVATAR_MAX_BYTES: int = 2 * 1024 * 1024  # 2 MB
+# Stored edge length. One size only: the UI renders sm/md/lg by CSS, and serving
+# one normalized square keeps the storage layout (and its deletion) trivial.
+AVATAR_SIZE_PX: int = 512
+# SVG is deliberately absent: it is a script-bearing document, not an image, and
+# /files/* serves it inline (stored XSS). Signature sniffing enforces this too.
+AVATAR_ALLOWED_MIME: tuple[str, ...] = ("image/jpeg", "image/png", "image/webp")
+AVATAR_ALLOWED_EXTS: list[str] = [".jpg", ".jpeg", ".png", ".webp"]
+# Every upload is re-encoded to a single format, so the stored object always has
+# this extension regardless of what was uploaded.
+AVATAR_STORAGE_EXT: str = ".webp"
+# Avatars are public by design (DECISIONS §59) and immutable per path, so the
+# signed URL can outlive a page view without weakening anything.
+AVATAR_URL_TTL_SECONDS: int = 60 * 60 * 24 * 7  # 7 days
+# Hosts an OAuth provider avatar may live on. An arbitrary URL must never reach
+# avatar_external_url — the frontend loads it directly in an <img>.
+AVATAR_PROVIDER_HOST_ALLOWLIST: frozenset[str] = frozenset(
+    {"lh3.googleusercontent.com", "avatars.yandex.net"}
+)
+# Yandex ID exposes an avatar id, not a URL; this is the documented template.
+YANDEX_AVATAR_URL_TEMPLATE: str = "https://avatars.yandex.net/get-yapic/{avatar_id}/islands-200"
+
+# ── Account deletion / restore (see services/account_service.py) ─────────────
+# The restore window IS the purge window: while the row is soft-deleted it is
+# restorable, and the moment purge is allowed to touch it, it is not. One knob,
+# no second timer to drift out of sync — SOFT_DELETE_PURGE_DAYS above.
+ACCOUNT_RESTORE_TTL_SECONDS: int = SOFT_DELETE_PURGE_DAYS * 24 * 60 * 60
+# Lifetime of the "release my address early" link. Short: it destroys the
+# ability to restore, so a stale link in an archived mailbox must not still fire.
+EMAIL_RELEASE_TTL_SECONDS: int = 60 * 60 * 24  # 24h
+# SPA routes for the two mailed links.
+ACCOUNT_RESTORE_PATH: str = "/restore-account"
+EMAIL_RELEASE_PATH: str = "/release-email"
+# Tombstone address written by anonymize_user_fields. .invalid is reserved by
+# RFC 2606 and can never be a real mailbox, so it cannot collide with a sign-up.
+ANONYMIZED_EMAIL_DOMAIN: str = "deleted.invalid"
+# Machine-readable code shared by the 403 on login and the 409 on register, so
+# the SPA branches once. Lives here rather than in either service because both
+# auth_service and account_service need it and they cannot import each other.
+ACCOUNT_PENDING_DELETION_CODE: str = "account_pending_deletion"
+
 # Access code generation
 ACCESS_CODE_LENGTH: int = 6
 # No I, O, 1, 0 — visually ambiguous characters excluded.

@@ -49,6 +49,7 @@ from app.models.oauth_account import OAuthAccount
 from app.models.user import User, UserRole
 from app.schemas.auth import is_disposable_domain
 from app.schemas.oauth import OAuthProfile, PendingTicket, StartedFlow
+from app.services import profile_service
 
 logger = structlog.get_logger()
 
@@ -272,7 +273,17 @@ def _parse_profile(provider: Provider, info: dict[str, Any]) -> OAuthProfile:
         provider_user_id=str(subject),
         email=normalize_email(email),
         full_name=full_name if isinstance(full_name, str) and full_name.strip() else None,
+        # Never fails a sign-in: an unusable or off-allowlist picture is None
+        # and the UI falls back to initials.
+        avatar_url=profile_service.provider_avatar_url(provider.name, info),
     )
+
+
+def _refresh_avatar(user: User, profile: OAuthProfile) -> None:
+    """Re-apply the provider picture on every social sign-in - it may have
+    changed on their side since last time. Only touches the external field, so a
+    user who uploaded their own avatar keeps it (the uploaded one wins)."""
+    user.avatar_external_url = profile.avatar_url
 
 
 # -- account resolution (branches A / B / C) ----------------------------------
@@ -305,6 +316,8 @@ async def resolve_user(db: AsyncSession, profile: OAuthProfile) -> User | None:
         if user is None:
             raise OAuthError("account_disabled")
         _assert_usable(user)
+        _refresh_avatar(user, profile)
+        await db.commit()
         return user
 
     user = await _user_by_email(db, profile.email)
@@ -340,6 +353,7 @@ async def link_identity(db: AsyncSession, user: User, profile: OAuthProfile) -> 
         )
     if not user.email_verified:
         user.email_verified = True
+    _refresh_avatar(user, profile)
     await db.commit()
 
 
@@ -353,6 +367,7 @@ async def issue_ticket(redis: Redis, profile: OAuthProfile) -> str:
         provider_user_id=profile.provider_user_id,
         email=profile.email,
         full_name=profile.full_name,
+        avatar_url=profile.avatar_url,
         created_at=datetime.now(timezone.utc),
     )
     await redis.set(
@@ -402,6 +417,7 @@ async def create_user(
         full_name=pending.full_name,
         role=role,
         email_verified=True,
+        avatar_external_url=pending.avatar_url,
         pdn_consent_at=now,
         terms_accepted_at=now,
         marketing_consent=accepted_marketing,
@@ -430,6 +446,7 @@ def _profile_of(pending: PendingTicket) -> OAuthProfile:
         provider_user_id=pending.provider_user_id,
         email=pending.email,
         full_name=pending.full_name,
+        avatar_url=pending.avatar_url,
     )
 
 

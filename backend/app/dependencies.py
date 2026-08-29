@@ -82,6 +82,35 @@ async def get_current_user(
     return user
 
 
+async def get_optional_user(
+    access_token: str | None = Cookie(default=None),
+    db: AsyncSession = Depends(get_db),
+) -> User | None:
+    """Current user when there is one, None when anonymous — for routes that
+    are readable without logging in but answer differently when you are.
+
+    Deliberately NOT built on get_current_token_payload: that dependency raises
+    on a missing or stale cookie, and here every one of those cases is simply
+    "anonymous". It also skips the CSRF branch, which is safe because this is
+    only used on GET routes.
+    """
+    if not access_token:
+        return None
+    try:
+        payload = decode_token(access_token)
+    except HTTPException:
+        return None
+    user_id = payload.get("sub")
+    if not user_id:
+        return None
+    try:
+        parsed = UUID(user_id)
+    except ValueError:
+        return None
+    user = await db.scalar(select(User).where(User.id == parsed))
+    return user if user and user.is_active else None
+
+
 async def check_csrf(
     request: Request,
     csrf_token: str | None = Cookie(default=None),

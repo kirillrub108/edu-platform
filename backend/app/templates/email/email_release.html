@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Освобождение адреса</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7;padding:32px 0;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;padding:32px;">
+          <tr>
+            <td>
+              <h1 style="margin:0 0 16px;font-size:22px;">Освободить адрес</h1>
+              <p style="margin:0 0 16px;font-size:15px;line-height:1.5;">
+                {% if full_name %}Здравствуйте, {{ full_name }}!{% else %}Здравствуйте!{% endif %}
+                Этот адрес закреплён за удалённым аккаунтом Edllm, который пока можно восстановить.
+                Вы запросили освобождение адреса, чтобы зарегистрировать на него новый аккаунт.
+              </p>
+              <p style="margin:0 0 16px;font-size:15px;line-height:1.5;color:#b91c1c;">
+                <strong>Внимание:</strong> после подтверждения данные старого аккаунта будут
+                обезличены безвозвратно, и восстановить его станет невозможно.
+              </p>
+              <p style="margin:0 0 24px;">
+                <a href="{{ release_url }}"
+                   style="display:inline-block;background:#b91c1c;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:6px;font-size:15px;">
+                  Освободить адрес
+                </a>
+              </p>
+              <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.5;">
+                Если кнопка не работает, скопируйте ссылку в браузер:<br />
+                <a href="{{ release_url }}" style="color:#b91c1c;word-break:break-all;">{{ release_url }}</a>
+              </p>
+              <p style="margin:16px 0 0;font-size:13px;color:#6b7280;">
+                Ссылка действует ограниченное время и срабатывает один раз.
+                Если вы этого не запрашивали — просто проигнорируйте письмо, аккаунт останется
+                восстановимым до конца обычного срока.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

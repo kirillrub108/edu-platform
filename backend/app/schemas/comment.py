@@ -3,7 +3,9 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator
 
+from app.constants import AVATAR_URL_TTL_SECONDS
 from app.models.user import UserRole
+from app.services.storage_service import storage_service
 
 
 def _strip_before(v: object) -> object:
@@ -32,6 +34,22 @@ class CommentAuthor(BaseModel):
     id: UUID
     full_name: str | None
     role: UserRole
+    # Source columns for avatar_url below; excluded from the response so the
+    # client sees one field, matching every other place a person is rendered.
+    avatar_image_path: str | None = Field(default=None, exclude=True)
+    avatar_external_url: str | None = Field(default=None, exclude=True)
+
+    @computed_field
+    @property
+    def avatar_url(self) -> str | None:
+        # Uploaded wins over the provider's, same rule as profile_service.
+        # Signed under the author's own id - see profile_service.avatar_url on
+        # why that is not an access check.
+        if self.avatar_image_path:
+            return storage_service.get_url(
+                self.avatar_image_path, str(self.id), expires_in=AVATAR_URL_TTL_SECONDS
+            )
+        return self.avatar_external_url
 
 
 class CommentRead(BaseModel):

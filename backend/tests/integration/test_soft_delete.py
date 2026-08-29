@@ -193,23 +193,33 @@ async def test_grouped_hides_the_purge_countdown_for_an_enrolled_archived_course
     assert archived[str(enrolled.id)]["days_until_purge"] is None
 
 
-async def test_soft_delete_user_blocks_auth_and_anonymizes(
+async def test_soft_delete_user_blocks_auth_but_keeps_identity(
     client: AsyncClient,
     db_session: AsyncSession,
     teacher_user: User,
     teacher_token: dict[str, str],
 ) -> None:
+    """Soft delete marks and deactivates; it does NOT anonymize.
+
+    Identity has to survive the restore window: the owner restores by
+    email+password, and a re-registration on that address must answer 409
+    rather than silently creating a second account. Anonymization is the end of
+    the lifecycle instead — account_service.anonymize_user_fields, applied by
+    purge or by an early email release (DECISIONS §59).
+    """
     from app.services.auth_service import soft_delete_user
 
     assert (await client.get("/api/v1/auth/me", cookies=teacher_token)).status_code == 200
 
+    original_email = teacher_user.email
+    original_name = teacher_user.full_name
     soft_delete_user(teacher_user)
     await db_session.commit()
 
     assert teacher_user.is_active is False
-    assert teacher_user.full_name is None
-    assert teacher_user.email.startswith("deleted_")
-    assert teacher_user.email.endswith("@anon.invalid")
+    assert teacher_user.deleted_at is not None
+    assert teacher_user.email == original_email
+    assert teacher_user.full_name == original_name
 
     # is_active=False + global filter ⇒ get_current_user 401s on the next request.
     resp = await client.get("/api/v1/auth/me", cookies=teacher_token)

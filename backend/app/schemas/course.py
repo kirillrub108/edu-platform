@@ -71,7 +71,11 @@ class CourseOut(BaseModel):
     access_mode: AccessMode
     access_code: str | None
     is_published: bool
-    owner: UserOut
+    # Optional because the global soft-delete filter hides a deleted teacher, so
+    # Course.owner loads as None while their courses live on — during the
+    # restore window, and permanently once purge anonymizes the row instead of
+    # deleting it (DECISIONS §59). The UI renders "Удалённый пользователь".
+    owner: UserOut | None = None
     created_at: datetime
     updated_at: datetime
     lessons_count: int = 0

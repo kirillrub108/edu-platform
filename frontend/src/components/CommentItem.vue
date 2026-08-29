@@ -18,12 +18,6 @@ const isEditing = ref(false)
 const draft = ref('')
 const saving = ref(false)
 
-const initials = computed(() => {
-  const src = props.comment.author.full_name || '?'
-  const parts = src.trim().split(/\s+/).slice(0, 2)
-  return parts.map((p) => p[0]?.toUpperCase() ?? '').join('') || '?'
-})
-
 const isTeacher = computed(() => props.comment.author.role === 'teacher')
 
 const beginEdit = () => {
@@ -56,17 +50,15 @@ const confirmDelete = () => {
 
 <template>
   <div class="flex gap-2.5">
-    <div
-      class="w-8 h-8 rounded-full grid place-items-center text-xs font-semibold flex-shrink-0"
-      :class="isTeacher ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-600'"
-    >
-      {{ initials }}
-    </div>
+    <UserAvatar :user="comment.author" size="sm" linked />
     <div class="flex-1 min-w-0">
       <div class="flex items-center gap-2 flex-wrap text-xs mb-0.5">
-        <span class="font-medium text-gray-900 truncate">
+        <NuxtLink
+          :to="`/u/${comment.author.id}`"
+          class="font-medium text-gray-900 truncate hover:underline"
+        >
           {{ comment.author.full_name || 'Без имени' }}
-        </span>
+        </NuxtLink>
         <span
           v-if="isTeacher"
           class="px-1.5 py-0.5 rounded-md bg-violet-50 text-violet-700 text-[10px] font-medium"

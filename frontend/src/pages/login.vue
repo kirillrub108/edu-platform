@@ -12,6 +12,8 @@ const error = ref<string | null>(null)
 const loading = ref(false)
 
 // Reason codes the OAuth callback appends when sign-in could not complete.
+const justDeleted = ref(false)
+
 const OAUTH_REASONS: Record<string, string> = {
   access_denied: 'Вы отменили вход через провайдера',
   email_unverified: 'Провайдер не подтвердил ваш email — войдите по паролю',
@@ -26,13 +28,25 @@ const OAUTH_REASONS: Record<string, string> = {
   internal_error: 'Не удалось завершить вход, попробуйте позже',
 }
 
+// Arrived here right after deleting the account.
+if (route.query.deleted === '1') {
+  justDeleted.value = true
+}
+
 if (route.query.oauth === '0') {
   const reason = route.query.reason as string | undefined
   error.value = (reason && OAUTH_REASONS[reason]) || 'Не удалось войти через провайдера'
 }
 
+// Set when the password was right but the account is inside its restore
+// window: the server only says so after proving the password, so showing the
+// recovery CTA here leaks nothing.
+const pendingDeletionUntil = ref<string | null>(null)
+const showRestoreCta = ref(false)
+
 const submit = async () => {
   error.value = null
+  showRestoreCta.value = false
   loading.value = true
   try {
     await auth.login(email.value, password.value, rememberMe.value)
@@ -40,7 +54,14 @@ const submit = async () => {
     const dest = redirect || (auth.user?.role === 'student' ? '/student/dashboard' : '/dashboard')
     await navigateTo(dest)
   } catch (e: any) {
-    error.value = e?.data?.detail ?? 'Неверный email или пароль'
+    const pending = parsePendingDeletion(e, 403)
+    if (pending) {
+      showRestoreCta.value = true
+      pendingDeletionUntil.value = formatRestoreDeadline(pending.restoreUntil)
+      error.value = null
+    } else {
+      error.value = e?.data?.detail ?? 'Неверный email или пароль'
+    }
   } finally {
     loading.value = false
   }
@@ -61,6 +82,13 @@ onMounted(restoreScroll)
       </div>
 
       <div class="rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
+        <p
+          v-if="justDeleted"
+          class="mb-4 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600"
+        >
+          Аккаунт удалён. Мы отправили на почту ссылку для восстановления — она действует 30 дней.
+        </p>
+
         <form class="space-y-4" @submit.prevent="submit">
           <UiInput
             v-model="email"
@@ -94,6 +122,25 @@ onMounted(restoreScroll)
             <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
             <span>{{ error }}</span>
           </p>
+
+          <div
+            v-if="showRestoreCta"
+            class="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900"
+          >
+            <p class="flex items-start gap-2">
+              <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Этот аккаунт удалён<template v-if="pendingDeletionUntil">, но его ещё можно
+                восстановить до {{ pendingDeletionUntil }}</template>.
+              </span>
+            </p>
+            <NuxtLink
+              to="/restore-account"
+              class="mt-2 inline-block rounded-xl bg-amber-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-amber-500"
+            >
+              Восстановить аккаунт
+            </NuxtLink>
+          </div>
 
           <UiButton type="submit" variant="primary" size="lg" block :loading="loading">
             {{ loading ? 'Вход…' : 'Войти' }}

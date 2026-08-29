@@ -63,6 +63,9 @@ class OAuthProfile(BaseModel):
     provider_user_id: str
     email: str
     full_name: str | None
+    # Provider-side picture, already allowlist-checked. Carried through branch C
+    # so a brand-new account gets its avatar at creation, not only on re-login.
+    avatar_url: str | None = None
 
 
 class PendingTicket(BaseModel):
@@ -72,6 +75,7 @@ class PendingTicket(BaseModel):
     provider_user_id: str
     email: str
     full_name: str | None
+    avatar_url: str | None = None
     created_at: datetime
 
 

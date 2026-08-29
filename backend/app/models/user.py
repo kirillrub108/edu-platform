@@ -1,18 +1,32 @@
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, String
+from sqlalchemy import Boolean, Column, DateTime, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
+from app.constants import (
+    PROFILE_DEFAULT_STATS_STUDENT,
+    PROFILE_DEFAULT_VISIBILITY_STUDENT,
+)
 from app.database import Base
 
 
 class UserRole(str, enum.Enum):
     teacher = "teacher"
     student = "student"
+
+
+class ProfileVisibility(str, enum.Enum):
+    """Who may read GET /users/{id}/profile. Enforced in profile_service, never
+    inline — and an unreadable profile answers 404, not 403, so the API never
+    confirms that a hidden account exists (same rule as unpublished lessons)."""
+
+    public = "public"
+    authenticated = "authenticated"
+    private = "private"
 
 
 class User(Base):
@@ -33,6 +47,25 @@ class User(Base):
     # later set one (see services/oauth_service.py).
     hashed_password = Column(String(255), nullable=True)
     full_name = Column(String(255), nullable=True)
+    bio = Column(Text, nullable=True)
+    # Avatar, mirroring the course-cover pair: an uploaded file (relative
+    # storage path) and a provider-supplied URL. The serializer collapses both
+    # into a single `avatar_url` and prefers the uploaded one, so "go back to my
+    # Google picture" is just DELETE of the upload — no third switch column.
+    avatar_image_path = Column(String(512), nullable=True)
+    avatar_external_url = Column(String(512), nullable=True)
+    profile_visibility = Column(
+        SAEnum(ProfileVisibility, name="profile_visibility"),
+        server_default=PROFILE_DEFAULT_VISIBILITY_STUDENT,
+        default=ProfileVisibility(PROFILE_DEFAULT_VISIBILITY_STUDENT),
+        nullable=False,
+    )
+    show_profile_stats = Column(
+        Boolean,
+        server_default="true" if PROFILE_DEFAULT_STATS_STUDENT else "false",
+        default=PROFILE_DEFAULT_STATS_STUDENT,
+        nullable=False,
+    )
     role = Column(
         SAEnum(UserRole, name="user_role"),
         default=UserRole.teacher,

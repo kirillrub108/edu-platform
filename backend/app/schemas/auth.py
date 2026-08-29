@@ -82,6 +82,30 @@ class ChangePasswordRequest(BaseModel):
     new_password: PasswordStr
 
 
+class DeleteAccountRequest(BaseModel):
+    """Re-authentication for self-deletion. The session cookie alone is not
+    enough for an action this destructive."""
+
+    password: str
+
+
+class RestoreAccountRequest(BaseModel):
+    """Either the signed token from the deletion email, or the original
+    credentials. Both routes end in the same restore."""
+
+    token: str | None = None
+    email: EmailStr | None = None
+    password: str | None = None
+
+
+class ReleaseEmailRequest(BaseModel):
+    email: EmailStr
+
+
+class ConfirmReleaseRequest(BaseModel):
+    token: str
+
+
 __all__ = [
     "UserRegister",
     "UserLogin",
@@ -90,6 +114,10 @@ __all__ = [
     "ForgotPasswordRequest",
     "ResetPasswordRequest",
     "ChangePasswordRequest",
+    "DeleteAccountRequest",
+    "RestoreAccountRequest",
+    "ReleaseEmailRequest",
+    "ConfirmReleaseRequest",
     "UserOut",
     "is_disposable_domain",
 ]
