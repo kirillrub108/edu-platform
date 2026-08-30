@@ -593,20 +593,20 @@ onMounted(async () => {
                 <Eye class="w-4 h-4" />
               </NuxtLink>
               <button
-                class="shrink-0 inline-grid place-items-center w-8 h-8 rounded-lg border text-xs transition disabled:opacity-40
-                       sm:inline-flex sm:w-auto sm:h-auto sm:px-2 sm:py-1 sm:whitespace-nowrap"
+                class="shrink-0 inline-grid place-items-center w-8 h-8 rounded-lg text-xs font-semibold transition disabled:opacity-40
+                       sm:inline-flex sm:w-auto sm:h-auto sm:px-3 sm:py-1.5 sm:whitespace-nowrap"
                 :class="m.is_published
-                  ? 'border-gray-200 text-gray-600 hover:bg-gray-50'
-                  : 'border-brand/40 text-brand hover:bg-brand/5'"
+                  ? 'border border-gray-200 text-gray-600 hover:bg-gray-50'
+                  : 'bg-brand text-white shadow-sm hover:brightness-110'"
                 :disabled="togglingModule[m.id]"
-                :title="m.is_published ? 'Снять с публикации' : 'Опубликовать'"
-                :aria-label="m.is_published ? 'Снять с публикации' : 'Опубликовать'"
+                :title="m.is_published ? 'Снять с публикации модуля' : 'Опубликовать модуль'"
+                :aria-label="m.is_published ? 'Снять с публикации модуля' : 'Опубликовать модуль'"
                 @click="toggleModulePublish(m)"
               >
                 <template v-if="togglingModule[m.id]">…</template>
                 <template v-else>
                   <component :is="m.is_published ? Undo2 : Send" class="w-3.5 h-3.5 sm:hidden" />
-                  <span class="hidden sm:inline">{{ m.is_published ? 'Снять с публикации' : 'Опубликовать' }}</span>
+                  <span class="hidden sm:inline">{{ m.is_published ? 'Снять с модуль публикации' : 'Опубликовать модуль' }}</span>
                 </template>
               </button>
               <button
@@ -618,6 +618,14 @@ onMounted(async () => {
               </button>
             </div>
           </div>
+
+          <!-- Only for a draft module that already has lessons — an empty or already-published module has nothing to warn about -->
+          <p
+            v-if="!m.is_published && m.lessons?.length"
+            class="mb-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2"
+          >
+            Уроки этого модуля не будут видны студентам, пока модуль не опубликован
+          </p>
 
           <ul class="space-y-1 mb-3">
             <li v-for="l in m.lessons" :key="l.id" class="flex items-center gap-1 group/lesson">
