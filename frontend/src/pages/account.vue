@@ -16,7 +16,7 @@ const TABS = [
   { id: 'profile', label: 'Профиль' },
   { id: 'privacy', label: 'Приватность' },
   { id: 'security', label: 'Безопасность' },
-  { id: 'danger', label: 'Опасная зона' },
+  { id: 'danger', label: 'Удаление аккаунта' },
 ]
 const tab = ref('profile')
 
@@ -374,7 +374,7 @@ const deleteAccount = async () => {
         </div>
       </template>
 
-      <!-- Опасная зона -->
+      <!-- Удаление аккаунта -->
       <div v-else-if="tab === 'danger'" class="rounded-2xl border border-rose-200 bg-white p-6 sm:p-8 shadow-soft">
         <h2 class="mb-1 flex items-center gap-2 text-base font-semibold text-rose-700">
           <TriangleAlert class="h-4 w-4" />

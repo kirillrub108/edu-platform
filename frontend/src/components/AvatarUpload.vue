@@ -97,7 +97,7 @@ const remove = async () => {
           </UiButton>
         </div>
         <p class="text-xs text-gray-500">
-          JPEG, PNG или WebP, до 2 МБ. Изображение обрежется в квадрат.
+          JPEG, PNG или WebP, до 2 МБ.
         </p>
       </div>
     </div>
