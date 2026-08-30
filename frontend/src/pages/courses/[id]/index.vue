@@ -606,7 +606,7 @@ onMounted(async () => {
                 <template v-if="togglingModule[m.id]">…</template>
                 <template v-else>
                   <component :is="m.is_published ? Undo2 : Send" class="w-3.5 h-3.5 sm:hidden" />
-                  <span class="hidden sm:inline">{{ m.is_published ? 'Снять с модуль публикации' : 'Опубликовать модуль' }}</span>
+                  <span class="hidden sm:inline">{{ m.is_published ? 'Снять модуль с публикации' : 'Опубликовать модуль' }}</span>
                 </template>
               </button>
               <button
