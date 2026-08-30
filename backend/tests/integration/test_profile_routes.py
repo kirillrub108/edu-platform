@@ -326,6 +326,27 @@ async def test_avatar_upload_happy_path(
     assert storage_service.exists(refreshed.avatar_image_path)
 
 
+
+async def test_uploaded_avatar_survives_in_auth_me(
+    client: AsyncClient, teacher_user: User, teacher_token: dict
+) -> None:
+    """The upload response is not the only place the avatar has to appear: the
+    SPA refills its store from /auth/me on every reload, so a null there is
+    indistinguishable from "no avatar" and the picture silently disappears."""
+    await client.post(
+        "/api/v1/users/me/avatar",
+        files={"file": ("me.png", _png(), "image/png")},
+        cookies=teacher_token,
+    )
+
+    resp = await client.get("/api/v1/auth/me", cookies=teacher_token)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["avatar_url"], "avatar must survive a fresh session probe"
+    # The two source columns stay server-side; clients see one ready URL.
+    assert "avatar_image_path" not in body
+    assert "avatar_external_url" not in body
+
 async def test_avatar_rejects_oversized_file(
     client: AsyncClient, teacher_user: User, teacher_token: dict
 ) -> None:

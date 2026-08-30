@@ -107,30 +107,7 @@ const handleLogout = () => {
           <MailWarning class="w-3.5 h-3.5" />
           Почта не подтверждена
         </button>
-        <div class="flex items-center gap-2.5">
-          <UserAvatar :user="user" size="sm" linked />
-          <div class="leading-tight">
-            <div class="text-sm font-medium text-gray-900">{{ user?.full_name || user?.email }}</div>
-            <div class="text-[11px] text-gray-500">
-              {{ user?.role === 'teacher' ? 'Автор' : 'Студент' }}
-            </div>
-          </div>
-        </div>
-        <NuxtLink
-          to="/account"
-          class="w-9 h-9 rounded-lg grid place-items-center text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
-          aria-label="Настройки аккаунта"
-          title="Настройки аккаунта"
-        >
-          <Settings class="w-4 h-4" />
-        </NuxtLink>
-        <button
-          class="w-9 h-9 rounded-lg grid place-items-center text-gray-500 hover:bg-gray-100 hover:text-gray-700 transition"
-          aria-label="Выйти"
-          @click="logout"
-        >
-          <LogOut class="w-4 h-4" />
-        </button>
+        <UserMenu />
       </div>
 
       <div v-else class="hidden md:flex items-center gap-2">
@@ -225,11 +202,12 @@ const handleLogout = () => {
             </button>
           </div>
 
-          <div
+          <NuxtLink
             v-if="isAuthenticated"
-            class="shrink-0 px-4 py-3 flex items-center gap-3 border-b border-gray-100"
+            to="/account"
+            class="shrink-0 px-4 py-3 flex items-center gap-3 border-b border-gray-100 hover:bg-gray-50 transition"
           >
-            <UserAvatar :user="user" size="md" linked />
+            <UserAvatar :user="user" size="md" />
             <div class="min-w-0 leading-tight">
               <div class="text-sm font-medium text-gray-900 truncate">
                 {{ user?.full_name || user?.email }}
@@ -238,7 +216,7 @@ const handleLogout = () => {
                 {{ isTeacher ? 'Автор' : 'Студент' }}
               </div>
             </div>
-          </div>
+          </NuxtLink>
 
           <nav v-if="mobileNav.length" class="p-2 flex flex-col gap-0.5">
             <NuxtLink

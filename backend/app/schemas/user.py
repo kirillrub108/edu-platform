@@ -1,10 +1,15 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field, field_validator
 
-from app.constants import PROFILE_MAX_BIO_CHARS, PROFILE_MAX_FULL_NAME_CHARS
+from app.constants import (
+    AVATAR_URL_TTL_SECONDS,
+    PROFILE_MAX_BIO_CHARS,
+    PROFILE_MAX_FULL_NAME_CHARS,
+)
 from app.models.user import ProfileVisibility, UserRole
+from app.services.storage_service import storage_service
 
 
 class UserBase(BaseModel):
@@ -20,9 +25,21 @@ class UserOut(UserBase):
     is_active: bool
     email_verified: bool
     created_at: datetime
-    # Filled by the caller from profile_service.avatar_url — the model stores
-    # two source columns, never a ready URL.
-    avatar_url: str | None = None
+    # Source columns for avatar_url below; excluded from the response so the
+    # client sees one field, same shape as CommentAuthor.
+    avatar_image_path: str | None = Field(default=None, exclude=True)
+    avatar_external_url: str | None = Field(default=None, exclude=True)
+
+    @computed_field
+    @property
+    def avatar_url(self) -> str | None:
+        # Mirrors profile_service.avatar_url: uploaded wins over the provider's,
+        # signed under the owner's own id (`uid` is HMAC payload, not an ACL).
+        if self.avatar_image_path:
+            return storage_service.get_url(
+                self.avatar_image_path, str(self.id), expires_in=AVATAR_URL_TTL_SECONDS
+            )
+        return self.avatar_external_url
 
 
 # ── Own settings (/users/me/*) ───────────────────────────────────────────────

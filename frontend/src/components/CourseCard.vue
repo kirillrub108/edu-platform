@@ -164,7 +164,7 @@ const onPublishToggle = () => emit('publish', props.course.id)
           <!-- Publish toggle sits above the stretched card link (relative z-20). -->
           <button
             type="button"
-            class="relative z-20 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-medium transition"
+            class="relative z-20 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition"
             :class="course.is_published
               ? 'border border-gray-200 text-gray-600 hover:bg-gray-50'
               : 'bg-violet-600 text-white hover:bg-violet-700'"
