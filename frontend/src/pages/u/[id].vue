@@ -106,7 +106,7 @@ onMounted(restoreScroll)
             <template v-if="!profile.show_profile_stats">
               Статистику другие не видят — вы видите её всегда.
             </template>
-            <NuxtLink to="/account" class="ml-1 font-medium underline">Настроить</NuxtLink>
+            <NuxtLink to="/account?tab=privacy" class="ml-1 font-medium underline">Настроить</NuxtLink>
           </span>
         </p>
 

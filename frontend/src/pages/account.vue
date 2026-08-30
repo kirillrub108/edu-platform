@@ -18,7 +18,8 @@ const TABS = [
   { id: 'security', label: 'Безопасность' },
   { id: 'danger', label: 'Удаление аккаунта' },
 ]
-const tab = ref('profile')
+const route = useRoute()
+const tab = ref(route.query.tab === 'privacy' ? 'privacy' : 'profile')
 
 onMounted(() => notifications.fetchSettings())
 
