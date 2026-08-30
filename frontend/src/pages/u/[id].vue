@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { BookOpen, EyeOff, Info, UserX } from 'lucide-vue-next'
+import { BookOpen, Check, EyeOff, Info, Pencil, UserX } from 'lucide-vue-next'
 import { statsHidden } from '~/stores/profile'
 
 // No `auth` middleware on purpose: a public profile must render for a visitor
@@ -21,6 +21,16 @@ const joined = computed(() =>
     : '',
 )
 const hiddenStats = computed(() => !!profile.value && statsHidden(profile.value))
+
+// Правки идут через /users/me/*, а страница читает /users/{id}/profile — это
+// разные ответы, поэтому карточку надо перечитать. Только по выходу из правки,
+// а не на каждое сохранение: fetchProfile переводит state в `loading`, и
+// страница на миг ушла бы в скелетон, пересоздав саму форму.
+const editing = ref(false)
+const stopEditing = () => {
+  editing.value = false
+  store.fetchProfile(userId.value)
+}
 
 const visibilityNote = computed(() => {
   if (!profile.value?.is_owner) return null
@@ -110,10 +120,24 @@ onMounted(restoreScroll)
           </span>
         </p>
 
-        <div class="rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
+        <div
+          v-if="editing"
+          class="rounded-2xl border border-violet-200 bg-white p-6 sm:p-8 shadow-soft"
+        >
+          <div class="mb-6 flex items-center justify-between gap-3">
+            <h1 class="text-base font-semibold text-gray-900">Редактирование профиля</h1>
+            <UiButton type="button" variant="secondary" size="sm" @click="stopEditing">
+              <Check class="mr-1.5 h-4 w-4" />
+              Готово
+            </UiButton>
+          </div>
+          <ProfileSettingsForm />
+        </div>
+
+        <div v-else class="rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
           <div class="flex flex-col items-center gap-4 text-center sm:flex-row sm:text-left">
             <UserAvatar :user="profile" size="lg" />
-            <div class="min-w-0">
+            <div class="min-w-0 flex-1">
               <h1 class="truncate text-xl font-semibold text-gray-900">
                 {{ profile.full_name || 'Без имени' }}
               </h1>
@@ -121,6 +145,17 @@ onMounted(restoreScroll)
                 {{ roleLabel }} · на платформе с {{ joined }}
               </p>
             </div>
+            <UiButton
+              v-if="profile.is_owner"
+              type="button"
+              variant="secondary"
+              size="sm"
+              class="shrink-0"
+              @click="editing = true"
+            >
+              <Pencil class="mr-1.5 h-4 w-4" />
+              Редактировать
+            </UiButton>
           </div>
 
           <p v-if="profile.bio" class="mt-5 whitespace-pre-line text-sm leading-relaxed text-gray-700">

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertCircle, CheckCircle2, ExternalLink, TriangleAlert } from 'lucide-vue-next'
+import { AlertCircle, CheckCircle2, TriangleAlert } from 'lucide-vue-next'
 import type { ProfileVisibility } from '~/stores/auth'
 import { NOTIFICATION_CATEGORIES } from '~/stores/notifications'
 
@@ -22,39 +22,6 @@ const route = useRoute()
 const tab = ref(route.query.tab === 'privacy' ? 'privacy' : 'profile')
 
 onMounted(() => notifications.fetchSettings())
-
-// ── Профиль ──────────────────────────────────────────────────────────────────
-
-const fullName = ref('')
-const bio = ref('')
-const profileError = ref<string | null>(null)
-const profileSaved = ref(false)
-const savingProfile = ref(false)
-
-onMounted(async () => {
-  try {
-    const settings = await auth.fetchProfileSettings()
-    fullName.value = settings.full_name ?? ''
-    bio.value = settings.bio ?? ''
-  } catch {
-    profileError.value = 'Не удалось загрузить профиль.'
-  }
-})
-
-const saveProfile = async () => {
-  profileError.value = null
-  profileSaved.value = false
-  savingProfile.value = true
-  try {
-    await auth.updateProfile({ full_name: fullName.value, bio: bio.value })
-    profileSaved.value = true
-  } catch (e: unknown) {
-    profileError.value =
-      (e as { data?: { detail?: string } })?.data?.detail ?? 'Не удалось сохранить профиль.'
-  } finally {
-    savingProfile.value = false
-  }
-}
 
 // ── Приватность ──────────────────────────────────────────────────────────────
 
@@ -186,48 +153,7 @@ const deleteAccount = async () => {
 
       <!-- Профиль -->
       <div v-if="tab === 'profile'" class="rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
-        <AvatarUpload :user="user" />
-
-        <form class="mt-6 space-y-4" @submit.prevent="saveProfile">
-          <UiInput v-model="fullName" label="Имя" placeholder="Как вас зовут" />
-          <UiInput
-            v-model="bio"
-            label="О себе"
-            as="textarea"
-            :rows="4"
-            placeholder="Пара слов о вас — это видят посетители профиля"
-            hint="До 1000 символов"
-          />
-
-          <p
-            v-if="profileError"
-            class="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
-          >
-            <AlertCircle class="mt-0.5 h-4 w-4 shrink-0" />
-            <span>{{ profileError }}</span>
-          </p>
-          <p
-            v-if="profileSaved"
-            class="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
-          >
-            <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0" />
-            <span>Профиль сохранён.</span>
-          </p>
-
-          <div class="flex items-center gap-3">
-            <UiButton type="submit" variant="primary" :loading="savingProfile">
-              {{ savingProfile ? 'Сохранение…' : 'Сохранить' }}
-            </UiButton>
-            <NuxtLink
-              v-if="user"
-              :to="`/u/${user.id}`"
-              class="inline-flex items-center gap-1 text-sm font-medium text-violet-700 hover:underline"
-            >
-              Открыть профиль
-              <ExternalLink class="h-3.5 w-3.5" />
-            </NuxtLink>
-          </div>
-        </form>
+        <ProfileSettingsForm show-profile-link />
       </div>
 
       <!-- Приватность -->
