@@ -1,8 +1,12 @@
 <!-- Кнопка «Мы в соц. сетях» с выпадающим меню. Живёт в шапке кабинета
-     (AppHeader), поэтому закрывается по клику мимо, Escape, смене роута и
-     выбору ссылки. Ссылки берутся из SocialLinks — здесь только поповер. -->
+     (AppHeader) и в шапке лендинга (LandingNav, variant="landing" — та же
+     логика поповера, только внешний вид кнопки подогнан под .nav-link),
+     поэтому закрывается по клику мимо, Escape, смене роута и выбору ссылки.
+     Ссылки берутся из SocialLinks — здесь только поповер. -->
 <script setup lang="ts">
 import { Share2 } from 'lucide-vue-next'
+
+withDefaults(defineProps<{ variant?: 'cabinet' | 'landing' }>(), { variant: 'cabinet' })
 
 const isOpen = ref(false)
 const rootRef = ref<HTMLElement | null>(null)
@@ -39,6 +43,22 @@ watch(() => route.fullPath, () => close())
 <template>
   <div ref="rootRef" class="relative">
     <button
+      v-if="variant === 'landing'"
+      ref="buttonRef"
+      type="button"
+      class="landing-trigger"
+      :class="{ 'is-open': isOpen }"
+      aria-label="Мы в соц. сетях"
+      title="Мы в соц. сетях"
+      aria-haspopup="true"
+      :aria-expanded="isOpen"
+      @click="isOpen = !isOpen"
+    >
+      <Share2 class="icon" />
+      <span class="hidden lg:inline whitespace-nowrap">Мы в соц. сетях</span>
+    </button>
+    <button
+      v-else
       ref="buttonRef"
       type="button"
       class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-gray-700 bg-gray-50 border border-gray-200 hover:bg-gray-100 transition"
@@ -70,3 +90,26 @@ watch(() => route.fullPath, () => close())
     </Transition>
   </div>
 </template>
+
+<style scoped>
+/* Подогнано под .ldg .nav-link (landing.css): та же типографика, обычный
+   текстовый вид без фона/рамки кабинетной кнопки. Переменные --ink-soft/
+   --accent берутся у предка .ldg (наследуются через каскад). */
+.landing-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  font-size: 15px;
+  color: var(--ink-soft);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.landing-trigger:hover,
+.landing-trigger.is-open {
+  color: var(--accent);
+}
+</style>

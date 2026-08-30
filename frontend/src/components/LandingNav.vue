@@ -12,6 +12,7 @@
           <Bug class="icon" :size="16" />
           Написать нам
         </SupportContactLink>
+        <SocialLinksMenu class="contact-link" variant="landing" />
         <NuxtLink class="nav-link" to="/login">Войти</NuxtLink>
         <NuxtLink class="btn btn-primary" to="/register">Создать аккаунт</NuxtLink>
       </nav>
