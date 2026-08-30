@@ -45,7 +45,6 @@ describe('SocialLinks', () => {
   it('renders every link from SOCIAL_LINKS with matching hrefs', () => {
     const anchors = [...mount('compact').querySelectorAll('a')]
     expect(anchors).toHaveLength(SOCIAL_LINKS.length)
-    expect(anchors).toHaveLength(5)
     expect(anchors.map((a) => a.getAttribute('href'))).toEqual(SOCIAL_LINKS.map((l) => l.href))
   })
 
