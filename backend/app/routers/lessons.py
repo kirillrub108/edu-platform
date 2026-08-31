@@ -742,6 +742,7 @@ _SSE_TERMINAL = {"published", "ready_for_edit", "error", "cancelled"}
 async def progress_stream(
     lesson_id: UUID,
     lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
     # Subscriptions live on their own pool: they hold a connection for the whole
     # stream and would otherwise starve auth and everything else Redis-backed
@@ -774,6 +775,13 @@ async def progress_stream(
             terminal_payload = {"status": "ready_for_edit"}
         elif lesson.status == LessonStatus.cancelled:
             terminal_payload = {"status": "cancelled", "credits_spent": lesson.credits_spent}
+
+    # Everything the stream needs is read above; hand the pooled DB connection
+    # back before it starts. The request-scoped session lives until the response
+    # completes and an SSE response never does, so without this every open
+    # stream pins a connection out of a pool of 5 + 10 overflow.
+    task_id = lesson.video_task_id or lesson.analyze_task_id
+    await db.close()
 
     # Probe Redis before committing to streaming (only needed for live path).
     # Must happen here — once EventSourceResponse is returned, HTTP headers are
@@ -828,7 +836,6 @@ async def progress_stream(
             # doesn't start blank after a page reload. Subscribe first so we
             # don't miss any message published between the snapshot read and
             # the subscribe call. Mirrors the /task-status endpoint pattern.
-            task_id = lesson.video_task_id or lesson.analyze_task_id
             if task_id:
                 try:
                     ar = AsyncResult(str(task_id), app=celery_app)

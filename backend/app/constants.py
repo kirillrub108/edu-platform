@@ -882,3 +882,13 @@ ACCESS_CODE_MAX_RETRIES: int = 10
 # back to refetching on tab focus.
 REDIS_MAX_CONNECTIONS: int = 20
 REDIS_PUBSUB_MAX_CONNECTIONS: int = 100
+
+# ── Cabinet course-access stream (services/course_stream.py) ─────────────────
+# One Redis subscription per worker fans out to per-student asyncio queues.
+# The queue only needs to hold "something changed" — the client refetches its
+# whole list on any message — so a small bound is enough and overflow is safe
+# to drop. Retry backoff keeps the single reader alive across a Redis hiccup.
+COURSE_STREAM_QUEUE_MAXSIZE: int = 16
+COURSE_STREAM_READY_TIMEOUT_SECONDS: float = 5.0
+COURSE_STREAM_RETRY_START_SECONDS: float = 1.0
+COURSE_STREAM_RETRY_MAX_SECONDS: float = 30.0

@@ -38,7 +38,12 @@ from app.schemas.student import (
     StudentQuizRead,
     StudentResultRead,
 )
-from app.services import course_access_service, gradebook_service, visibility_service
+from app.services import (
+    course_access_service,
+    course_stream,
+    gradebook_service,
+    visibility_service,
+)
 from app.services.progress_service import get_or_create_lesson_progress
 from app.services.storage_service import storage_service
 
@@ -164,6 +169,7 @@ async def preview_course(
 @router.get("/courses/stream")
 async def courses_stream(
     user: User = Depends(require_student),
+    db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_pubsub_redis),
 ):
     """Pushes course-access changes to the student's cabinet so a course the
@@ -172,12 +178,24 @@ async def courses_stream(
     Registered ABOVE `/courses/{course_id}` on purpose — declared after it, the
     path parameter would swallow "stream" and answer 422.
 
-    Same shape as the lesson progress stream in routers/lessons.py, minus the
-    presence bookkeeping and snapshot replay: there is no prior state to
-    replay, the client just refetches its list on any message. The cabinet also
-    refetches on tab focus, so a dropped or unavailable stream degrades to that
-    instead of going stale.
+    Unlike the lesson progress stream in routers/lessons.py, this does NOT open
+    a Redis subscription per connection — `services/course_stream.py` keeps one
+    pattern subscription per worker and hands out asyncio queues, so Redis
+    connections stay O(workers) instead of O(open tabs) (DECISIONS §62). There
+    is no snapshot to replay either: the client refetches its list on any
+    message, and the cabinet also refetches on tab focus, so a dropped or
+    unavailable stream degrades to that instead of going stale.
     """
+    student_id = user.id
+
+    # Authentication is done, so hand the pooled DB connection back BEFORE the
+    # stream starts. FastAPI holds the request-scoped session until the response
+    # completes, and an SSE response never completes — without this every open
+    # tab pins a connection and the pool (5 + 10 overflow) runs dry at ~15
+    # concurrent streams, which is a far lower ceiling than the Redis one this
+    # endpoint was built to avoid. close() is idempotent; get_db closes again.
+    await db.close()
+
     # Must fail before EventSourceResponse — once it is returned the headers are
     # sent and a 503 can no longer be raised.
     try:
@@ -185,40 +203,27 @@ async def courses_stream(
     except Exception:
         raise HTTPException(status_code=503, detail="Streaming unavailable")
 
-    channel = course_access_service.courses_channel(user.id)
-
     async def generator():
         # `retry` tells the browser how fast to come back; a blue-green switch
         # cuts open streams when the old slot drains.
         yield {"retry": SSE_RETRY_MS, "comment": "stream open"}
 
-        pubsub = redis.pubsub()
         try:
-            await pubsub.subscribe(channel)
+            async with course_stream.subscribe(redis, student_id) as queue:
+                while True:
+                    try:
+                        data = await asyncio.wait_for(queue.get(), timeout=SSE_HEARTBEAT_SECONDS)
+                    except asyncio.TimeoutError:
+                        # Idle long enough — keep the connection warm and let a
+                        # dead client be noticed.
+                        yield {"comment": "ping"}
+                        continue
+                    yield {"data": data}
         except Exception:
-            # Pool exhausted, or Redis went away between the ping and here.
             # Headers are already sent so we cannot 503 — end the stream and let
             # the cabinet fall back to refetching when the tab regains focus.
-            logger.warning("courses_stream_subscribe_failed", student_id=str(user.id))
-            await pubsub.aclose()
+            logger.warning("courses_stream_failed", student_id=str(student_id))
             return
-
-        try:
-            last_heartbeat = asyncio.get_running_loop().time()
-            while True:
-                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
-                if msg and msg["type"] == "message":
-                    yield {"data": msg["data"]}
-
-                now = asyncio.get_running_loop().time()
-                if now - last_heartbeat >= SSE_HEARTBEAT_SECONDS:
-                    yield {"comment": "ping"}
-                    last_heartbeat = now
-        finally:
-            # finally, not after the loop: a client disconnect tears the
-            # generator down by raising through the yield.
-            await pubsub.unsubscribe(channel)
-            await pubsub.aclose()
 
     return EventSourceResponse(generator())
 

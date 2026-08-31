@@ -46,7 +46,7 @@ from app.routers import (
     uploads,
     users,
 )
-from app.services import yookassa_service
+from app.services import course_stream, yookassa_service
 
 logger = structlog.get_logger()
 
@@ -213,6 +213,7 @@ async def lifespan(app: FastAPI):
 
     yield
     await engine.dispose()
+    await course_stream.shutdown()
     await close_redis()
     await yookassa_service.close_client()
 
