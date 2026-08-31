@@ -69,6 +69,9 @@ onMounted(() => {
   cabinet.fetchDashboard()
   loadCourses()
 })
+
+// Access granted while the tab was in the background shows up on return.
+useRefetchOnFocus(loadCourses)
 </script>
 
 <template>

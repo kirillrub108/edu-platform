@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, computed_field
 
 from app.constants import SOFT_DELETE_PURGE_DAYS
 from app.models.course import AccessMode
@@ -172,7 +172,9 @@ class CourseAccessModeUpdate(BaseModel):
 
 
 class CourseAccessGrantCreate(BaseModel):
-    student_id: UUID
+    """Add by exact email only — there is no candidate search to browse."""
+
+    email: EmailStr
 
 
 class CourseAccessGrantRead(BaseModel):
@@ -184,11 +186,3 @@ class CourseAccessGrantRead(BaseModel):
     email: str
     full_name: str | None = None
     created_at: datetime
-
-
-class AccessGrantCandidateRead(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: UUID
-    email: str
-    full_name: str | None = None

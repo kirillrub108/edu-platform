@@ -871,3 +871,14 @@ ACCESS_CODE_LENGTH: int = 6
 # No I, O, 1, 0 — visually ambiguous characters excluded.
 ACCESS_CODE_ALPHABET: str = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 ACCESS_CODE_MAX_RETRIES: int = 10
+
+# ── Redis connection pools ───────────────────────────────────────────────────
+# Two pools per worker process. The shared one serves ordinary commands (auth
+# token families, presence, task status); the pub/sub one serves SSE, whose
+# subscriptions hold a connection for as long as the browser tab stays open.
+# They are separate so a crowd of open streams cannot exhaust the pool that
+# logins depend on. Ceiling per worker is REDIS_PUBSUB_MAX_CONNECTIONS
+# concurrent streams; beyond that a new stream is refused and the client falls
+# back to refetching on tab focus.
+REDIS_MAX_CONNECTIONS: int = 20
+REDIS_PUBSUB_MAX_CONNECTIONS: int = 100

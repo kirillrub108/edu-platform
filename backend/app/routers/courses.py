@@ -2,20 +2,22 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from sqlalchemy import delete, func, or_, select
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
+from redis.asyncio import Redis
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_course_access, require_teacher
+from app.limiter import limiter
 from app.models.course import AccessMode, Course, CourseAccessGrant
 from app.models.enrollment import Enrollment
 from app.models.lesson import Module
 from app.models.user import User, UserRole
+from app.redis_client import get_redis
 from app.schemas.course import (
-    AccessGrantCandidateRead,
     CourseAccessGrantCreate,
     CourseAccessGrantRead,
     CourseAccessModeUpdate,
@@ -432,9 +434,6 @@ async def delete_access_code(
 # `AccessMode.invite` is the restricted mode: self-enrollment by code is refused
 # and only the students listed here reach the course. See DECISIONS §62.
 
-_GRANT_SEARCH_MIN_CHARS = 2
-_GRANT_SEARCH_LIMIT = 10
-
 
 @router.patch("/{course_id}/access-mode", response_model=CourseOut)
 async def set_access_mode(
@@ -479,57 +478,39 @@ async def list_access_grants(
     return [CourseAccessGrantRead.model_validate(r) for r in rows.all()]
 
 
-@router.get("/{course_id}/access-grants/search", response_model=list[AccessGrantCandidateRead])
-async def search_access_grant_candidates(
-    course_id: UUID,
-    q: str,
-    user: User = Depends(require_teacher),
-    db: AsyncSession = Depends(get_db),
-):
-    await _get_owned_course(course_id, user, db)
-    term = q.strip()
-    if len(term) < _GRANT_SEARCH_MIN_CHARS:
-        return []
-    pattern = f"%{term}%"
-    already_granted = (
-        select(CourseAccessGrant.student_id)
-        .where(CourseAccessGrant.course_id == course_id)
-        .scalar_subquery()
-    )
-    # Soft-deleted users are excluded by the global ORM filter (app/database.py).
-    rows = await db.scalars(
-        select(User)
-        .where(
-            User.role == UserRole.student,
-            User.id != user.id,
-            User.id.not_in(already_granted),
-            or_(User.email.ilike(pattern), User.full_name.ilike(pattern)),
-        )
-        .order_by(User.email)
-        .limit(_GRANT_SEARCH_LIMIT)
-    )
-    return [AccessGrantCandidateRead.model_validate(u) for u in rows.all()]
-
-
 @router.post(
     "/{course_id}/access-grants",
     response_model=CourseAccessGrantRead,
     status_code=status.HTTP_201_CREATED,
 )
+@limiter.limit("20/minute")
 async def add_access_grant(
+    request: Request,
     course_id: UUID,
     data: CourseAccessGrantCreate,
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
+    """Add by exact email — there is deliberately no browse or search step, so
+    the endpoint can't be walked to harvest the platform's student directory.
+    A non-student and a nonexistent address answer the same 404 (rate-limited),
+    which is all an invite-by-email flow can avoid leaking. Idempotent: adding
+    someone already on the list returns their existing entry.
+    """
     await _get_owned_course(course_id, user, db)
+    # Soft-deleted users are excluded by the global ORM filter (app/database.py).
     student = await db.scalar(
-        select(User).where(User.id == data.student_id, User.role == UserRole.student)
+        select(User).where(
+            func.lower(User.email) == data.email.lower(),
+            User.role == UserRole.student,
+        )
     )
     if student is None:
-        raise HTTPException(status_code=404, detail="Student not found")
+        raise HTTPException(status_code=404, detail="Студент с таким email не найден")
 
     await course_access_service.grant_access(db, course_id, student.id, user.id)
+    await course_access_service.publish_access_change(redis, student.id, course_id, "granted")
     grant = await db.scalar(
         select(CourseAccessGrant).where(
             CourseAccessGrant.course_id == course_id,
@@ -550,17 +531,13 @@ async def remove_access_grant(
     student_id: UUID,
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     """Revokes access only. The Enrollment and everything hanging off it
     (progress, grades, submissions) stays so the gradebook keeps its history."""
     await _get_owned_course(course_id, user, db)
-    await db.execute(
-        delete(CourseAccessGrant).where(
-            CourseAccessGrant.course_id == course_id,
-            CourseAccessGrant.student_id == student_id,
-        )
-    )
-    await db.commit()
+    await course_access_service.revoke_access(db, course_id, student_id)
+    await course_access_service.publish_access_change(redis, student_id, course_id, "revoked")
 
 
 @router.post("/{course_id}/cover", response_model=CourseOut)

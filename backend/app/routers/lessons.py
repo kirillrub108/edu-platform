@@ -48,7 +48,7 @@ from app.models.lesson_video import LessonVideo
 from app.models.quiz import AttemptStatus, Quiz, QuizAttempt
 from app.models.slide_text import SlideText
 from app.models.user import User
-from app.redis_client import get_redis
+from app.redis_client import get_pubsub_redis, get_redis
 from app.schemas.billing import (
     EstimateTrialOut,
     EstimateVideoOut,
@@ -743,6 +743,11 @@ async def progress_stream(
     lesson_id: UUID,
     lesson: Lesson = Depends(get_owned_lesson),
     redis: Redis = Depends(get_redis),
+    # Subscriptions live on their own pool: they hold a connection for the whole
+    # stream and would otherwise starve auth and everything else Redis-backed
+    # in this worker. Presence writes below stay on the shared pool — they are
+    # ordinary short-lived commands.
+    pubsub_redis: Redis = Depends(get_pubsub_redis),
 ):
     """SSE stream of Celery task progress for a lesson.
 
@@ -815,7 +820,7 @@ async def progress_stream(
         # even if subscribing raises. Only the latter clears presence.
         watched_to_completion = False
 
-        pubsub = redis.pubsub()
+        pubsub = pubsub_redis.pubsub()
         try:
             await pubsub.subscribe(channel)
 

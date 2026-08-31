@@ -4,6 +4,7 @@ enforcement that hangs off `services/course_access_service.py`."""
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import pytest
 from httpx import AsyncClient
@@ -13,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.course import AccessMode, Course, CourseAccessGrant
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.user import User, UserRole
+from app.services import course_access_service
 from tests.factories import (
     make_course,
     make_enrollment,
@@ -176,7 +178,7 @@ async def test_granted_student_may_still_call_enroll(
     )
     resp = await client.post(
         f"/api/v1/courses/{course.id}/access-grants",
-        json={"student_id": str(student_user.id)},
+        json={"email": student_user.email},
         cookies=teacher_token,
     )
     assert resp.status_code == 201
@@ -203,12 +205,12 @@ async def test_add_grant_creates_enrollment_and_is_idempotent(
 
     first = await client.post(
         f"/api/v1/courses/{course.id}/access-grants",
-        json={"student_id": str(student_user.id)},
+        json={"email": student_user.email},
         cookies=teacher_token,
     )
     second = await client.post(
         f"/api/v1/courses/{course.id}/access-grants",
-        json={"student_id": str(student_user.id)},
+        json={"email": student_user.email},
         cookies=teacher_token,
     )
     assert first.status_code == 201
@@ -265,7 +267,7 @@ async def test_grant_to_non_student_returns_404(
     course = await make_course(db_session, owner=teacher_user, access_mode=AccessMode.invite)
     resp = await client.post(
         f"/api/v1/courses/{course.id}/access-grants",
-        json={"student_id": str(teacher_user.id)},
+        json={"email": teacher_user.email},
         cookies=teacher_token,
     )
     assert resp.status_code == 404
@@ -281,7 +283,7 @@ async def test_list_grants_returns_student_profiles(
     course = await make_course(db_session, owner=teacher_user, access_mode=AccessMode.invite)
     await client.post(
         f"/api/v1/courses/{course.id}/access-grants",
-        json={"student_id": str(student_user.id)},
+        json={"email": student_user.email},
         cookies=teacher_token,
     )
 
@@ -293,51 +295,164 @@ async def test_list_grants_returns_student_profiles(
     assert body[0]["full_name"] == student_user.full_name
 
 
-# ── Candidate search ─────────────────────────────────────────────────────────
+# ── Adding by email ──────────────────────────────────────────────────────────
 
 
-async def test_search_filters_short_queries_granted_and_deleted(
+async def test_add_by_email_is_case_insensitive(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    course = await make_course(db_session, owner=teacher_user, access_mode=AccessMode.invite)
+    student = await _make_student(db_session)
+
+    resp = await client.post(
+        f"/api/v1/courses/{course.id}/access-grants",
+        json={"email": student.email.upper()},
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 201
+    assert resp.json()["student_id"] == str(student.id)
+
+
+async def test_add_unknown_email_returns_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    course = await make_course(db_session, owner=teacher_user, access_mode=AccessMode.invite)
+    resp = await client.post(
+        f"/api/v1/courses/{course.id}/access-grants",
+        json={"email": "nobody-here@example.com"},
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 404
+
+
+async def test_add_soft_deleted_student_returns_404(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    """A deleted account must be indistinguishable from a nonexistent one."""
+    from datetime import datetime, timezone
+
+    course = await make_course(db_session, owner=teacher_user, access_mode=AccessMode.invite)
+    deleted = await _make_student(db_session, deleted_at=datetime.now(timezone.utc))
+
+    resp = await client.post(
+        f"/api/v1/courses/{course.id}/access-grants",
+        json={"email": deleted.email},
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 404
+
+
+async def test_add_malformed_email_returns_422(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    course = await make_course(db_session, owner=teacher_user, access_mode=AccessMode.invite)
+    resp = await client.post(
+        f"/api/v1/courses/{course.id}/access-grants",
+        json={"email": "not-an-email"},
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 422
+
+
+async def test_candidate_search_endpoint_is_gone(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    """Browsing students was removed on purpose (DECISIONS §62) — if someone
+    reintroduces it, this fails and they have to read why first."""
+    course = await make_course(db_session, owner=teacher_user, access_mode=AccessMode.invite)
+    resp = await client.get(
+        f"/api/v1/courses/{course.id}/access-grants/search",
+        params={"q": "grantee-"},
+        cookies=teacher_token,
+    )
+    # 405, not 404: the path now falls through to DELETE /access-grants/{student_id}.
+    assert resp.status_code != 200
+
+
+# ── Live updates (SSE) ───────────────────────────────────────────────────────
+
+
+async def test_courses_stream_is_registered_before_course_detail(app: Any) -> None:
+    """Route order, not just uniqueness (test_route_shadowing_guard covers that):
+    declared after `/courses/{course_id}`, the literal "stream" would be parsed
+    as a course id and answer 422 instead of opening the stream."""
+    from fastapi.routing import APIRoute
+
+    paths = [r.path for r in app.routes if isinstance(r, APIRoute) and "GET" in r.methods]
+    assert paths.index("/api/v1/students/courses/stream") < paths.index(
+        "/api/v1/students/courses/{course_id}"
+    )
+
+
+async def test_courses_stream_rejects_teacher(
+    client: AsyncClient,
+    teacher_token: dict[str, str],
+) -> None:
+    resp = await client.get("/api/v1/students/courses/stream", cookies=teacher_token)
+    assert resp.status_code == 403
+
+
+async def test_grant_and_revoke_publish_access_change(
     client: AsyncClient,
     db_session: AsyncSession,
     teacher_user: User,
     student_user: User,
     teacher_token: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from datetime import datetime, timezone
+    """The cabinet's stream is only as good as what gets published to it."""
+    published: list[tuple[str, str, str]] = []
 
-    course = await make_course(db_session, owner=teacher_user, access_mode=AccessMode.invite)
-    findable = await _make_student(db_session)
-    deleted = await _make_student(db_session, deleted_at=datetime.now(timezone.utc))
+    async def fake_publish(_redis: Any, student_id: Any, course_id: Any, event: str) -> None:
+        published.append((str(student_id), str(course_id), event))
 
-    short = await client.get(
-        f"/api/v1/courses/{course.id}/access-grants/search", params={"q": "g"},
-        cookies=teacher_token,
+    monkeypatch.setattr(course_access_service, "publish_access_change", fake_publish)
+
+    course = await make_course(
+        db_session, owner=teacher_user, is_published=True, access_mode=AccessMode.invite
     )
-    assert short.status_code == 200
-    assert short.json() == []
-
-    found = await client.get(
-        f"/api/v1/courses/{course.id}/access-grants/search",
-        params={"q": "grantee-"},
-        cookies=teacher_token,
-    )
-    assert found.status_code == 200
-    ids = {row["id"] for row in found.json()}
-    assert str(findable.id) in ids
-    assert str(deleted.id) not in ids
-
     await client.post(
         f"/api/v1/courses/{course.id}/access-grants",
-        json={"student_id": str(findable.id)},
+        json={"email": student_user.email},
         cookies=teacher_token,
     )
-    after = await client.get(
-        f"/api/v1/courses/{course.id}/access-grants/search",
-        params={"q": "grantee-"},
+    await client.delete(
+        f"/api/v1/courses/{course.id}/access-grants/{student_user.id}",
         cookies=teacher_token,
     )
-    assert str(findable.id) not in {row["id"] for row in after.json()}
-    assert student_user.role == UserRole.student  # sanity: fixture is a student
+
+    assert published == [
+        (str(student_user.id), str(course.id), "granted"),
+        (str(student_user.id), str(course.id), "revoked"),
+    ]
+
+
+async def test_publish_failure_is_swallowed() -> None:
+    """Redis being down must cost live updates, not the teacher's action —
+    publishing is best effort and the cabinet still refetches on tab focus."""
+
+    class BrokenRedis:
+        async def publish(self, *_args: Any, **_kwargs: Any) -> None:
+            raise ConnectionError("redis is down")
+
+    await course_access_service.publish_access_change(
+        BrokenRedis(), uuid.uuid4(), uuid.uuid4(), "granted"
+    )
 
 
 # ── Enforcement on every student-facing path ─────────────────────────────────

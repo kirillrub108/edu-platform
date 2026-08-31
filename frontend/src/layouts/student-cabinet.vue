@@ -5,6 +5,14 @@ import { Menu } from 'lucide-vue-next'
 // layout (course/lesson browser) is left untouched and still serves the lesson
 // viewer; this layout only wraps the cabinet's dashboard/list pages.
 const cabinet = useStudentCabinetStore()
+const student = useStudentStore()
+
+// One connection for the whole cabinet instead of one per page: the layout
+// outlives navigation between dashboard and the course list, and both read the
+// same store.
+useCourseAccessStream(() => {
+  void student.fetchCourses()
+})
 </script>
 
 <template>

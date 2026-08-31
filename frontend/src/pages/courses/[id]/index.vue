@@ -254,19 +254,12 @@ interface AccessGrant {
   full_name: string | null
   created_at: string
 }
-interface GrantCandidate {
-  id: string
-  email: string
-  full_name: string | null
-}
-
 const grants = ref<AccessGrant[]>([])
 const grantsLoading = ref(false)
-const grantQuery = ref('')
-const grantResults = ref<GrantCandidate[]>([])
-const grantSearching = ref(false)
+const grantEmail = ref('')
+const grantAdding = ref(false)
+const grantNotice = ref('')
 const grantBusy = ref<Record<string, boolean>>({})
-let grantSearchTimeout: ReturnType<typeof setTimeout> | null = null
 
 const isRestricted = computed(() => course.value?.access_restricted === true)
 
@@ -300,45 +293,31 @@ const setAccessMode = async (mode: 'open' | 'restricted') => {
   }
 }
 
-const runGrantSearch = async () => {
-  const q = grantQuery.value.trim()
-  if (q.length < 2) {
-    grantResults.value = []
-    return
-  }
-  grantSearching.value = true
-  try {
-    grantResults.value = await apiFetch<GrantCandidate[]>(
-      `/courses/${route.params.id}/access-grants/search`,
-      { query: { q } },
-    )
-  } catch (e: any) {
-    accessError.value = e?.data?.detail ?? 'Ошибка поиска'
-  } finally {
-    grantSearching.value = false
-  }
-}
-
-const onGrantQueryInput = () => {
-  if (grantSearchTimeout) clearTimeout(grantSearchTimeout)
-  grantSearchTimeout = setTimeout(runGrantSearch, 300)
-}
-
-const addGrant = async (candidate: GrantCandidate) => {
-  if (grantBusy.value[candidate.id]) return
-  grantBusy.value = { ...grantBusy.value, [candidate.id]: true }
+const addByEmail = async () => {
+  const email = grantEmail.value.trim()
+  if (!email || grantAdding.value) return
+  grantAdding.value = true
   accessError.value = ''
+  grantNotice.value = ''
   try {
     const grant = await apiFetch<AccessGrant>(`/courses/${route.params.id}/access-grants`, {
       method: 'POST',
-      body: { student_id: candidate.id },
+      body: { email },
     })
+    const known = grants.value.some(g => g.student_id === grant.student_id)
     grants.value = [grant, ...grants.value.filter(g => g.student_id !== grant.student_id)]
-    grantResults.value = grantResults.value.filter(r => r.id !== candidate.id)
+    grantEmail.value = ''
+    grantNotice.value = known ? 'Этот студент уже был в списке.' : 'Студент добавлен.'
   } catch (e: any) {
-    accessError.value = e?.data?.detail ?? 'Не удалось добавить студента'
+    const status = e?.response?.status
+    accessError.value =
+      status === 404
+        ? 'Студента с таким email нет на платформе. Попросите его зарегистрироваться.'
+        : status === 422
+          ? 'Похоже, это не email.'
+          : (e?.data?.detail ?? 'Не удалось добавить студента')
   } finally {
-    grantBusy.value = { ...grantBusy.value, [candidate.id]: false }
+    grantAdding.value = false
   }
 }
 
@@ -893,45 +872,32 @@ onMounted(async () => {
           уже записанные доступ не теряют.
         </p>
 
-        <div>
-          <label class="block text-sm text-gray-600 mb-2" for="grant-search">
-            Найти студента по имени или email
+        <form @submit.prevent="addByEmail">
+          <label class="block text-sm text-gray-600 mb-2" for="grant-email">
+            Добавить студента по email
           </label>
-          <input
-            id="grant-search"
-            v-model="grantQuery"
-            type="search"
-            placeholder="Минимум 2 символа"
-            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
-            @input="onGrantQueryInput"
-          >
-          <p v-if="grantSearching" class="mt-2 text-xs text-gray-500">Поиск…</p>
-          <p
-            v-else-if="grantQuery.trim().length >= 2 && !grantResults.length"
-            class="mt-2 text-xs text-gray-500"
-          >
-            Никого не найдено.
-          </p>
-          <ul v-else-if="grantResults.length" class="mt-2 border rounded-lg divide-y">
-            <li
-              v-for="candidate in grantResults"
-              :key="candidate.id"
-              class="flex items-center justify-between gap-3 px-3 py-2"
+          <div class="flex flex-wrap gap-2">
+            <input
+              id="grant-email"
+              v-model="grantEmail"
+              type="email"
+              autocomplete="off"
+              placeholder="student@example.com"
+              class="flex-1 min-w-0 border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
             >
-              <div class="min-w-0">
-                <p class="text-sm text-gray-800 truncate">{{ candidate.full_name || candidate.email }}</p>
-                <p v-if="candidate.full_name" class="text-xs text-gray-500 truncate">{{ candidate.email }}</p>
-              </div>
-              <button
-                class="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 transition disabled:opacity-50"
-                :disabled="grantBusy[candidate.id]"
-                @click="addGrant(candidate)"
-              >
-                {{ grantBusy[candidate.id] ? '…' : 'Добавить' }}
-              </button>
-            </li>
-          </ul>
-        </div>
+            <button
+              type="submit"
+              class="px-4 py-2 rounded-lg bg-violet-600 text-white text-sm font-medium hover:bg-violet-700 transition disabled:opacity-50"
+              :disabled="grantAdding || !grantEmail.trim()"
+            >
+              {{ grantAdding ? '…' : 'Добавить' }}
+            </button>
+          </div>
+          <p v-if="grantNotice" class="mt-2 text-xs text-green-700">{{ grantNotice }}</p>
+          <p class="mt-2 text-xs text-gray-500">
+            Нужен точный адрес — списка студентов платформы здесь намеренно нет.
+          </p>
+        </form>
 
         <div>
           <p class="text-sm text-gray-600 mb-2">Есть доступ ({{ grants.length }}):</p>

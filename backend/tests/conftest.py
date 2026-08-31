@@ -264,7 +264,7 @@ async def app(db_session: Any) -> AsyncIterator[Any]:
 
     from app.database import get_db
     from app.main import app as fastapi_app
-    from app.redis_client import get_redis
+    from app.redis_client import get_pubsub_redis, get_redis
 
     # Disable slowapi for the duration of this fixture so per-route
     # decorators don't 429 our parametrized tests.
@@ -282,6 +282,9 @@ async def app(db_session: Any) -> AsyncIterator[Any]:
 
     fastapi_app.dependency_overrides[get_db] = _override_get_db
     fastapi_app.dependency_overrides[get_redis] = _override_get_redis
+    # Production runs pub/sub on its own pool (see redis_client); in tests both
+    # resolve to the same fake, so SSE routes get a working pubsub.
+    fastapi_app.dependency_overrides[get_pubsub_redis] = _override_get_redis
 
     try:
         yield fastapi_app

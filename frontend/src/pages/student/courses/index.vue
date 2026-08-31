@@ -46,6 +46,7 @@ const progress = (completed: number, total: number) =>
   total > 0 ? Math.round((completed / total) * 100) : 0
 
 onMounted(load)
+useRefetchOnFocus(load)
 </script>
 
 <template>

@@ -1,12 +1,17 @@
+import asyncio
 from datetime import datetime, timezone
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
+from redis.asyncio import Redis
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sse_starlette.sse import EventSourceResponse
 
+from app.constants import SSE_HEARTBEAT_SECONDS, SSE_RETRY_MS
 from app.database import get_db
 from app.dependencies import require_student
 from app.limiter import limiter
@@ -21,6 +26,7 @@ from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import ContentType, Lesson, Module
 from app.models.quiz import AttemptStatus, Quiz, QuizAttempt, QuizStatus
 from app.models.user import User
+from app.redis_client import get_pubsub_redis
 from app.routers.lessons import video_playback_url
 from app.schemas.course import CoursePreview, StudentCourseOut
 from app.schemas.gradebook import StudentCourseDetailRead, StudentLessonProgressRead
@@ -35,6 +41,8 @@ from app.schemas.student import (
 from app.services import course_access_service, gradebook_service, visibility_service
 from app.services.progress_service import get_or_create_lesson_progress
 from app.services.storage_service import storage_service
+
+logger = structlog.get_logger()
 
 router = APIRouter(prefix="/api/v1/students", tags=["students"])
 
@@ -149,6 +157,68 @@ async def preview_course(
         raise HTTPException(status_code=404, detail="Course not found")
 
     return course
+
+
+@router.get("/courses/stream")
+async def courses_stream(
+    user: User = Depends(require_student),
+    redis: Redis = Depends(get_pubsub_redis),
+):
+    """Pushes course-access changes to the student's cabinet so a course the
+    teacher just granted (or revoked) appears without a reload.
+
+    Registered ABOVE `/courses/{course_id}` on purpose — declared after it, the
+    path parameter would swallow "stream" and answer 422.
+
+    Same shape as the lesson progress stream in routers/lessons.py, minus the
+    presence bookkeeping and snapshot replay: there is no prior state to
+    replay, the client just refetches its list on any message. The cabinet also
+    refetches on tab focus, so a dropped or unavailable stream degrades to that
+    instead of going stale.
+    """
+    # Must fail before EventSourceResponse — once it is returned the headers are
+    # sent and a 503 can no longer be raised.
+    try:
+        await redis.ping()
+    except Exception:
+        raise HTTPException(status_code=503, detail="Streaming unavailable")
+
+    channel = course_access_service.courses_channel(user.id)
+
+    async def generator():
+        # `retry` tells the browser how fast to come back; a blue-green switch
+        # cuts open streams when the old slot drains.
+        yield {"retry": SSE_RETRY_MS, "comment": "stream open"}
+
+        pubsub = redis.pubsub()
+        try:
+            await pubsub.subscribe(channel)
+        except Exception:
+            # Pool exhausted, or Redis went away between the ping and here.
+            # Headers are already sent so we cannot 503 — end the stream and let
+            # the cabinet fall back to refetching when the tab regains focus.
+            logger.warning("courses_stream_subscribe_failed", student_id=str(user.id))
+            await pubsub.aclose()
+            return
+
+        try:
+            last_heartbeat = asyncio.get_running_loop().time()
+            while True:
+                msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                if msg and msg["type"] == "message":
+                    yield {"data": msg["data"]}
+
+                now = asyncio.get_running_loop().time()
+                if now - last_heartbeat >= SSE_HEARTBEAT_SECONDS:
+                    yield {"comment": "ping"}
+                    last_heartbeat = now
+        finally:
+            # finally, not after the loop: a client disconnect tears the
+            # generator down by raising through the yield.
+            await pubsub.unsubscribe(channel)
+            await pubsub.aclose()
+
+    return EventSourceResponse(generator())
 
 
 @router.get("/courses/{course_id}", response_model=StudentCourseDetailRead)
