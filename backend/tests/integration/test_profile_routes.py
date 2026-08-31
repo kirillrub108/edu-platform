@@ -326,7 +326,6 @@ async def test_avatar_upload_happy_path(
     assert storage_service.exists(refreshed.avatar_image_path)
 
 
-
 async def test_uploaded_avatar_survives_in_auth_me(
     client: AsyncClient, teacher_user: User, teacher_token: dict
 ) -> None:
@@ -346,6 +345,7 @@ async def test_uploaded_avatar_survives_in_auth_me(
     # The two source columns stay server-side; clients see one ready URL.
     assert "avatar_image_path" not in body
     assert "avatar_external_url" not in body
+
 
 async def test_avatar_rejects_oversized_file(
     client: AsyncClient, teacher_user: User, teacher_token: dict
