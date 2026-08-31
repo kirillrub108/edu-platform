@@ -107,3 +107,154 @@ describe('safety', () => {
     expect(html).toContain('&lt;script&gt;')
   })
 })
+
+// ── Images, tables and `material:` resolution (text lessons) ─────────────────
+
+const MATERIAL_ID = 'a1b2c3d4-e5f6-4788-9a0b-c1d2e3f4a5b6'
+const OTHER_ID = '0f0e0d0c-0b0a-4908-8706-050403020100'
+
+const materials = {
+  [MATERIAL_ID]: {
+    id: MATERIAL_ID,
+    title: 'Схема алгоритма',
+    url: 'http://localhost:8000/files/materials/l1/scheme.png?sig=abc',
+    contentType: 'image/png',
+  },
+  [OTHER_ID]: {
+    id: OTHER_ID,
+    title: 'Методичка.pdf',
+    url: 'http://localhost:8000/files/materials/l1/manual.pdf?sig=def',
+    contentType: 'application/pdf',
+  },
+}
+
+const renderWith = async (
+  source: string,
+  options: Parameters<typeof markdownNodes>[1] = {},
+): Promise<string> => {
+  const Comp = defineComponent({ render: () => h('div', markdownNodes(source, options)) })
+  return renderToString(createSSRApp(Comp))
+}
+
+describe('images', () => {
+  it('renders an external https image', async () => {
+    const html = await renderWith('![схема](https://example.com/a.png)')
+    expect(html).toContain('<img')
+    expect(html).toContain('src="https://example.com/a.png"')
+    expect(html).toContain('alt="схема"')
+    expect(html).toContain('loading="lazy"')
+  })
+
+  it('resolves material: to the signed URL from the lesson map', async () => {
+    const html = await renderWith(`![схема](material:${MATERIAL_ID})`, { materials })
+    expect(html).toContain('src="http://localhost:8000/files/materials/l1/scheme.png?sig=abc"')
+    expect(html).toContain('alt="схема"')
+  })
+
+  it('never stores a signed URL — only the material ref is in the source', async () => {
+    const source = `![схема](material:${MATERIAL_ID})`
+    expect(source).not.toContain('sig=')
+    // …and without a map the ref stays inert text rather than a request.
+    const html = await renderWith(source)
+    expect(html).not.toContain('<img')
+  })
+
+  it('escapes the alt text instead of letting it become markup', async () => {
+    const html = await renderWith('![" onerror="alert(1)](https://example.com/a.png)')
+    expect(html).not.toContain('onerror="alert(1)"')
+    expect(html).toContain('&quot;')
+  })
+
+  it('degrades a non-image material referenced as an image to a download chip', async () => {
+    const html = await renderWith(`![методичка](material:${OTHER_ID})`, { materials })
+    expect(html).not.toContain('<img')
+    expect(html).toContain('href="http://localhost:8000/files/materials/l1/manual.pdf?sig=def"')
+  })
+
+  it('cuts a javascript: image target', async () => {
+    const html = await renderWith('![x](javascript:alert(1))')
+    expect(html).not.toContain('<img')
+    expect(html).toContain('javascript:alert(1)')
+  })
+})
+
+describe('material: references', () => {
+  it('renders an attachment as a download chip, not a bare link', async () => {
+    const html = await renderWith(`[Методичка](material:${OTHER_ID})`, { materials })
+    expect(html).toContain('href="http://localhost:8000/files/materials/l1/manual.pdf?sig=def"')
+    expect(html).toContain('download="Методичка.pdf"')
+    expect(html).toContain('Методичка')
+  })
+
+  it('renders an unknown uuid as plain text — no link, no request', async () => {
+    const html = await renderWith(
+      '[Пропало](material:99999999-9999-4999-8999-999999999999)',
+      { materials },
+    )
+    expect(html).not.toContain('<a')
+    expect(html).toContain('material:99999999-9999-4999-8999-999999999999')
+  })
+
+  it("does not resolve another lesson's material when it is absent from the map", async () => {
+    const html = await renderWith(`![чужая](material:${MATERIAL_ID})`, { materials: {} })
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('<a')
+    expect(html).toContain(`material:${MATERIAL_ID}`)
+  })
+
+  it('rejects a malformed material ref', async () => {
+    const html = await renderWith('[x](material:not-a-uuid)', { materials })
+    expect(html).not.toContain('<a')
+    expect(html).toContain('material:not-a-uuid')
+  })
+})
+
+describe('scheme allowlist', () => {
+  it.each([
+    'javascript:alert(1)',
+    'JaVaScRiPt:alert(1)',
+    'JAVASCRIPT:alert(1)',
+    'data:text/html;base64,PHNjcmlwdD4=',
+    'vbscript:msgbox(1)',
+    'file:///etc/passwd',
+  ])('cuts %s', async (href) => {
+    const html = await renderWith(`[клик](${href})`)
+    expect(html).not.toContain('<a')
+    expect(html).not.toContain(`href="${href}"`)
+  })
+
+  it('keeps a link whose target contains whitespace or a newline literal', async () => {
+    // The inline pattern excludes whitespace in the target, so such a source is
+    // never treated as a link in the first place.
+    const html = await renderWith('[клик](java\nscript:alert(1))')
+    expect(html).not.toContain('<a')
+  })
+
+  it('still allows http(s) and mailto', async () => {
+    expect(await renderWith('[a](https://example.com)')).toContain('<a')
+    expect(await renderWith('[a](http://example.com)')).toContain('<a')
+    expect(await renderWith('[a](mailto:teacher@example.com)')).toContain('<a')
+  })
+})
+
+describe('tables', () => {
+  it('renders a pipe table with a header and body', async () => {
+    const html = await renderWith('| Тема | Часы |\n| --- | --- |\n| Алгоритмы | 4 |\n| Графы | 2 |')
+    expect(html).toContain('<table')
+    expect((html.match(/<th[\s>]/g) ?? []).length).toBe(2)
+    expect((html.match(/<tr[\s>]/g) ?? []).length).toBe(3)
+    expect(html).toContain('Алгоритмы')
+    expect(html).toContain('Графы')
+  })
+
+  it('renders inline markup inside cells', async () => {
+    const html = await renderWith('| A | B |\n| --- | --- |\n| **жирный** | `код` |')
+    expect(html).toContain('<strong>жирный</strong>')
+    expect(html).toContain('код</code>')
+  })
+
+  it('leaves a dash line that follows no table row as ordinary content', async () => {
+    const html = await renderWith('просто текст\n---')
+    expect(html).not.toContain('<table')
+  })
+})

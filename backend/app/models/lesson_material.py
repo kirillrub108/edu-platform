@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -36,6 +36,11 @@ class LessonMaterial(Base):
     original_filename = Column(String(255), nullable=False)
     content_type = Column(String(128), nullable=True)
     size_bytes = Column(Integer, nullable=False)
+    # True for a file referenced from a text lesson's markdown body as
+    # `material:{uuid}`. Same row, same storage/purge/delete path as a regular
+    # material — the flag only splits the two UI lists apart and marks the rows
+    # the body-save orphan sweep may reclaim.
+    is_inline = Column(Boolean, nullable=False, default=False, server_default="false")
     uploaded_by = Column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),

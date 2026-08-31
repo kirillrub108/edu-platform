@@ -3,18 +3,22 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
-from app.dependencies import get_current_user, require_teacher
-from app.models.course import AccessMode, Course
+from app.dependencies import get_current_user, require_course_access, require_teacher
+from app.models.course import AccessMode, Course, CourseAccessGrant
 from app.models.enrollment import Enrollment
 from app.models.lesson import Module
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.course import (
+    AccessGrantCandidateRead,
+    CourseAccessGrantCreate,
+    CourseAccessGrantRead,
+    CourseAccessModeUpdate,
     CourseCreate,
     CourseDetail,
     CourseGroupedResponse,
@@ -26,7 +30,13 @@ from app.schemas.course import (
     ModuleOut,
     ModuleUpdate,
 )
-from app.services import course_service, visibility_service
+from app.schemas.lesson_material import CourseKnowledgeTreeRead
+from app.services import (
+    course_access_service,
+    course_service,
+    lesson_material_service,
+    visibility_service,
+)
 from app.services.storage_service import storage_service
 
 router = APIRouter(prefix="/api/v1/courses", tags=["courses"])
@@ -210,6 +220,23 @@ async def course_preview(
     resp = CoursePreviewTreeRead.model_validate(course)
     resp.modules = visibility_service.annotated_module_tree(course)
     return resp
+
+
+@router.get("/{course_id}/knowledge", response_model=CourseKnowledgeTreeRead)
+async def course_knowledge(
+    access: tuple[User, Course, bool] = Depends(require_course_access),
+    db: AsyncSession = Depends(get_db),
+) -> CourseKnowledgeTreeRead:
+    """Whole-course knowledge base grouped module → lesson, in one request.
+
+    Lives here rather than in routers/lesson_materials.py so the `/courses/…`
+    prefix stays owned by a single router; the logic is the same service call.
+    Note bodies are omitted — fetch them per lesson from /lessons/{id}/knowledge.
+    """
+    user, course, is_owner = access
+    return await lesson_material_service.get_course_knowledge(
+        db, course=course, viewer_id=str(user.id), is_owner=is_owner
+    )
 
 
 @router.put("/{course_id}", response_model=CourseOut)
@@ -399,6 +426,141 @@ async def delete_access_code(
     await db.commit()
     await db.refresh(course, attribute_names=["owner"])
     return _course_out(course, str(user.id))
+
+
+# ── Selective access (restricted courses) ───────────────────────────────────
+# `AccessMode.invite` is the restricted mode: self-enrollment by code is refused
+# and only the students listed here reach the course. See DECISIONS §62.
+
+_GRANT_SEARCH_MIN_CHARS = 2
+_GRANT_SEARCH_LIMIT = 10
+
+
+@router.patch("/{course_id}/access-mode", response_model=CourseOut)
+async def set_access_mode(
+    course_id: UUID,
+    data: CourseAccessModeUpdate,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    course = await _get_owned_course(course_id, user, db)
+    if data.mode == "restricted":
+        # Backfill first: switching modes must never evict a student who is
+        # already enrolled (same commit as the mode flip, so there is no window
+        # in which the course is restricted with an empty list).
+        await course_access_service.backfill_grants_from_enrollments(db, course.id, user.id)
+        course.access_mode = AccessMode.invite
+    else:
+        # Back to open — an existing code keeps working, otherwise link-only.
+        course.access_mode = AccessMode.code if course.access_code else AccessMode.link
+    await db.commit()
+    await db.refresh(course, attribute_names=["owner"])
+    return _course_out(course, str(user.id))
+
+
+@router.get("/{course_id}/access-grants", response_model=list[CourseAccessGrantRead])
+async def list_access_grants(
+    course_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_course(course_id, user, db)
+    rows = await db.execute(
+        select(
+            CourseAccessGrant.student_id,
+            User.email,
+            User.full_name,
+            CourseAccessGrant.created_at,
+        )
+        .join(User, CourseAccessGrant.student_id == User.id)
+        .where(CourseAccessGrant.course_id == course_id)
+        .order_by(CourseAccessGrant.created_at.desc())
+    )
+    return [CourseAccessGrantRead.model_validate(r) for r in rows.all()]
+
+
+@router.get("/{course_id}/access-grants/search", response_model=list[AccessGrantCandidateRead])
+async def search_access_grant_candidates(
+    course_id: UUID,
+    q: str,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_course(course_id, user, db)
+    term = q.strip()
+    if len(term) < _GRANT_SEARCH_MIN_CHARS:
+        return []
+    pattern = f"%{term}%"
+    already_granted = (
+        select(CourseAccessGrant.student_id)
+        .where(CourseAccessGrant.course_id == course_id)
+        .scalar_subquery()
+    )
+    # Soft-deleted users are excluded by the global ORM filter (app/database.py).
+    rows = await db.scalars(
+        select(User)
+        .where(
+            User.role == UserRole.student,
+            User.id != user.id,
+            User.id.not_in(already_granted),
+            or_(User.email.ilike(pattern), User.full_name.ilike(pattern)),
+        )
+        .order_by(User.email)
+        .limit(_GRANT_SEARCH_LIMIT)
+    )
+    return [AccessGrantCandidateRead.model_validate(u) for u in rows.all()]
+
+
+@router.post(
+    "/{course_id}/access-grants",
+    response_model=CourseAccessGrantRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_access_grant(
+    course_id: UUID,
+    data: CourseAccessGrantCreate,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    await _get_owned_course(course_id, user, db)
+    student = await db.scalar(
+        select(User).where(User.id == data.student_id, User.role == UserRole.student)
+    )
+    if student is None:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    await course_access_service.grant_access(db, course_id, student.id, user.id)
+    grant = await db.scalar(
+        select(CourseAccessGrant).where(
+            CourseAccessGrant.course_id == course_id,
+            CourseAccessGrant.student_id == student.id,
+        )
+    )
+    return CourseAccessGrantRead(
+        student_id=student.id,
+        email=student.email,
+        full_name=student.full_name,
+        created_at=grant.created_at,
+    )
+
+
+@router.delete("/{course_id}/access-grants/{student_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_access_grant(
+    course_id: UUID,
+    student_id: UUID,
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+):
+    """Revokes access only. The Enrollment and everything hanging off it
+    (progress, grades, submissions) stays so the gradebook keeps its history."""
+    await _get_owned_course(course_id, user, db)
+    await db.execute(
+        delete(CourseAccessGrant).where(
+            CourseAccessGrant.course_id == course_id,
+            CourseAccessGrant.student_id == student_id,
+        )
+    )
+    await db.commit()
 
 
 @router.post("/{course_id}/cover", response_model=CourseOut)

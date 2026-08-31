@@ -8,9 +8,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from app.constants import (
     LESSON_MATERIAL_MAX_DESCRIPTION_CHARS,
     LESSON_MATERIAL_MAX_FILES,
+    LESSON_MATERIAL_MAX_INLINE_FILES,
     LESSON_MATERIAL_MAX_TOTAL_SIZE_MB,
     LESSON_NOTE_MAX_CONTENT_CHARS,
     LESSON_NOTE_MAX_TITLE_CHARS,
+    LESSON_TEXT_MAX_CHARS,
 )
 
 
@@ -50,6 +52,7 @@ class MaterialRead(BaseModel):
     original_filename: str
     content_type: str | None
     size_bytes: int
+    is_inline: bool
     uploaded_by: UUID | None
     created_at: datetime
     updated_at: datetime
@@ -108,6 +111,8 @@ class KnowledgeLimits(BaseModel):
     max_total_mb: int = LESSON_MATERIAL_MAX_TOTAL_SIZE_MB
     allowed_ext: list[str]
     note_max_chars: int = LESSON_NOTE_MAX_CONTENT_CHARS
+    max_inline_files: int = LESSON_MATERIAL_MAX_INLINE_FILES
+    text_max_chars: int = LESSON_TEXT_MAX_CHARS
 
 
 class KnowledgeBaseRead(BaseModel):
@@ -115,3 +120,46 @@ class KnowledgeBaseRead(BaseModel):
     notes: list[NoteRead]
     can_edit: bool
     limits: KnowledgeLimits
+
+
+# ── Course-level knowledge tree ──────────────────────────────────────────────
+
+
+class CourseKnowledgeNoteRead(BaseModel):
+    """Note METADATA only — `content` is deliberately absent.
+
+    A course can hold hundreds of notes of up to LESSON_NOTE_MAX_CONTENT_CHARS
+    each; shipping the bodies would make this response tens of MB. The body is
+    fetched per lesson from GET /lessons/{id}/knowledge.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    lesson_id: UUID
+    title: str
+    order: int
+    updated_at: datetime
+
+
+class CourseKnowledgeLessonRead(BaseModel):
+    id: UUID
+    title: str
+    order: int
+    content_type: str
+    materials: list[MaterialRead]
+    notes: list[CourseKnowledgeNoteRead]
+
+
+class CourseKnowledgeModuleRead(BaseModel):
+    id: UUID
+    title: str
+    order: int
+    lessons: list[CourseKnowledgeLessonRead]
+
+
+class CourseKnowledgeTreeRead(BaseModel):
+    course_id: UUID
+    course_title: str
+    can_edit: bool
+    modules: list[CourseKnowledgeModuleRead]

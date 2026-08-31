@@ -65,6 +65,9 @@ async def upload_lesson_material(
     file: UploadFile,
     title: str | None = Form(default=None),
     description: str | None = Form(default=None),
+    # Set by the text-lesson editor: the file is referenced from the markdown
+    # body as `material:{uuid}` and is listed there, not under «Файлы».
+    is_inline: bool = Form(default=False),
     lesson: Lesson = Depends(get_owned_lesson),
     user: User = Depends(require_teacher),
     db: AsyncSession = Depends(get_db),
@@ -76,6 +79,7 @@ async def upload_lesson_material(
         file=file,
         title=title,
         description=description,
+        is_inline=is_inline,
     )
     return lesson_material_service.serialize_material(material, str(user.id))
 

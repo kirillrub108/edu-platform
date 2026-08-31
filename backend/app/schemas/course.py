@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
@@ -90,6 +91,12 @@ class CourseOut(BaseModel):
 
     @computed_field  # type: ignore[prop-decorator]
     @property
+    def access_restricted(self) -> bool:
+        """`invite` is the restricted mode — see services/course_access_service."""
+        return self.access_mode == AccessMode.invite
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
     def days_until_purge(self) -> int | None:
         """Whole days left before purge, clamped at 0.
 
@@ -158,3 +165,30 @@ class CourseGroupedResponse(BaseModel):
     published: list[CourseOut] = []
     drafts: list[CourseOut] = []
     archived: list[CourseOut] = []
+
+
+class CourseAccessModeUpdate(BaseModel):
+    mode: Literal["open", "restricted"]
+
+
+class CourseAccessGrantCreate(BaseModel):
+    student_id: UUID
+
+
+class CourseAccessGrantRead(BaseModel):
+    """One entry of a restricted course's student list."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    student_id: UUID
+    email: str
+    full_name: str | None = None
+    created_at: datetime
+
+
+class AccessGrantCandidateRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    email: str
+    full_name: str | None = None

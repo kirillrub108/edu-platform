@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.constants import (
+    LESSON_TEXT_MAX_CHARS,
     POLZA_TTS_VOICES,
     YANDEX_TTS_PITCH_MAX,
     YANDEX_TTS_PITCH_MIN,
@@ -28,11 +29,21 @@ class LessonUpdate(BaseModel):
     order: int | None = None
     content_type: ContentType | None = None
     video_url: str | None = None
-    text_content: str | None = None
     script: str | None = None
     status: LessonStatus | None = None
     creation_mode: CreationMode | None = None
     detail_level: DetailLevel | None = None
+
+
+class LessonTextUpdate(BaseModel):
+    """The ONLY write path for a text lesson's markdown body.
+
+    Deliberately absent from `LessonUpdate`: saving the body also sweeps inline
+    materials the new text no longer references, and a second entry point would
+    silently skip that sweep and leak orphans.
+    """
+
+    text_content: str = Field(max_length=LESSON_TEXT_MAX_CHARS)
 
 
 class LessonPartialUpdate(BaseModel):

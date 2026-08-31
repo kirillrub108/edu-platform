@@ -17,8 +17,33 @@ const state = computed(() => store.getState(props.lessonId))
 // the editing affordances to show exactly what a student sees.
 const canEdit = computed(() => !props.preview && state.value.canEdit)
 const noteMaxChars = computed(() => state.value.limits?.note_max_chars ?? 50000)
+
+// Inline attachments live in the text-lesson body, not in this list — but they
+// DO consume the lesson-wide file/size quota, so the usage line below spells out
+// their share. Without it the teacher hits the cap next to a visibly short list.
+const visibleMaterials = computed(() => state.value.materials.filter((m) => !m.is_inline))
+const inlineCount = computed(() => state.value.materials.filter((m) => m.is_inline).length)
+const usedBytes = computed(() =>
+  state.value.materials.reduce((sum, m) => sum + m.size_bytes, 0),
+)
+const usageLine = computed(() => {
+  const limits = state.value.limits
+  if (!limits) return ''
+  const usedMb = Math.round(usedBytes.value / (1024 * 1024))
+  const base =
+    `Использовано ${state.value.materials.length} из ${limits.max_files} файлов · ` +
+    `${usedMb} МБ из ${limits.max_total_mb} МБ`
+  return inlineCount.value
+    ? `${base} · из них ${inlineCount.value} — вложения в тексте урока`
+    : base
+})
 const acceptAttr = computed(() =>
   (state.value.limits?.allowed_ext ?? []).map((ext) => `.${ext}`).join(','),
+)
+
+// Notes live in the same lesson, so they resolve `material:` against the same map.
+const { materials: materialMap, onImageError } = useLessonMaterialMap(
+  computed(() => props.lessonId),
 )
 
 const showNoteEditor = ref(false)
@@ -109,10 +134,11 @@ const removeMaterial = async (material: KnowledgeMaterial) => {
   }
 }
 
-watch(() => props.lessonId, (id) => store.fetch(id))
-onMounted(() => {
-  if (!state.value.loaded) store.fetch(props.lessonId)
-})
+// ensureLoaded (not fetch): the lesson page requests the same data for its
+// markdown material map, and the store's singleflight collapses both into one
+// request regardless of which consumer mounts first.
+watch(() => props.lessonId, (id) => store.ensureLoaded(id))
+onMounted(() => store.ensureLoaded(props.lessonId))
 </script>
 
 <template>
@@ -198,7 +224,11 @@ onMounted(() => {
                 </button>
               </div>
             </div>
-            <KnowledgeMarkdownText :content="note.content" />
+            <KnowledgeMarkdownText
+              :content="note.content"
+              :materials="materialMap"
+              :on-image-error="onImageError"
+            />
           </li>
         </ul>
       </section>
@@ -232,18 +262,16 @@ onMounted(() => {
             <template #icon><Plus class="w-4 h-4" /></template>
             Прикрепить файл
           </UiButton>
-          <p v-if="state.limits" class="text-xs text-gray-400">
-            До {{ state.limits.max_files }} файлов · суммарно до {{ state.limits.max_total_mb }} МБ
-          </p>
+          <p v-if="usageLine" class="text-xs text-gray-400">{{ usageLine }}</p>
         </div>
 
-        <p v-if="!state.materials.length" class="text-sm text-gray-500">
+        <p v-if="!visibleMaterials.length" class="text-sm text-gray-500">
           {{ canEdit ? 'Пока нет прикреплённых файлов.' : 'Преподаватель пока не приложил файлы.' }}
         </p>
 
         <ul v-else class="space-y-2">
           <li
-            v-for="material in state.materials"
+            v-for="material in visibleMaterials"
             :key="material.id"
             class="flex items-center gap-3 rounded-xl border border-gray-100 px-4 py-3"
           >

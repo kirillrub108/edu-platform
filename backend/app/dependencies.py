@@ -11,11 +11,10 @@ from sqlalchemy.orm import joinedload
 from app.config import settings
 from app.database import get_db
 from app.models.course import Course
-from app.models.enrollment import Enrollment
-from app.models.lesson import Lesson, Module
+from app.models.lesson import ContentType, Lesson, Module
 from app.models.user import User, UserRole
 from app.redis_client import get_redis
-from app.services import visibility_service
+from app.services import course_access_service, visibility_service
 from app.services.auth_service import decode_token
 
 _STATE_CHANGING = {"POST", "PUT", "PATCH", "DELETE"}
@@ -207,6 +206,9 @@ async def require_lesson_access(
 ) -> tuple[User, Lesson, bool]:
     """Lesson-scoped access guard: teacher-owner OR enrolled student.
 
+    "Enrolled" means `course_access_service.has_access` — on a restricted course
+    an Enrollment alone is not enough, the owner must also have granted access.
+
     Returns `(user, lesson, is_owner)`. Raises 404 if the lesson does not exist
     and 403 otherwise — matching the access semantics already used by
     `routers/students.py` (which 404s missing lessons and 403s non-enrolled).
@@ -224,13 +226,7 @@ async def require_lesson_access(
         return user, lesson, True
 
     if user.role == UserRole.student:
-        enrolled = await db.scalar(
-            select(Enrollment.id).where(
-                Enrollment.student_id == user.id,
-                Enrollment.course_id == course.id,
-            )
-        )
-        if enrolled is not None:
+        if await course_access_service.has_access(db, user.id, course.id):
             # Unpublished module/lesson is hidden — 404 (not 403) so we don't
             # reveal that a draft exists. course.is_published is intentionally not
             # checked: an enrolled student keeps access after the course is
@@ -240,6 +236,49 @@ async def require_lesson_access(
             return user, lesson, False
 
     raise HTTPException(status_code=403, detail="No access to this lesson")
+
+
+def assert_not_text_lesson(lesson: Lesson) -> None:
+    """Text lessons have no slides, script or video — every generation entry
+    point refuses them explicitly instead of failing deep in the pipeline."""
+    if lesson.content_type == ContentType.text:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "text_lesson_no_video",
+                "message": (
+                    "Это текстовый урок: презентация, озвучка и генерация видео "
+                    "для него недоступны."
+                ),
+            },
+        )
+
+
+async def require_course_access(
+    course_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> tuple[User, Course, bool]:
+    """Course-scoped access guard: teacher-owner OR enrolled student.
+
+    Returns `(user, course, is_owner)`. Mirrors `require_lesson_access` one level
+    up, and matches routers/students.py:course_details — a missing course is 404,
+    a non-enrolled viewer 403. `deleted_at` is deliberately not filtered for an
+    enrolled student: archiving a course is teacher-facing and never revokes the
+    access of someone already enrolled (docs/DECISIONS.md §51).
+    """
+    course = await db.scalar(select(Course).where(Course.id == course_id))
+    if course is None:
+        raise HTTPException(status_code=404, detail="Course not found")
+
+    if user.role == UserRole.teacher and course.owner_id == user.id:
+        return user, course, True
+
+    if user.role == UserRole.student:
+        if await course_access_service.has_access(db, user.id, course.id):
+            return user, course, False
+
+    raise HTTPException(status_code=403, detail="No access to this course")
 
 
 async def get_owned_lesson(

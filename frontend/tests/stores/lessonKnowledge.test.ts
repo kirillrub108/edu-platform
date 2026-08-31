@@ -217,3 +217,65 @@ describe('knowledgeErrorMessage', () => {
     )
   })
 })
+
+// ── Signed-URL refresh: one request per lesson, not per broken image ──────────
+
+describe('expired signed URLs', () => {
+  const knowledgeResponse = (url: string) => ({
+    materials: [
+      { ...material(), id: 'm1', is_inline: true, download_url: `${url}#1` },
+      { ...material(), id: 'm2', is_inline: true, download_url: `${url}#2` },
+    ],
+    notes: [],
+    can_edit: true,
+    limits: {
+      max_files: 30,
+      max_total_mb: 2048,
+      allowed_ext: ['png'],
+      note_max_chars: 50000,
+      max_inline_files: 20,
+      text_max_chars: 200000,
+    },
+  })
+
+  it('collapses a burst of image errors into a single refetch', async () => {
+    const { store } = await loadStore()
+    let release: (v: unknown) => void = () => {}
+    fetchMock.mockImplementation(
+      () => new Promise((resolve) => { release = resolve }),
+    )
+
+    // 20 inline images signed together expire together and all fire @error.
+    const bursts = Array.from({ length: 20 }, (_, i) =>
+      store.refreshExpiredUrls('L1', `http://files/img.png?sig=old${i}`),
+    )
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    release(knowledgeResponse('http://files/img.png?sig=new'))
+    await Promise.all(bursts)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(store.getState('L1').materials[0].download_url).toContain('sig=new')
+  })
+
+  it('does not retry the same URL twice — a broken object cannot loop', async () => {
+    const { store } = await loadStore()
+    fetchMock.mockResolvedValue(knowledgeResponse('http://files/img.png?sig=new'))
+
+    await store.refreshExpiredUrls('L1', 'http://files/broken.png?sig=x')
+    await store.refreshExpiredUrls('L1', 'http://files/broken.png?sig=x')
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('ensureLoaded fetches once and is a no-op afterwards', async () => {
+    const { store } = await loadStore()
+    fetchMock.mockResolvedValue(knowledgeResponse('http://files/img.png?sig=a'))
+
+    // Two consumers (page material map + KnowledgePanel) race on mount.
+    await Promise.all([store.ensureLoaded('L1'), store.ensureLoaded('L1')])
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await store.ensureLoaded('L1')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+})

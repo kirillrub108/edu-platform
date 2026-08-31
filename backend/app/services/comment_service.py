@@ -12,6 +12,7 @@ from app.models.course import Course
 from app.models.enrollment import Enrollment
 from app.models.lesson import Lesson, Module
 from app.models.user import User, UserRole
+from app.services import course_access_service
 from app.services.notification_service import NotificationEvent, notify
 from app.services.visibility_service import lesson_visible_to_student
 
@@ -75,8 +76,11 @@ async def notify_students_of_comment(db: AsyncSession, lesson_id: UUID, author: 
         student_ids = (
             (
                 await db.execute(
-                    select(Enrollment.student_id).where(
-                        Enrollment.course_id == lesson.module.course_id
+                    select(Enrollment.student_id)
+                    .join(Course, Enrollment.course_id == Course.id)
+                    .where(
+                        Enrollment.course_id == lesson.module.course_id,
+                        course_access_service.access_clause(Enrollment.student_id),
                     )
                 )
             )

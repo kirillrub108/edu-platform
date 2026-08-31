@@ -16,6 +16,7 @@ from app.models.course import Course
 from app.models.lesson import Lesson, LessonStatus
 from app.models.slide_text import SlideText
 from app.models.user import User
+from app.services import lesson_material_service
 from app.services.file_validation_service import validate_upload
 from app.services.storage_service import storage_service
 
@@ -213,6 +214,13 @@ async def upload_pptx(
         await db.execute(delete(SlideText).where(SlideText.lesson_id == lesson.id))
         await db.commit()
 
+        # Best-effort mirror into the lesson's knowledge base. Streams its own
+        # copy under materials/<lesson_id>/ and never raises — a failed
+        # registration must not undo the PPTX the teacher just attached.
+        await lesson_material_service.register_uploaded_file(
+            db, lesson_id=lesson.id, uploaded_by=user.id, file=file
+        )
+
     return {
         "file_path": relative,
         "file_url": storage_service.get_url(relative, str(user.id)),
@@ -258,6 +266,13 @@ async def upload_script(
             raise HTTPException(status_code=404, detail="Lesson not found")
         lesson.script = script
         await db.commit()
+
+        # The source document used to be parsed and discarded; it is now also
+        # kept as a lesson material. Same best-effort contract as /pptx — the
+        # extraction result below is returned either way.
+        await lesson_material_service.register_uploaded_file(
+            db, lesson_id=lesson.id, uploaded_by=user.id, file=file
+        )
 
     return {"script": script, "chars": len(script)}
 

@@ -33,6 +33,7 @@ from app.constants import (
 )
 from app.database import get_db
 from app.dependencies import (
+    assert_not_text_lesson,
     get_owned_lesson,
     require_lesson_access,
     require_teacher,
@@ -42,7 +43,7 @@ from app.limiter import limiter
 from app.models.course import Course
 from app.models.credit import CreditOperation
 from app.models.enrollment import Enrollment
-from app.models.lesson import CreationMode, Lesson, LessonStatus, Module
+from app.models.lesson import ContentType, CreationMode, Lesson, LessonStatus, Module
 from app.models.lesson_video import LessonVideo
 from app.models.quiz import AttemptStatus, Quiz, QuizAttempt
 from app.models.slide_text import SlideText
@@ -57,6 +58,7 @@ from app.schemas.lesson import (
     LessonCreate,
     LessonOut,
     LessonPartialUpdate,
+    LessonTextUpdate,
     LessonUpdate,
     LessonVideoOut,
     ScriptUpdateRequest,
@@ -64,7 +66,13 @@ from app.schemas.lesson import (
     VideoGenerateRequest,
 )
 from app.schemas.quiz import QuizTeacherResultRow
-from app.services import billing_service, duration_service, quota_service, tier_service
+from app.services import (
+    billing_service,
+    duration_service,
+    lesson_material_service,
+    quota_service,
+    tier_service,
+)
 from app.services.notification_service import presence_key
 from app.services.storage_service import storage_service
 from app.services.video_service import count_source_slides
@@ -229,6 +237,41 @@ async def update_script(
     lesson.script = data.script
     await db.commit()
     await db.refresh(lesson)
+    return _lesson_out(lesson, str(user.id))
+
+
+@router.put("/{lesson_id}/text", response_model=LessonOut)
+@limiter.limit("60/minute")
+async def update_lesson_text(
+    request: Request,
+    data: LessonTextUpdate,
+    user: User = Depends(require_teacher),
+    lesson: Lesson = Depends(get_owned_lesson),
+    db: AsyncSession = Depends(get_db),
+):
+    """Save a text lesson's markdown body (last write wins).
+
+    Sole write path for `text_content`: saving also sweeps inline materials the
+    new body no longer references. No LLM/TTS/vision and no credits — hence
+    plain `require_teacher` and no AI_GATED_ENDPOINTS entry.
+    """
+    if lesson.content_type != ContentType.text:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "not_a_text_lesson",
+                "message": "Текстовое тело доступно только для урока типа «текст».",
+            },
+        )
+    swept = await lesson_material_service.save_text_body(
+        db, lesson=lesson, text_content=data.text_content
+    )
+    if swept:
+        logger.info(
+            "lesson_text_inline_orphans_swept",
+            lesson_id=str(lesson.id),
+            count=len(swept),
+        )
     return _lesson_out(lesson, str(user.id))
 
 
@@ -401,6 +444,8 @@ async def generate_video(
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
+    assert_not_text_lesson(lesson)
+
     pptx_path = data.pptx_path or lesson.pptx_path
     if not pptx_path:
         raise HTTPException(

@@ -303,7 +303,13 @@ const STEP_TITLES: Record<StepKey, string> = {
   history: 'История генераций',
 }
 
+// A text lesson has no PPTX, script or generation — the whole video wizard is
+// replaced by the markdown editor, so the step list is empty and every
+// step-driven affordance (nav, prev/next footer) disappears with it.
+const isTextLesson = computed(() => lesson.value?.content_type === 'text')
+
 const workflowSteps = computed(() => {
+  if (isTextLesson.value) return []
   const keys: StepKey[] = ['mode']
   if (isVideoUpload.value) keys.push('video')
   if (isManual.value || isAuto.value) keys.push('presentation')
@@ -607,15 +613,24 @@ watch(lessonId, (newId, oldId) => {
           aria-labelledby="tab-lesson"
           class="space-y-6 pb-28"
         >
+          <!-- Text lesson: markdown body instead of the whole video wizard -->
+          <LessonTextBodyEditor
+            v-if="isTextLesson"
+            :lesson-id="lessonId"
+            :model-value="lesson.text_content ?? ''"
+            @update:model-value="lesson = { ...lesson, text_content: $event }"
+          />
+
           <!-- Mobile step chips (desktop uses the right-column nav) -->
           <LessonWorkflowNav
+            v-if="!isTextLesson"
             v-model="activeStep"
             :steps="workflowSteps"
             orientation="horizontal"
             class="lg:hidden"
           />
 
-          <div v-show="activeStep === 'mode'">
+          <div v-if="!isTextLesson" v-show="activeStep === 'mode'">
             <section class="bg-white rounded-2xl border border-gray-100 p-6 shadow-soft">
               <CreationModeChooser :model-value="mode" @update:model-value="onModeSelect" />
             </section>
@@ -976,8 +991,9 @@ watch(lessonId, (newId, oldId) => {
           </button>
         </div>
 
-        <!-- Desktop-only step navigator -->
+        <!-- Desktop-only step navigator (no steps on a text lesson) -->
         <div
+          v-if="!isTextLesson"
           v-show="activeTab === 'lesson'"
           class="hidden lg:block shrink-0 bg-white rounded-2xl border border-gray-100 shadow-soft p-3 mb-4"
         >

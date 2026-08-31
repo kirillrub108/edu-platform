@@ -320,6 +320,13 @@ LESSON_MATERIAL_EXTENSION_MIME: dict[str, str] = {
     "webm": "video/webm",
     "zip": "application/zip",
 }
+# Files referenced inline from a text lesson's markdown body. This is a SUB-cap
+# inside LESSON_MATERIAL_MAX_FILES / _MAX_TOTAL_SIZE_MB above, not a parallel
+# budget: an inline upload consumes the lesson-wide quota first and this ceiling
+# second, so a text lesson cannot crowd out ordinary materials entirely.
+LESSON_MATERIAL_MAX_INLINE_FILES: int = 20
+# Markdown body of a text lesson (content_type == "text").
+LESSON_TEXT_MAX_CHARS: int = 200_000
 # Hand-written markdown notes — length caps enforced by the Pydantic schema.
 LESSON_NOTE_MAX_TITLE_CHARS: int = 255
 LESSON_NOTE_MAX_CONTENT_CHARS: int = 50_000

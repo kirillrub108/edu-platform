@@ -30,6 +30,11 @@ const onVideoError = () => {
     emit('video-url-expired')
   }
 }
+
+// Text lessons resolve `material:{uuid}` against their own lesson's materials.
+// Requested explicitly here rather than relying on KnowledgePanel being mounted.
+const lessonId = computed(() => props.lesson.id)
+const { materials, ready, onImageError } = useLessonMaterialMap(lessonId)
 </script>
 
 <template>
@@ -55,9 +60,21 @@ const onVideoError = () => {
 
   <div
     v-else-if="lesson.content_type === 'text'"
-    class="bg-white border border-gray-100 rounded-2xl p-6 prose max-w-none"
+    class="bg-white border border-gray-100 rounded-2xl p-6"
   >
-    <p>{{ lesson.text_content }}</p>
+    <!-- Held back until the material map has loaded, so inline images never
+         paint one frame unresolved. -->
+    <p v-if="!ready" class="text-sm text-gray-400">Загрузка…</p>
+    <p v-else-if="!lesson.text_content?.trim()" class="text-sm text-gray-500">
+      Преподаватель пока не добавил текст урока.
+    </p>
+    <KnowledgeMarkdownText
+      v-else
+      :content="lesson.text_content"
+      :materials="materials"
+      :on-image-error="onImageError"
+      class="text-base"
+    />
   </div>
 
   <div

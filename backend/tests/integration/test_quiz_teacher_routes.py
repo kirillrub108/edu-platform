@@ -319,6 +319,32 @@ async def test_first_load_does_not_trigger_lazy_relationship(
 
 
 @pytest.mark.asyncio
+async def test_quiz_creation_is_idempotent(db_session, teacher_user):
+    """Regression: a brand-new lesson's page fires several creating endpoints
+    at once (/quiz, /quiz/questions, /quiz/generation-options, plus the
+    preview's QuizTaker), and the loser used to 500 with a
+    uq_quizzes_lesson_id UniqueViolationError. The INSERT is now a no-op on
+    conflict, so a second one changes nothing and raises nothing.
+    """
+    from sqlalchemy import select
+
+    from app.models.quiz import Quiz, QuizStatus
+    from app.services.quiz_service import _insert_quiz_if_absent, get_or_create_quiz
+
+    course = await make_course(db_session, teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module)
+
+    first = await get_or_create_quiz(db_session, lesson)
+    await db_session.execute(_insert_quiz_if_absent(lesson.id))  # the racing INSERT
+    assert (await get_or_create_quiz(db_session, lesson)).id == first.id
+
+    rows = (await db_session.scalars(select(Quiz).where(Quiz.lesson_id == lesson.id))).all()
+    assert len(rows) == 1
+    assert rows[0].status == QuizStatus.draft  # core INSERT still applies the ORM defaults
+
+
+@pytest.mark.asyncio
 async def test_list_questions_only_returns_current(
     client,
     db_session,

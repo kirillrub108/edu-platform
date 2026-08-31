@@ -8,6 +8,8 @@ export interface KnowledgeMaterial {
   original_filename: string
   content_type: string | null
   size_bytes: number
+  /** Referenced from the lesson's markdown body; hidden from the «Файлы» list. */
+  is_inline: boolean
   uploaded_by: string | null
   created_at: string
   updated_at: string
@@ -30,6 +32,8 @@ export interface KnowledgeLimits {
   max_total_mb: number
   allowed_ext: string[]
   note_max_chars: number
+  max_inline_files: number
+  text_max_chars: number
 }
 
 export interface KnowledgeState {
@@ -68,6 +72,7 @@ export const KNOWLEDGE_ERROR_CODES: Record<string, string> = {
   file_too_large: 'Файл слишком большой',
   materials_too_large: 'Суммарный объём материалов слишком большой',
   extension_not_allowed: 'Недопустимый тип файла',
+  too_many_inline_files: 'Превышено число вложений в тексте урока',
   too_many_notes: 'Превышено число конспектов',
   invalid_note_order: 'Не удалось изменить порядок конспектов',
 }
@@ -117,18 +122,57 @@ export const useLessonKnowledgeStore = defineStore('lessonKnowledge', () => {
     }
   }
 
+  // ── Signed-URL refresh (singleflight) ──────────────────────────────────────
+  // Material download URLs expire after SIGNED_URL_TTL_MATERIAL. A text lesson
+  // can hold ~20 inline images signed within the same second, so they all expire
+  // together and every <img> fires @error at once. Without this, that is 20
+  // identical GETs; with it, the first one starts the request and the rest await
+  // it. Mirrors the singleflight `refreshPromise` in composables/useApi.ts.
+  const inFlight: Record<string, Promise<void> | undefined> = {}
+  // Per-URL guard: a genuinely broken object must not spin refetch forever.
+  const retriedUrls = new Set<string>()
+
+  const refresh = (lessonId: string): Promise<void> => {
+    const pending = inFlight[lessonId]
+    if (pending) return pending
+    const run = fetch(lessonId).finally(() => {
+      delete inFlight[lessonId]
+    })
+    inFlight[lessonId] = run
+    return run
+  }
+
+  /** Load once per lesson; concurrent callers share the same request. */
+  const ensureLoaded = (lessonId: string): Promise<void> => {
+    const state = getState(lessonId)
+    if (state.loaded) return Promise.resolve()
+    return refresh(lessonId)
+  }
+
+  /**
+   * Called from an inline <img> @error. Re-signs the lesson's material URLs once,
+   * no matter how many images failed; a URL that fails again after a refresh is
+   * genuinely broken and is not retried.
+   */
+  const refreshExpiredUrls = async (lessonId: string, failedUrl: string): Promise<void> => {
+    if (retriedUrls.has(failedUrl)) return
+    retriedUrls.add(failedUrl)
+    await refresh(lessonId)
+  }
+
   // ── Materials ──────────────────────────────────────────────────────────────
 
   const uploadMaterial = async (
     lessonId: string,
     file: File,
-    meta: { title?: string; description?: string } = {},
+    meta: { title?: string; description?: string; isInline?: boolean } = {},
   ): Promise<KnowledgeMaterial> => {
     const state = getState(lessonId)
     const form = new FormData()
     form.append('file', file)
     if (meta.title) form.append('title', meta.title)
     if (meta.description) form.append('description', meta.description)
+    if (meta.isInline) form.append('is_inline', 'true')
     try {
       const created = await apiFetch<KnowledgeMaterial>(`/lessons/${lessonId}/materials`, {
         method: 'POST',
@@ -256,6 +300,8 @@ export const useLessonKnowledgeStore = defineStore('lessonKnowledge', () => {
     byLesson,
     getState,
     fetch,
+    ensureLoaded,
+    refreshExpiredUrls,
     uploadMaterial,
     updateMaterial,
     deleteMaterial,

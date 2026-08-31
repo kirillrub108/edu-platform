@@ -1,7 +1,7 @@
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -11,6 +11,14 @@ from app.database import Base
 
 
 class AccessMode(str, enum.Enum):
+    """How students get onto a course.
+
+    `link`/`code` are both *open*: anyone holding the link or the access code
+    can self-enroll. `invite` is the *restricted* mode — self-enrollment is
+    refused and only students the owner listed in `CourseAccessGrant` may reach
+    the course (see services/course_access_service.py).
+    """
+
     link = "link"
     code = "code"
     invite = "invite"
@@ -57,3 +65,34 @@ class Course(Base):
         order_by="Module.order",
     )
     enrollments = relationship("Enrollment", back_populates="course")
+    access_grants = relationship(
+        "CourseAccessGrant", back_populates="course", cascade="all, delete-orphan"
+    )
+
+
+class CourseAccessGrant(Base):
+    """An explicit "this student may use this course" entry, meaningful only
+    while the course is in `AccessMode.invite`. Revoking a grant leaves the
+    Enrollment (and therefore the progress/grades hanging off it) intact — the
+    teacher keeps seeing the student in the gradebook.
+    """
+
+    __tablename__ = "course_access_grants"
+    __table_args__ = (
+        UniqueConstraint("course_id", "student_id", name="uq_course_access_grant_course_student"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    course_id = Column(
+        UUID(as_uuid=True), ForeignKey("courses.id", ondelete="CASCADE"), nullable=False
+    )
+    student_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    granted_by_id = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    course = relationship("Course", back_populates="access_grants")
+    student = relationship("User", foreign_keys=[student_id])

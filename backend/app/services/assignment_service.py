@@ -47,7 +47,7 @@ from app.schemas.assignment import (
     SubmissionStudentRead,
     SubmissionTeacherRead,
 )
-from app.services import retention_service
+from app.services import course_access_service, retention_service
 from app.services.file_validation_service import validate_upload
 from app.services.grading_service import aggregate_score
 from app.services.notification_service import NotificationEvent, notify
@@ -194,12 +194,7 @@ async def get_published_assignment_for_student(
     if row is None or row[0].status != AssignmentStatus.published:
         raise HTTPException(status_code=404, detail="Assignment not found")
     assignment, course_id = row
-    enrollment = await db.scalar(
-        select(Enrollment).where(
-            Enrollment.student_id == student_id,
-            Enrollment.course_id == course_id,
-        )
-    )
+    enrollment = await course_access_service.get_enrollment(db, student_id, course_id)
     if enrollment is None:
         raise HTTPException(status_code=403, detail="Not enrolled in this course")
     return assignment, enrollment

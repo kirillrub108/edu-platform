@@ -137,10 +137,31 @@ def _material() -> object:
         original_filename="handout.pdf",
         content_type="application/pdf",
         size_bytes=1234,
+        is_inline=False,
         uploaded_by=uuid4(),
         created_at=now,
         updated_at=now,
     )
+
+
+# ── `material:{uuid}` references inside a text lesson's body ─────────────────
+
+
+def test_referenced_material_ids_collects_images_links_and_ignores_noise() -> None:
+    kept_image, kept_link = uuid4(), uuid4()
+    body = (
+        f"# Тема\n\n"
+        f"![схема](material:{kept_image})\n\n"
+        f"Файл: [Методичка](material:{kept_link})\n\n"
+        f"Внешняя ссылка: [сайт](https://example.com/material:not-a-uuid)\n"
+        f"Мусор: material:12345 и material:{str(kept_image).upper()}\n"
+    )
+
+    assert svc.referenced_material_ids(body) == {kept_image, kept_link}
+
+
+def test_referenced_material_ids_on_an_empty_body() -> None:
+    assert svc.referenced_material_ids("") == set()
 
 
 def test_serialize_material_signs_local_urls(

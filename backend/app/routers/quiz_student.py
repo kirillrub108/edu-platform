@@ -48,7 +48,7 @@ from app.schemas.quiz import (
     QuizSubmitResponse,
     to_student_payload,
 )
-from app.services import quota_service
+from app.services import course_access_service, quota_service
 from app.services.grading_service import (
     ResolvedQuestion,
     aggregate_score,
@@ -79,12 +79,7 @@ async def _ensure_enrolled(
     module = await db.get(Module, lesson.module_id)
     if module is None:
         raise HTTPException(status_code=404, detail="Lesson not found")
-    enrollment = await db.scalar(
-        select(Enrollment).where(
-            Enrollment.student_id == student.id,
-            Enrollment.course_id == module.course_id,
-        )
-    )
+    enrollment = await course_access_service.get_enrollment(db, student.id, module.course_id)
     if enrollment is None:
         raise HTTPException(status_code=403, detail="Not enrolled")
     return lesson, enrollment

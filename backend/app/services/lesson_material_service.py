@@ -13,31 +13,44 @@ the given lesson) and the quota/whitelist policy.
 from __future__ import annotations
 
 import os
+import re
 from uuid import UUID
 
+import structlog
 from fastapi import HTTPException, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.constants import (
     LESSON_MATERIAL_ALLOWED_TYPES,
     LESSON_MATERIAL_CATEGORY_MAX_SIZE_MB,
     LESSON_MATERIAL_EXTENSION_MIME,
     LESSON_MATERIAL_MAX_FILES,
+    LESSON_MATERIAL_MAX_INLINE_FILES,
     LESSON_MATERIAL_MAX_TOTAL_SIZE_MB,
     LESSON_NOTE_MAX_PER_LESSON,
     SIGNED_URL_TTL_MATERIAL,
 )
+from app.models.course import Course
+from app.models.lesson import Lesson, Module
 from app.models.lesson_material import LessonMaterial, LessonNote
 from app.schemas.lesson_material import (
+    CourseKnowledgeLessonRead,
+    CourseKnowledgeModuleRead,
+    CourseKnowledgeNoteRead,
+    CourseKnowledgeTreeRead,
     KnowledgeBaseRead,
     KnowledgeLimits,
     MaterialRead,
     NoteCreate,
     NoteRead,
 )
+from app.services import visibility_service
 from app.services.file_validation_service import validate_upload
 from app.services.storage_service import UploadTooLargeError, storage_service
+
+log = structlog.get_logger(__name__)
 
 # Storage prefix for every material of a lesson. Defined here because the purge
 # pipeline deletes this same prefix when a lesson is hard-deleted.
@@ -62,6 +75,7 @@ def serialize_material(material: LessonMaterial, viewer_id: str) -> MaterialRead
         original_filename=material.original_filename,
         content_type=material.content_type,
         size_bytes=material.size_bytes,
+        is_inline=material.is_inline,
         uploaded_by=material.uploaded_by,
         created_at=material.created_at,
         updated_at=material.updated_at,
@@ -167,16 +181,37 @@ async def add_material(
     file: UploadFile,
     title: str | None,
     description: str | None,
+    is_inline: bool = False,
 ) -> LessonMaterial:
     existing = await list_materials(db, lesson_id)
+    inline_count = sum(1 for m in existing if m.is_inline)
     if len(existing) >= LESSON_MATERIAL_MAX_FILES:
+        # Inline attachments are hidden from the «Файлы» list but still consume
+        # this quota, so the message spells out that share — otherwise the
+        # teacher sees a full lesson with a visibly short list of files.
         raise HTTPException(
             status_code=400,
             detail={
                 "code": "too_many_files",
                 "max_files": LESSON_MATERIAL_MAX_FILES,
+                "inline_files": inline_count,
                 "message": (
-                    f"Слишком много материалов: не более {LESSON_MATERIAL_MAX_FILES} на урок."
+                    f"Слишком много материалов: не более {LESSON_MATERIAL_MAX_FILES} "
+                    f"на урок (сейчас {len(existing)}, из них {inline_count} — "
+                    f"вложения в тексте урока)."
+                ),
+            },
+        )
+    # Sub-cap inside the lesson-wide ceiling above, not a parallel budget.
+    if is_inline and inline_count >= LESSON_MATERIAL_MAX_INLINE_FILES:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "too_many_inline_files",
+                "max_inline_files": LESSON_MATERIAL_MAX_INLINE_FILES,
+                "message": (
+                    f"Слишком много вложений в тексте: не более "
+                    f"{LESSON_MATERIAL_MAX_INLINE_FILES} на урок."
                 ),
             },
         )
@@ -222,12 +257,105 @@ async def add_material(
         original_filename=file.filename or f"file.{ext}",
         content_type=file.content_type,
         size_bytes=written,
+        is_inline=is_inline,
         uploaded_by=uploaded_by,
     )
     db.add(material)
     await db.commit()
     await db.refresh(material)
     return material
+
+
+async def register_uploaded_file(
+    db: AsyncSession,
+    *,
+    lesson_id: UUID,
+    uploaded_by: UUID,
+    file: UploadFile,
+) -> LessonMaterial | None:
+    """Mirror a file uploaded through /uploads/* into the lesson's knowledge base.
+
+    NEVER raises: the caller's primary outcome (PPTX attached / script text
+    extracted) must succeed even when the material cannot be registered — an
+    exhausted quota or an extension outside the material whitelist is a skip
+    with a log line, not a failed upload.
+
+    Stores its OWN copy under `materials/{lesson_id}/` rather than pointing at
+    the pipeline's object: sharing would make "delete this material" silently
+    break video generation, and the purge sweep only covers that prefix.
+
+    Dedup is `(lesson_id, original_filename, size_bytes)` — a match is skipped
+    and the existing row is left untouched (its stored object may already be
+    referenced by a signed URL a student holds, and its title/description may
+    have been edited by hand).
+    """
+    filename = file.filename or ""
+    try:
+        existing = await list_materials(db, lesson_id)
+        declared = file.size
+        if declared is not None and any(
+            m.original_filename == filename and m.size_bytes == declared for m in existing
+        ):
+            log.info("material_autoregister_duplicate", lesson_id=str(lesson_id), filename=filename)
+            return None
+
+        await file.seek(0)
+        material = await add_material(
+            db,
+            lesson_id=lesson_id,
+            uploaded_by=uploaded_by,
+            file=file,
+            title=None,
+            description=None,
+        )
+        log.info("material_autoregistered", lesson_id=str(lesson_id), filename=filename)
+        return material
+    except Exception as exc:
+        # Widest possible net on purpose — this path is best-effort by contract.
+        log.warning(
+            "material_autoregister_failed",
+            lesson_id=str(lesson_id),
+            filename=filename,
+            error=str(exc),
+        )
+        return None
+    finally:
+        await file.seek(0)
+
+
+# `material:<uuid>` inside a markdown link/image target. Matched case-insensitively
+# on the uuid; the scheme itself is lower-case by construction (the editor writes it).
+_MATERIAL_REF = re.compile(
+    r"material:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+    re.IGNORECASE,
+)
+
+
+def referenced_material_ids(markdown: str) -> set[UUID]:
+    return {UUID(m) for m in _MATERIAL_REF.findall(markdown or "")}
+
+
+async def save_text_body(db: AsyncSession, *, lesson: Lesson, text_content: str) -> list[UUID]:
+    """Write a text lesson's markdown body and reclaim orphaned inline materials.
+
+    Sole write path for `Lesson.text_content` (see schemas/lesson.LessonTextUpdate).
+    An inline material no longer referenced anywhere in the new body is deleted
+    storage-object-first, then row — the order `delete_material` uses, so a crash
+    between the two leaves a reclaimable orphan file, never a row pointing at
+    bytes that are gone. Returns the ids swept, for the caller to log/report.
+    """
+    referenced = referenced_material_ids(text_content)
+    orphans = [
+        m for m in await list_materials(db, lesson.id) if m.is_inline and m.id not in referenced
+    ]
+
+    lesson.text_content = text_content
+    for material in orphans:
+        storage_service.delete_file(material.file_path)
+        await db.delete(material)
+    await db.commit()
+    await db.refresh(lesson)
+    return [m.id for m in orphans]
 
 
 async def update_material(
@@ -340,3 +468,77 @@ async def reorder_notes(
         note.order = position[note.id]
     await db.commit()
     return await list_notes(db, lesson_id)
+
+
+# ── Course-level tree ────────────────────────────────────────────────────────
+
+
+async def get_course_knowledge(
+    db: AsyncSession, *, course: Course, viewer_id: str, is_owner: bool
+) -> CourseKnowledgeTreeRead:
+    """The whole course's knowledge base as module → lesson → (materials, notes).
+
+    Replaces N calls to GET /lessons/{id}/knowledge. For a student the tree is
+    pruned by `visibility_service` — the rule is never re-derived here. Note
+    bodies are deliberately omitted (see CourseKnowledgeNoteRead).
+    """
+    modules = (
+        await db.scalars(
+            select(Module)
+            .where(Module.course_id == course.id)
+            .options(selectinload(Module.lessons))
+            .order_by(Module.order, Module.created_at)
+        )
+    ).all()
+
+    lesson_ids = [
+        lesson.id
+        for module in modules
+        for lesson in module.lessons
+        if is_owner or visibility_service.lesson_visible_to_student(module, lesson)
+    ]
+
+    materials: dict[UUID, list[LessonMaterial]] = {lid: [] for lid in lesson_ids}
+    notes: dict[UUID, list[LessonNote]] = {lid: [] for lid in lesson_ids}
+    if lesson_ids:
+        for material in await db.scalars(
+            select(LessonMaterial)
+            .where(LessonMaterial.lesson_id.in_(lesson_ids))
+            .order_by(LessonMaterial.created_at)
+        ):
+            materials[material.lesson_id].append(material)
+        for note in await db.scalars(
+            select(LessonNote)
+            .where(LessonNote.lesson_id.in_(lesson_ids))
+            .order_by(LessonNote.order, LessonNote.created_at)
+        ):
+            notes[note.lesson_id].append(note)
+
+    tree: list[CourseKnowledgeModuleRead] = []
+    for module in modules:
+        if not is_owner and not visibility_service.module_visible_to_student(module):
+            continue
+        lessons = [
+            CourseKnowledgeLessonRead(
+                id=lesson.id,
+                title=lesson.title,
+                order=lesson.order,
+                content_type=lesson.content_type.value,
+                materials=[serialize_material(m, viewer_id) for m in materials[lesson.id]],
+                notes=[CourseKnowledgeNoteRead.model_validate(n) for n in notes[lesson.id]],
+            )
+            for lesson in sorted(module.lessons, key=lambda x: (x.order, x.created_at))
+            if lesson.id in materials
+        ]
+        tree.append(
+            CourseKnowledgeModuleRead(
+                id=module.id, title=module.title, order=module.order, lessons=lessons
+            )
+        )
+
+    return CourseKnowledgeTreeRead(
+        course_id=course.id,
+        course_title=course.title,
+        can_edit=is_owner,
+        modules=tree,
+    )

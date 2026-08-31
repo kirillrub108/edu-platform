@@ -32,7 +32,7 @@ from app.schemas.student import (
     StudentQuizRead,
     StudentResultRead,
 )
-from app.services import gradebook_service, visibility_service
+from app.services import course_access_service, gradebook_service, visibility_service
 from app.services.progress_service import get_or_create_lesson_progress
 from app.services.storage_service import storage_service
 
@@ -67,6 +67,13 @@ async def enroll(
     if not course or course.deleted_at is not None or not course.is_published:
         raise HTTPException(status_code=404, detail="Course not available")
 
+    # Restricted course: only students the owner listed may get on, and the
+    # answer is the same 403 whether the access_code was right or wrong.
+    if course_access_service.is_restricted(course) and not await course_access_service.has_grant(
+        db, user.id, course.id
+    ):
+        raise HTTPException(status_code=403, detail="Course access is restricted")
+
     existing = await db.scalar(
         select(Enrollment).where(
             Enrollment.student_id == user.id, Enrollment.course_id == course.id
@@ -90,7 +97,10 @@ async def my_courses(
     enrollments = await db.scalars(
         select(Enrollment)
         .join(Course, Enrollment.course_id == Course.id)
-        .where(Enrollment.student_id == user.id)
+        .where(
+            Enrollment.student_id == user.id,
+            course_access_service.access_clause(user.id),
+        )
         .options(
             selectinload(Enrollment.course).selectinload(Course.owner),
             selectinload(Enrollment.course)
@@ -147,11 +157,7 @@ async def course_details(
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> StudentCourseDetailRead:
-    enrollment = await db.scalar(
-        select(Enrollment).where(
-            Enrollment.student_id == user.id, Enrollment.course_id == course_id
-        )
-    )
+    enrollment = await course_access_service.get_enrollment(db, user.id, course_id)
     if not enrollment:
         raise HTTPException(status_code=403, detail="Not enrolled")
 
@@ -195,11 +201,7 @@ async def get_lesson_for_student(
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
     module = await db.get(Module, lesson.module_id)
-    enrollment = await db.scalar(
-        select(Enrollment).where(
-            Enrollment.student_id == user.id, Enrollment.course_id == module.course_id
-        )
-    )
+    enrollment = await course_access_service.get_enrollment(db, user.id, module.course_id)
     if not enrollment:
         raise HTTPException(status_code=403, detail="Not enrolled")
 
@@ -219,11 +221,7 @@ async def _get_progress(user: User, lesson_id: UUID, db: AsyncSession) -> Lesson
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
     module = await db.get(Module, lesson.module_id)
-    enrollment = await db.scalar(
-        select(Enrollment).where(
-            Enrollment.student_id == user.id, Enrollment.course_id == module.course_id
-        )
-    )
+    enrollment = await course_access_service.get_enrollment(db, user.id, module.course_id)
     if not enrollment:
         raise HTTPException(status_code=403, detail="Not enrolled")
 
@@ -261,14 +259,19 @@ async def dashboard(
     user: User = Depends(require_student),
     db: AsyncSession = Depends(get_db),
 ) -> StudentDashboardRead:
-    enrollment_ids = select(Enrollment.id).where(Enrollment.student_id == user.id).scalar_subquery()
-    course_ids = (
-        select(Enrollment.course_id).where(Enrollment.student_id == user.id).scalar_subquery()
+    accessible = (
+        select(Enrollment.id.label("enrollment_id"), Enrollment.course_id.label("course_id"))
+        .join(Course, Enrollment.course_id == Course.id)
+        .where(
+            Enrollment.student_id == user.id,
+            course_access_service.access_clause(user.id),
+        )
+        .subquery()
     )
+    enrollment_ids = select(accessible.c.enrollment_id).scalar_subquery()
+    course_ids = select(accessible.c.course_id).scalar_subquery()
 
-    enrolled_courses = await db.scalar(
-        select(func.count()).select_from(Enrollment).where(Enrollment.student_id == user.id)
-    )
+    enrolled_courses = await db.scalar(select(func.count()).select_from(accessible))
 
     # "Выполнено заданий" — assignments handed in (anything past the draft stage).
     completed_assignments = await db.scalar(
@@ -345,7 +348,11 @@ async def my_quizzes(
         .join(Course, Module.course_id == Course.id)
         .join(
             Enrollment,
-            and_(Enrollment.course_id == Course.id, Enrollment.student_id == user.id),
+            and_(
+                Enrollment.course_id == Course.id,
+                Enrollment.student_id == user.id,
+                course_access_service.access_clause(user.id),
+            ),
         )
         .join(
             Quiz,
@@ -443,7 +450,11 @@ async def my_assignments(
         .join(Course, Module.course_id == Course.id)
         .join(
             Enrollment,
-            and_(Enrollment.course_id == Course.id, Enrollment.student_id == user.id),
+            and_(
+                Enrollment.course_id == Course.id,
+                Enrollment.student_id == user.id,
+                course_access_service.access_clause(user.id),
+            ),
         )
         .outerjoin(
             AssignmentSubmission,

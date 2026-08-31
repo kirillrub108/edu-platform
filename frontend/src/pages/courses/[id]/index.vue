@@ -16,6 +16,9 @@ const newModuleTitle = ref('')
 const addingModule = ref(false)
 const publishing = ref(false)
 const newLessonTitle = ref<Record<string, string>>({})
+// Lesson kind picked at creation time; 'video' stays the default so the
+// existing flow is unchanged.
+const newLessonType = ref<Record<string, 'video' | 'text'>>({})
 const addingLesson = ref<Record<string, boolean>>({})
 
 const coverInputRef = ref<HTMLInputElement | null>(null)
@@ -98,6 +101,7 @@ const load = async () => {
   pageError.value = ''
   try {
     course.value = await apiFetch<any>(`/courses/${route.params.id}`)
+    if (course.value?.access_restricted) await loadGrants()
   } catch (e: any) {
     pageError.value = e?.data?.detail ?? 'Не удалось загрузить курс'
   } finally {
@@ -173,9 +177,15 @@ const addLesson = async (moduleId: string) => {
   try {
     const lesson = await apiFetch<any>('/lessons/', {
       method: 'POST',
-      body: { title, module_id: moduleId, content_type: 'video', order: 0 },
+      body: {
+        title,
+        module_id: moduleId,
+        content_type: newLessonType.value[moduleId] ?? 'video',
+        order: 0,
+      },
     })
     newLessonTitle.value[moduleId] = ''
+    delete newLessonType.value[moduleId]
     await navigateTo(`/lessons/${lesson.id}`)
   } catch (e: any) {
     actionError.value = e?.data?.detail ?? 'Ошибка при добавлении урока'
@@ -234,6 +244,115 @@ const regenerateCode = async () => {
     accessError.value = e?.data?.detail ?? 'Ошибка при обновлении кода'
   } finally {
     accessLoading.value = false
+  }
+}
+
+// ── Selective access (restricted courses) ───────────────────────────────────
+interface AccessGrant {
+  student_id: string
+  email: string
+  full_name: string | null
+  created_at: string
+}
+interface GrantCandidate {
+  id: string
+  email: string
+  full_name: string | null
+}
+
+const grants = ref<AccessGrant[]>([])
+const grantsLoading = ref(false)
+const grantQuery = ref('')
+const grantResults = ref<GrantCandidate[]>([])
+const grantSearching = ref(false)
+const grantBusy = ref<Record<string, boolean>>({})
+let grantSearchTimeout: ReturnType<typeof setTimeout> | null = null
+
+const isRestricted = computed(() => course.value?.access_restricted === true)
+
+const loadGrants = async () => {
+  if (!course.value) return
+  grantsLoading.value = true
+  try {
+    grants.value = await apiFetch<AccessGrant[]>(`/courses/${route.params.id}/access-grants`)
+  } catch (e: any) {
+    accessError.value = e?.data?.detail ?? 'Не удалось загрузить список доступа'
+  } finally {
+    grantsLoading.value = false
+  }
+}
+
+const setAccessMode = async (mode: 'open' | 'restricted') => {
+  if (!course.value || accessLoading.value) return
+  if (isRestricted.value === (mode === 'restricted')) return
+  accessLoading.value = true
+  accessError.value = ''
+  try {
+    course.value = await apiFetch(`/courses/${route.params.id}/access-mode`, {
+      method: 'PATCH',
+      body: { mode },
+    })
+    if (mode === 'restricted') await loadGrants()
+  } catch (e: any) {
+    accessError.value = e?.data?.detail ?? 'Не удалось изменить режим доступа'
+  } finally {
+    accessLoading.value = false
+  }
+}
+
+const runGrantSearch = async () => {
+  const q = grantQuery.value.trim()
+  if (q.length < 2) {
+    grantResults.value = []
+    return
+  }
+  grantSearching.value = true
+  try {
+    grantResults.value = await apiFetch<GrantCandidate[]>(
+      `/courses/${route.params.id}/access-grants/search`,
+      { query: { q } },
+    )
+  } catch (e: any) {
+    accessError.value = e?.data?.detail ?? 'Ошибка поиска'
+  } finally {
+    grantSearching.value = false
+  }
+}
+
+const onGrantQueryInput = () => {
+  if (grantSearchTimeout) clearTimeout(grantSearchTimeout)
+  grantSearchTimeout = setTimeout(runGrantSearch, 300)
+}
+
+const addGrant = async (candidate: GrantCandidate) => {
+  if (grantBusy.value[candidate.id]) return
+  grantBusy.value = { ...grantBusy.value, [candidate.id]: true }
+  accessError.value = ''
+  try {
+    const grant = await apiFetch<AccessGrant>(`/courses/${route.params.id}/access-grants`, {
+      method: 'POST',
+      body: { student_id: candidate.id },
+    })
+    grants.value = [grant, ...grants.value.filter(g => g.student_id !== grant.student_id)]
+    grantResults.value = grantResults.value.filter(r => r.id !== candidate.id)
+  } catch (e: any) {
+    accessError.value = e?.data?.detail ?? 'Не удалось добавить студента'
+  } finally {
+    grantBusy.value = { ...grantBusy.value, [candidate.id]: false }
+  }
+}
+
+const removeGrant = async (studentId: string) => {
+  if (grantBusy.value[studentId]) return
+  grantBusy.value = { ...grantBusy.value, [studentId]: true }
+  accessError.value = ''
+  try {
+    await apiFetch(`/courses/${route.params.id}/access-grants/${studentId}`, { method: 'DELETE' })
+    grants.value = grants.value.filter(g => g.student_id !== studentId)
+  } catch (e: any) {
+    accessError.value = e?.data?.detail ?? 'Не удалось убрать студента'
+  } finally {
+    grantBusy.value = { ...grantBusy.value, [studentId]: false }
   }
 }
 
@@ -468,6 +587,12 @@ onMounted(async () => {
           >
             Журнал оценок
           </NuxtLink>
+          <NuxtLink
+            :to="`/courses/${route.params.id}/knowledge`"
+            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center whitespace-nowrap flex-shrink-0"
+          >
+            База знаний
+          </NuxtLink>
 
           <!-- Active course: publish toggle + archive -->
           <template v-if="!course.is_archived">
@@ -692,12 +817,17 @@ onMounted(async () => {
             </li>
           </ul>
 
+          <p class="text-xs text-gray-400 mb-1">Выберите тип урока (видео или текст) — по умолчанию видео</p>
           <form class="flex gap-2" @submit.prevent="addLesson(m.id)">
             <input
               v-model="newLessonTitle[m.id]"
               placeholder="Название урока"
               required
               class="flex-1 border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand/30"
+            />
+            <LessonTypeSelect
+              :model-value="newLessonType[m.id] ?? 'video'"
+              @update:model-value="newLessonType[m.id] = $event"
             />
             <button
               type="submit"
@@ -737,7 +867,104 @@ onMounted(async () => {
         {{ accessError }}
       </p>
 
-      <div v-if="course.access_code" class="space-y-5">
+      <div class="mb-6 flex flex-wrap gap-2">
+        <button
+          class="px-4 py-2 rounded-lg border text-sm font-medium transition disabled:opacity-50"
+          :class="!isRestricted ? 'bg-violet-600 border-violet-600 text-white' : 'border-gray-300 text-gray-600 hover:bg-gray-50'"
+          :disabled="accessLoading"
+          @click="setAccessMode('open')"
+        >
+          Открытый доступ
+        </button>
+        <button
+          class="px-4 py-2 rounded-lg border text-sm font-medium transition disabled:opacity-50"
+          :class="isRestricted ? 'bg-violet-600 border-violet-600 text-white' : 'border-gray-300 text-gray-600 hover:bg-gray-50'"
+          :disabled="accessLoading"
+          @click="setAccessMode('restricted')"
+        >
+          Только по списку
+        </button>
+      </div>
+
+      <!-- Restricted: explicit student list replaces the code/link flow -->
+      <div v-if="isRestricted" class="space-y-6">
+        <p class="text-sm text-gray-600">
+          Записаться по коду или ссылке нельзя. Курс открыт только студентам из списка ниже —
+          уже записанные доступ не теряют.
+        </p>
+
+        <div>
+          <label class="block text-sm text-gray-600 mb-2" for="grant-search">
+            Найти студента по имени или email
+          </label>
+          <input
+            id="grant-search"
+            v-model="grantQuery"
+            type="search"
+            placeholder="Минимум 2 символа"
+            class="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-300"
+            @input="onGrantQueryInput"
+          >
+          <p v-if="grantSearching" class="mt-2 text-xs text-gray-500">Поиск…</p>
+          <p
+            v-else-if="grantQuery.trim().length >= 2 && !grantResults.length"
+            class="mt-2 text-xs text-gray-500"
+          >
+            Никого не найдено.
+          </p>
+          <ul v-else-if="grantResults.length" class="mt-2 border rounded-lg divide-y">
+            <li
+              v-for="candidate in grantResults"
+              :key="candidate.id"
+              class="flex items-center justify-between gap-3 px-3 py-2"
+            >
+              <div class="min-w-0">
+                <p class="text-sm text-gray-800 truncate">{{ candidate.full_name || candidate.email }}</p>
+                <p v-if="candidate.full_name" class="text-xs text-gray-500 truncate">{{ candidate.email }}</p>
+              </div>
+              <button
+                class="px-3 py-1.5 rounded-lg bg-violet-600 text-white text-xs font-medium hover:bg-violet-700 transition disabled:opacity-50"
+                :disabled="grantBusy[candidate.id]"
+                @click="addGrant(candidate)"
+              >
+                {{ grantBusy[candidate.id] ? '…' : 'Добавить' }}
+              </button>
+            </li>
+          </ul>
+        </div>
+
+        <div>
+          <p class="text-sm text-gray-600 mb-2">Есть доступ ({{ grants.length }}):</p>
+          <p v-if="grantsLoading" class="text-sm text-gray-500">Загрузка…</p>
+          <p v-else-if="!grants.length" class="text-sm text-gray-500">
+            Список пуст — пока курс недоступен никому, кроме вас.
+          </p>
+          <ul v-else class="border rounded-lg divide-y">
+            <li
+              v-for="grant in grants"
+              :key="grant.student_id"
+              class="flex items-center justify-between gap-3 px-3 py-2"
+            >
+              <div class="min-w-0">
+                <p class="text-sm text-gray-800 truncate">{{ grant.full_name || grant.email }}</p>
+                <p v-if="grant.full_name" class="text-xs text-gray-500 truncate">{{ grant.email }}</p>
+              </div>
+              <button
+                class="px-3 py-1.5 rounded-lg border border-gray-300 text-xs text-gray-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition disabled:opacity-50"
+                :disabled="grantBusy[grant.student_id]"
+                @click="removeGrant(grant.student_id)"
+              >
+                {{ grantBusy[grant.student_id] ? '…' : 'Убрать' }}
+              </button>
+            </li>
+          </ul>
+          <p class="mt-2 text-xs text-gray-500">
+            После удаления студент теряет доступ, но его оценки и прогресс остаются в журнале.
+          </p>
+        </div>
+      </div>
+
+      <div v-else-if="course.access_code" class="space-y-5">
         <div>
           <p class="text-sm text-gray-600 mb-2">Код доступа — продиктуйте или отправьте студентам:</p>
           <div class="flex flex-wrap gap-2 items-center">
@@ -782,7 +1009,7 @@ onMounted(async () => {
         Код доступа не найден. Нажмите «Обновить код», чтобы создать новый.
       </p>
       <button
-        v-if="!course.access_code"
+        v-if="!isRestricted && !course.access_code"
         class="mt-2 text-xs text-gray-500 hover:text-gray-700 underline underline-offset-2 transition disabled:opacity-50"
         :disabled="accessLoading"
         @click="regenerateCode"

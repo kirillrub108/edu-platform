@@ -14,7 +14,7 @@ from uuid import UUID
 
 import structlog
 from sqlalchemy import select, tuple_
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
@@ -113,40 +113,47 @@ def assemble_material_sync(
 # ── Quiz lifecycle helpers ───────────────────────────────────────────────────
 
 
+def _insert_quiz_if_absent(lesson_id: UUID):
+    """Idempotent INSERT for the lesson's single quiz row.
+
+    First page load fires several creating endpoints at once (the authoring
+    composable alone requests /quiz, /quiz/questions and /quiz/generation-options
+    in parallel, and the teacher preview mounts QuizTaker on top), so racing
+    INSERTs on `uq_quizzes_lesson_id` are the normal case, not the exception.
+    ON CONFLICT DO NOTHING waits for the winning INSERT to commit and then
+    does nothing, so the caller's follow-up SELECT always finds a row —
+    nothing to catch, nothing to retry.
+    """
+    return (
+        pg_insert(Quiz)
+        .values(lesson_id=lesson_id)
+        .on_conflict_do_nothing(index_elements=["lesson_id"])
+    )
+
+
 async def get_or_create_quiz(db: AsyncSession, lesson: Lesson) -> Quiz:
     """Return the lesson's Quiz (create draft if missing). Routers call this
     on first GET so the teacher gets a stable object to attach questions to.
 
     NOTE: do NOT short-circuit on `lesson.quiz` — that's a lazy relationship
     and dereferencing it inside async context triggers `MissingGreenlet`.
-    The unique constraint `uq_quizzes_lesson_id` also means two parallel
-    requests on first load can race: both SELECT None, both INSERT, one
-    fails. We catch the resulting IntegrityError and re-select.
     """
     quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson.id))
     if quiz is not None:
         return quiz
-    quiz = Quiz(lesson_id=lesson.id)
-    db.add(quiz)
-    try:
-        await db.commit()
-    except IntegrityError:
-        await db.rollback()
-        quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson.id))
-        if quiz is None:
-            raise  # Real integrity error, not the race we expected
-        return quiz
-    await db.refresh(quiz)
+    await db.execute(_insert_quiz_if_absent(lesson.id))
+    await db.commit()
+    quiz = await db.scalar(select(Quiz).where(Quiz.lesson_id == lesson.id))
+    assert quiz is not None  # ON CONFLICT DO NOTHING leaves a committed row either way
     return quiz
 
 
 def get_or_create_quiz_sync(session: Session, lesson_id: UUID) -> Quiz:
     quiz = session.execute(select(Quiz).where(Quiz.lesson_id == lesson_id)).scalar_one_or_none()
-    if quiz is None:
-        quiz = Quiz(lesson_id=lesson_id)
-        session.add(quiz)
-        session.flush()
-    return quiz
+    if quiz is not None:
+        return quiz
+    session.execute(_insert_quiz_if_absent(lesson_id))
+    return session.execute(select(Quiz).where(Quiz.lesson_id == lesson_id)).scalar_one()
 
 
 def replace_questions_sync(

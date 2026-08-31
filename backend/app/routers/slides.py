@@ -13,6 +13,7 @@ from app.config import settings
 from app.constants import CREDIT_WEIGHTS, SIGNED_URL_TTL_SLIDE, TRIAL_MAX_SLIDES
 from app.database import get_db
 from app.dependencies import (
+    assert_not_text_lesson,
     get_owned_lesson,
     require_teacher,
     require_verified_email,
@@ -102,6 +103,8 @@ async def analyze_lesson_slides(
     lesson: Lesson = Depends(get_owned_lesson),
     db: AsyncSession = Depends(get_db),
 ):
+    assert_not_text_lesson(lesson)
+
     if not lesson.pptx_path:
         raise HTTPException(
             status_code=400,

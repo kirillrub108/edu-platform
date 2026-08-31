@@ -8,7 +8,7 @@ from app.models.assignment import (
     SubmissionStatus,
 )
 from app.models.comment import Comment
-from app.models.course import AccessMode, Course
+from app.models.course import AccessMode, Course, CourseAccessGrant
 from app.models.credit import (
     CreditAccount,
     CreditOperation,
@@ -50,6 +50,7 @@ __all__ = [
     "OAuthAccount",
     "Course",
     "AccessMode",
+    "CourseAccessGrant",
     "Module",
     "Lesson",
     "Quiz",
