@@ -19,6 +19,7 @@ from tests.factories import (
     make_course,
     make_enrollment,
     make_lesson,
+    make_lesson_progress,
     make_module,
 )
 
@@ -246,3 +247,65 @@ async def test_unpublishing_module_keeps_lesson_flag(
     assert module_out["is_published"] is False
     # The child lesson's own flag is untouched.
     assert module_out["lessons"][0]["is_published"] is True
+
+
+# ── Retained-progress exception (visibility_service) ─────────────────────────
+
+
+async def test_progress_keeps_a_later_unpublished_lesson_reachable(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_user: User,
+    student_token: dict[str, str],
+) -> None:
+    """The student worked through the lesson, then the author unpublished the
+    whole module: access survives (200 + hidden flag), untouched drafts do not.
+    """
+    course = await make_course(db_session, owner=teacher_user, is_published=True)
+    module = await make_module(db_session, course, is_published=True)
+    touched = await make_lesson(db_session, module, order=0)
+    untouched = await make_lesson(db_session, module, order=1)
+    enrollment = await make_enrollment(db_session, student_user, course)
+    await make_lesson_progress(db_session, enrollment, touched, is_completed=True)
+
+    module.is_published = False
+    await db_session.commit()
+
+    direct = await client.get(f"/api/v1/students/lessons/{touched.id}", cookies=student_token)
+    assert direct.status_code == 200
+    assert direct.json()["hidden_by_author"] is True
+
+    hidden = await client.get(f"/api/v1/students/lessons/{untouched.id}", cookies=student_token)
+    assert hidden.status_code == 404
+
+    detail = await client.get(f"/api/v1/students/courses/{course.id}", cookies=student_token)
+    assert detail.status_code == 200
+    modules = detail.json()["modules"]
+    assert len(modules) == 1
+    assert modules[0]["hidden_by_author"] is True
+    assert [lesson["id"] for lesson in modules[0]["lessons"]] == [str(touched.id)]
+    assert modules[0]["lessons"][0]["hidden_by_author"] is True
+
+
+async def test_no_progress_still_404s_and_republishing_restores_everyone(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_user: User,
+    student_token: dict[str, str],
+) -> None:
+    course = await make_course(db_session, owner=teacher_user, is_published=True)
+    module = await make_module(db_session, course, is_published=True)
+    lesson = await make_lesson(db_session, module, is_published=False)
+    await make_enrollment(db_session, student_user, course)
+
+    missed = await client.get(f"/api/v1/students/lessons/{lesson.id}", cookies=student_token)
+    assert missed.status_code == 404
+
+    lesson.is_published = True
+    await db_session.commit()
+
+    restored = await client.get(f"/api/v1/students/lessons/{lesson.id}", cookies=student_token)
+    assert restored.status_code == 200
+    assert restored.json()["hidden_by_author"] is False

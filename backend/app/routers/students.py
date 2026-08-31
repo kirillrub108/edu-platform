@@ -13,7 +13,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from app.constants import SSE_HEARTBEAT_SECONDS, SSE_RETRY_MS
 from app.database import get_db
-from app.dependencies import require_student
+from app.dependencies import require_lesson_access, require_student
 from app.limiter import limiter
 from app.models.assignment import (
     Assignment,
@@ -120,12 +120,14 @@ async def my_courses(
     result = []
     for enrollment in enrollments.all():
         course = enrollment.course
-        # Count only lessons the student can actually see (full publish chain).
+        # Count only lessons the student can actually see (full publish chain,
+        # plus the ones retained by their own progress).
+        progressed = {p.lesson_id for p in enrollment.progress}
         course.lessons_count = sum(
             1
             for module in course.modules
             for lesson in module.lessons
-            if visibility_service.lesson_visible_to_student(module, lesson)
+            if visibility_service.lesson_visible_to_student(module, lesson, lesson.id in progressed)
         )
         out = StudentCourseOut.model_validate(course)
         out.completed_lessons = sum(1 for p in enrollment.progress if p.is_completed)
@@ -242,81 +244,71 @@ async def course_details(
     if not course:
         raise HTTPException(status_code=404, detail="Course not found")
 
-    progress_rows = await db.scalars(
-        select(LessonProgress).where(LessonProgress.enrollment_id == enrollment.id)
-    )
+    progress_rows = (
+        await db.scalars(
+            select(LessonProgress).where(LessonProgress.enrollment_id == enrollment.id)
+        )
+    ).all()
     lesson_progress = {
         str(p.lesson_id): StudentLessonProgressRead(
             effective_score=gradebook_service.compute_effective_score(p.quiz_score, p.manual_score),
             teacher_comment=p.teacher_comment,
             is_completed=p.is_completed,
         )
-        for p in progress_rows.all()
+        for p in progress_rows
     }
 
     resp = StudentCourseDetailRead.model_validate(course)
-    # Students only see modules/lessons whose full publish chain is published.
-    resp.modules = visibility_service.visible_module_tree(course)
+    # Students only see modules/lessons whose full publish chain is published —
+    # plus the ones their own progress retains, already loaded just above.
+    resp.modules = visibility_service.visible_module_tree(
+        course, {p.lesson_id for p in progress_rows}
+    )
     resp.lesson_progress = lesson_progress
     return resp
 
 
 @router.get("/lessons/{lesson_id}", response_model=LessonOut)
 async def get_lesson_for_student(
-    lesson_id: UUID,
-    user: User = Depends(require_student),
-    db: AsyncSession = Depends(get_db),
+    access: tuple[User, Lesson, bool] = Depends(require_lesson_access),
 ):
-    lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
-    if not lesson:
-        raise HTTPException(status_code=404, detail="Lesson not found")
-    module = await db.get(Module, lesson.module_id)
-    enrollment = await course_access_service.get_enrollment(db, user.id, module.course_id)
-    if not enrollment:
-        raise HTTPException(status_code=403, detail="Not enrolled")
-
-    # An unpublished module/lesson hides the lesson — 404, never leak a draft.
-    # course.is_published is intentionally not checked here: an enrolled student
-    # keeps access after the course is unpublished (see visibility_service).
-    if not visibility_service.lesson_visible_to_student(module, lesson):
-        raise HTTPException(status_code=404, detail="Lesson not found")
+    """`require_lesson_access` owns the whole gate (enrollment + the publish
+    AND-rule with the retained-progress exception), so this route never
+    re-derives it — visibility_service stays the single source of truth."""
+    user, lesson, _is_owner = access
 
     out = LessonOut.model_validate(lesson)
+    out.hidden_by_author = visibility_service.lesson_hidden_by_author(lesson.module, lesson)
     out.video_url = video_playback_url(lesson.id, None, lesson.video_url, str(user.id))
     return out
 
 
-async def _get_progress(user: User, lesson_id: UUID, db: AsyncSession) -> LessonProgress:
-    lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
-    if not lesson:
-        raise HTTPException(status_code=404, detail="Lesson not found")
-    module = await db.get(Module, lesson.module_id)
-    enrollment = await course_access_service.get_enrollment(db, user.id, module.course_id)
+async def _get_progress(user: User, lesson: Lesson, db: AsyncSession) -> LessonProgress:
+    """Access is already settled by `require_lesson_access`; what is left is the
+    enrollment row the progress hangs off (owners have none → 403)."""
+    enrollment = await course_access_service.get_enrollment(db, user.id, lesson.module.course_id)
     if not enrollment:
         raise HTTPException(status_code=403, detail="Not enrolled")
 
-    return await get_or_create_lesson_progress(db, enrollment_id=enrollment.id, lesson_id=lesson_id)
+    return await get_or_create_lesson_progress(db, enrollment_id=enrollment.id, lesson_id=lesson.id)
 
 
 @router.post("/lessons/{lesson_id}/complete")
 async def complete_lesson(
-    lesson_id: UUID,
-    user: User = Depends(require_student),
+    access: tuple[User, Lesson, bool] = Depends(require_lesson_access),
     db: AsyncSession = Depends(get_db),
 ):
-    lesson = await db.scalar(select(Lesson).where(Lesson.id == lesson_id))
-    if lesson is None:
-        raise HTTPException(status_code=404, detail="Lesson not found")
+    user, lesson, _is_owner = access
     if lesson.content_type == ContentType.quiz:
         raise HTTPException(
             status_code=400,
             detail="Quiz lessons are completed automatically upon passing the quiz",
         )
-    progress = await _get_progress(user, lesson_id, db)
+    progress = await _get_progress(user, lesson, db)
     progress.is_completed = True
     progress.completed_at = datetime.now(timezone.utc)
     await db.commit()
-    return {"lesson_id": str(lesson_id), "completed": True}
+    return {"lesson_id": str(lesson.id), "completed": True}
 
 
 # ── Personal cabinet (dashboard + list pages) ───────────────────────────────

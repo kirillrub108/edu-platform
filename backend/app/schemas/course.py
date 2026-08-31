@@ -49,6 +49,9 @@ class LessonShort(BaseModel):
     content_type: str
     status: str
     is_published: bool
+    # Author unpublished it, but this student keeps access through retained
+    # progress (visibility_service). False on every normally-published node.
+    hidden_by_author: bool = False
 
 
 class ModuleOut(BaseModel):
@@ -58,6 +61,7 @@ class ModuleOut(BaseModel):
     title: str
     order: int
     is_published: bool
+    hidden_by_author: bool = False
     lessons: list[LessonShort] = []
 
 

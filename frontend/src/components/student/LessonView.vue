@@ -15,6 +15,7 @@ interface FullLesson {
   status: string
   video_url?: string | null
   text_content?: string | null
+  hidden_by_author?: boolean
 }
 
 const props = defineProps<{
@@ -59,6 +60,12 @@ const courseTitle = computed(() =>
 // Effective student visibility of the current lesson (preview only).
 const lessonHiddenFromStudents = computed(
   () => props.preview && previewStore.findLesson(lessonId.value)?.visible_to_student === false,
+)
+
+// The author unpublished this lesson (or its module) after the student had
+// already worked through it — access is retained, viewing stays unrestricted.
+const lessonHiddenByAuthor = computed(
+  () => !props.preview && fullLesson.value?.hidden_by_author === true,
 )
 
 const canDeleteComment = (c: Comment): boolean =>
@@ -281,6 +288,11 @@ onMounted(loadLesson)
                 v-if="lessonHiddenFromStudents"
                 class="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700"
               >Студент не увидит</span>
+              <span
+                v-if="lessonHiddenByAuthor"
+                class="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-700"
+                title="Преподаватель снял урок с публикации — он остаётся доступен вам, потому что вы уже его проходили"
+              >Снят с публикации · доступ сохранён</span>
             </h1>
             <div class="flex flex-wrap items-center gap-2 sm:gap-3 text-xs">
               <span class="px-2 py-1 rounded-md bg-violet-50 text-violet-700 font-medium max-w-full truncate">

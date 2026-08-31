@@ -13,9 +13,22 @@ never re-derive it inline.
 
 Unpublishing a parent does NOT clear the children's flags — the flags are
 independent; hiding is purely a read-time effect of this AND.
+
+**Retained-progress exception.** A student who already worked through a lesson
+keeps it: the effective rule is ``(module.is_published AND lesson.is_published)
+OR has_progress``, where *has_progress* is the existence of a ``LessonProgress``
+row for that student — the only "the student really interacted with this lesson"
+signal the system records. Such a lesson is flagged ``hidden_by_author`` in the
+DTOs so the UI can mark it. This is a publish-flag exception only: soft-delete /
+purge / content edits are unaffected, there are no content snapshots.
 """
 
+from uuid import UUID
+
+from sqlalchemy import ColumnElement, select
+
 from app.models.course import Course
+from app.models.enrollment import Enrollment, LessonProgress
 from app.models.lesson import Lesson, Module
 from app.schemas.course import (
     LessonShort,
@@ -25,31 +38,62 @@ from app.schemas.course import (
 )
 
 
-def module_visible_to_student(module: Module) -> bool:
-    return bool(module.is_published)
+def lesson_progress_exists(
+    lesson_id: ColumnElement[UUID] | UUID, student_id: UUID
+) -> ColumnElement[bool]:
+    """SQL half of the retained-progress exception, as a correlated EXISTS so
+    callers can fold it into a query they already run instead of round-tripping.
+    """
+    return (
+        select(LessonProgress.id)
+        .join(Enrollment, LessonProgress.enrollment_id == Enrollment.id)
+        .where(
+            LessonProgress.lesson_id == lesson_id,
+            Enrollment.student_id == student_id,
+        )
+        .exists()
+    )
 
 
-def lesson_visible_to_student(module: Module, lesson: Lesson) -> bool:
-    return module_visible_to_student(module) and bool(lesson.is_published)
+def lesson_hidden_by_author(module: Module, lesson: Lesson) -> bool:
+    """The bare publish AND-rule: the author currently hides this lesson.
+    Combined with progress this is what makes a lesson "hidden but retained"."""
+    return not (bool(module.is_published) and bool(lesson.is_published))
 
 
-def visible_module_tree(course: Course) -> list[ModuleOut]:
+def module_visible_to_student(module: Module, has_progressed_lesson: bool = False) -> bool:
+    return bool(module.is_published) or has_progressed_lesson
+
+
+def lesson_visible_to_student(module: Module, lesson: Lesson, has_progress: bool = False) -> bool:
+    return not lesson_hidden_by_author(module, lesson) or has_progress
+
+
+def visible_module_tree(
+    course: Course, progressed_lesson_ids: frozenset[UUID] | set[UUID] = frozenset()
+) -> list[ModuleOut]:
     """Prune a loaded course's modules/lessons to the student-visible chain.
 
-    Expects ``course.modules`` (and each ``module.lessons``) eagerly loaded.
+    Expects ``course.modules`` (and each ``module.lessons``) eagerly loaded, and
+    ``progressed_lesson_ids`` — the lessons this student has a ``LessonProgress``
+    row for, which the callers already load for their own progress payload.
     Returns DTOs, so the caller never mutates the ORM relationship collections
     (which would risk delete-orphan cascades).
     """
     tree: list[ModuleOut] = []
     for module in course.modules:
-        if not module_visible_to_student(module):
+        lessons: list[LessonShort] = []
+        for lesson in module.lessons:
+            if not lesson_visible_to_student(module, lesson, lesson.id in progressed_lesson_ids):
+                continue
+            lesson_out = LessonShort.model_validate(lesson)
+            lesson_out.hidden_by_author = lesson_hidden_by_author(module, lesson)
+            lessons.append(lesson_out)
+        if not module_visible_to_student(module, bool(lessons)):
             continue
         out = ModuleOut.model_validate(module)
-        out.lessons = [
-            LessonShort.model_validate(lesson)
-            for lesson in module.lessons
-            if lesson_visible_to_student(module, lesson)
-        ]
+        out.hidden_by_author = not module.is_published
+        out.lessons = lessons
         tree.append(out)
     return tree
 

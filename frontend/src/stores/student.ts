@@ -15,11 +15,14 @@ interface LessonNode {
   title: string
   content_type: 'video' | 'text' | 'quiz'
   status: string
+  // Unpublished by the author, kept reachable by this student's own progress.
+  hidden_by_author?: boolean
 }
 
 interface ModuleNode {
   id: string
   title: string
+  hidden_by_author?: boolean
   lessons: LessonNode[]
 }
 

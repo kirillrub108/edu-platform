@@ -213,13 +213,18 @@ async def require_lesson_access(
     and 403 otherwise — matching the access semantics already used by
     `routers/students.py` (which 404s missing lessons and 403s non-enrolled).
     """
-    lesson = await db.scalar(
-        select(Lesson)
-        .where(Lesson.id == lesson_id)
-        .options(joinedload(Lesson.module).joinedload(Module.course))
-    )
-    if lesson is None:
+    # The retained-progress EXISTS rides along in this query rather than costing
+    # a second round-trip on an already chatty hot path.
+    row = (
+        await db.execute(
+            select(Lesson, visibility_service.lesson_progress_exists(Lesson.id, user.id))
+            .where(Lesson.id == lesson_id)
+            .options(joinedload(Lesson.module).joinedload(Module.course))
+        )
+    ).first()
+    if row is None:
         raise HTTPException(status_code=404, detail="Lesson not found")
+    lesson, has_progress = row
 
     course = lesson.module.course
     if user.role == UserRole.teacher and course.owner_id == user.id:
@@ -228,10 +233,13 @@ async def require_lesson_access(
     if user.role == UserRole.student:
         if await course_access_service.has_access(db, user.id, course.id):
             # Unpublished module/lesson is hidden — 404 (not 403) so we don't
-            # reveal that a draft exists. course.is_published is intentionally not
-            # checked: an enrolled student keeps access after the course is
-            # unpublished (single source of truth: visibility_service).
-            if not visibility_service.lesson_visible_to_student(lesson.module, lesson):
+            # reveal that a draft exists, unless this student already has
+            # progress on it. course.is_published is intentionally not checked:
+            # an enrolled student keeps access after the course is unpublished
+            # (single source of truth: visibility_service).
+            if not visibility_service.lesson_visible_to_student(
+                lesson.module, lesson, bool(has_progress)
+            ):
                 raise HTTPException(status_code=404, detail="Lesson not found")
             return user, lesson, False
 

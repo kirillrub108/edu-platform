@@ -84,6 +84,8 @@ class LessonOut(BaseModel):
     script: str | None
     status: LessonStatus
     is_published: bool
+    # See LessonShort.hidden_by_author — set only on the student read path.
+    hidden_by_author: bool = False
     creation_mode: CreationMode
     detail_level: DetailLevel
     duration_sec: int | None = None
