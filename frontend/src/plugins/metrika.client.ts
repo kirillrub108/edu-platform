@@ -1,58 +1,18 @@
-// Yandex.Metrika loader — client only.
+// Yandex.Metrika hits — client only.
 //
-// SPA-adapted: instead of the static <script>+auto-hit snippet we (1) lazily
-// inject tag.js the first moment the visitor is eligible, and (2) send every
+// tag.js + ym(id,'init',{defer:true}) live in the static head snippet
+// (nuxt.config.ts) so Metrika's counter check finds them in the served HTML.
+// defer:true means Metrika sends no view on its own — this plugin sends every
 // page view manually on router.afterEach. The gate (anonymous OR teacher) lives
 // in useMetrika().shouldTrack so it isn't duplicated here.
 
-const TAG_SRC = 'https://mc.yandex.ru/metrika/tag.js'
-
 export default defineNuxtPlugin((nuxtApp) => {
   const { counterId, shouldTrack } = useMetrika()
-  // Empty NUXT_PUBLIC_METRIKA_ID (dev/test) → nothing is wired up at all.
+  // Empty metrikaId (dev/test) → nothing is wired up at all.
   if (!counterId) return
 
   const auth = useAuthStore()
   const router = useRouter()
-
-  // tag.js is fetched only after shouldTrack() is first true, so a student who
-  // lands straight in their cabinet never loads the counter at all.
-  let counterLoaded = false
-
-  const ensureCounter = (): void => {
-    if (counterLoaded) return
-    counterLoaded = true
-
-    // Queue stub so ym() calls made before tag.js finishes loading are buffered
-    // (mirrors Yandex's own loader).
-    if (typeof window.ym !== 'function') {
-      const stub: typeof window.ym & { a?: unknown[][]; l?: number } = function (
-        ...args: unknown[]
-      ) {
-        ;(stub.a = stub.a || []).push(args)
-      }
-      stub.l = Date.now()
-      window.ym = stub
-    }
-
-    if (!document.querySelector(`script[src="${TAG_SRC}"]`)) {
-      const s = document.createElement('script')
-      s.async = true
-      s.src = TAG_SRC
-      document.head.appendChild(s)
-    }
-
-    // defer:true suppresses Metrika's automatic first hit — the role isn't known
-    // at init time, and we send hits manually below, so the auto-hit would both
-    // leak prematurely and double the landing view.
-    window.ym?.(counterId, 'init', {
-      defer: true,
-      clickmap: true,
-      trackLinks: true,
-      accurateTrackBounce: true,
-      webvisor: true,
-    })
-  }
 
   // Guards a hit being sent twice for the same route — the initial navigation
   // can trigger both the app:mounted hit and a router.afterEach hit.
@@ -64,12 +24,16 @@ export default defineNuxtPlugin((nuxtApp) => {
     if (!shouldTrack()) return
     if (toPath === lastHitPath) return
     lastHitPath = toPath
-    ensureCounter()
     const origin = window.location.origin
-    window.ym?.(counterId, 'hit', origin + toPath, {
-      title: document.title,
-      ...(fromPath ? { referer: origin + fromPath } : {}),
-    })
+    try {
+      // window.ym is absent if an ad blocker stripped the snippet — no-op.
+      window.ym?.(counterId, 'hit', origin + toPath, {
+        title: document.title,
+        ...(fromPath ? { referer: origin + fromPath } : {}),
+      })
+    } catch {
+      /* analytics must never break the app */
+    }
   }
 
   // The role is only known after the session is restored. Hold every hit that

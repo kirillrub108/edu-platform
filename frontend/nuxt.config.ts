@@ -1,3 +1,11 @@
+// Yandex.Metrika counter id — single source of truth (public by nature: it is
+// visible in the page HTML). Used both by the head snippet and runtimeConfig.
+const METRIKA_ID = 110101429
+
+// Official new-version (tag.js) loader. Must sit in the served HTML, not be
+// injected after hydration, or Metrika's counter check can't find it on a SPA.
+const METRIKA_SNIPPET = `(function(m,e,t,r,i,k,a){m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};m[i].l=1*new Date();for(var j=0;j<document.scripts.length;j++){if(document.scripts[j].src===r){return}}k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)})(window,document,"script","https://mc.yandex.ru/metrika/tag.js","ym");ym(${METRIKA_ID},"init",{defer:true,clickmap:true,trackLinks:true,accurateTrackBounce:true,webvisor:true});`
+
 export default defineNuxtConfig({
   srcDir: 'src/',
   devtools: { enabled: false },
@@ -17,8 +25,8 @@ export default defineNuxtConfig({
       // are same-origin in development. Override via NUXT_PUBLIC_API_BASE in
       // production (e.g. http://backend:8000/api/v1 behind an nginx proxy).
       apiBase: '/api/v1',
-      // Yandex.Metrika counter id. Empty → tracking is fully disabled (dev/test).
-      // Set the real id only in prod via NUXT_PUBLIC_METRIKA_ID — never commit it.
+      // Yandex.Metrika counter id. Empty → tracking is fully disabled; the real
+      // id is injected by the $production block below, so dev never tracks.
       metrikaId: '',
     },
   },
@@ -74,6 +82,22 @@ export default defineNuxtConfig({
   // fires when ssr:false — which is the root cause of "Vite Node IPC socket path not configured"
   experimental: {
     viteEnvironmentApi: true,
+  },
+  // Production only: load the counter and enable hits/goals. In dev metrikaId
+  // stays '' and the whole integration no-ops.
+  $production: {
+    runtimeConfig: { public: { metrikaId: String(METRIKA_ID) } },
+    app: {
+      head: {
+        script: [{ innerHTML: METRIKA_SNIPPET, tagPosition: 'head' }],
+        noscript: [
+          {
+            innerHTML: `<div><img src="https://mc.yandex.ru/watch/${METRIKA_ID}" style="position:absolute;left:-9999px" alt="" /></div>`,
+            tagPosition: 'bodyClose',
+          },
+        ],
+      },
+    },
   },
   compatibilityDate: '2025-01-01',
 })

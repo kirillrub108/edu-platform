@@ -29,7 +29,7 @@ export const METRIKA_GOALS = {
 export type MetrikaGoal = (typeof METRIKA_GOALS)[keyof typeof METRIKA_GOALS]
 
 export function useMetrika() {
-  // Empty NUXT_PUBLIC_METRIKA_ID (dev/test default) → counterId 0 → everything no-ops.
+  // Empty metrikaId (dev) → counterId 0 → everything no-ops. See nuxt.config $production.
   const counterId = Number(useRuntimeConfig().public.metrikaId) || 0
   const auth = useAuthStore()
 
