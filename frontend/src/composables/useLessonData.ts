@@ -66,6 +66,7 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
       lesson.value = data
       setProgrammaticScript(data.script ?? data.text_content ?? '')
       detailLevel.value = data.detail_level ?? DEFAULT_DETAIL_LEVEL
+      narrationBrief.value = data.narration_brief ?? ''
       isDirty.value = false
       if (data.creation_mode) {
         mode.value = data.creation_mode as CreationModeValue
@@ -86,19 +87,38 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
   const detailLevel = ref<DetailLevelValue>(DEFAULT_DETAIL_LEVEL)
   const detailLevelError = ref('')
 
+  const putLesson = (body: Record<string, unknown>) =>
+    apiFetch(`/lessons/${lessonId.value}`, { method: 'PUT', body })
+
   const setDetailLevel = async (value: DetailLevelValue) => {
     const previous = detailLevel.value
     detailLevel.value = value
     detailLevelError.value = ''
     try {
-      await apiFetch(`/lessons/${lessonId.value}`, {
-        method: 'PUT',
-        body: { detail_level: value },
-      })
+      await putLesson({ detail_level: value })
       lesson.value = { ...lesson.value, detail_level: value }
     } catch (e: any) {
       detailLevel.value = previous
       detailLevelError.value = e?.data?.detail ?? 'Не удалось сохранить степень раскрытия'
+    }
+  }
+
+  // Free-form author notes for the vision LLM; same save path and the same
+  // "re-run the analysis" caveat as the detail level above.
+  const narrationBrief = ref('')
+  const narrationBriefError = ref('')
+
+  const setNarrationBrief = async (value: string) => {
+    const previous = narrationBrief.value
+    const next = value.trim()
+    narrationBrief.value = next
+    narrationBriefError.value = ''
+    try {
+      await putLesson({ narration_brief: next })
+      lesson.value = { ...lesson.value, narration_brief: next || null }
+    } catch (e: any) {
+      narrationBrief.value = previous
+      narrationBriefError.value = e?.data?.detail ?? 'Не удалось сохранить уточнения'
     }
   }
 
@@ -225,6 +245,7 @@ export function useLessonData(lessonId: Readonly<Ref<string>>) {
     scriptFile, uploadingScript, scriptUploadError,
     videoFile, uploadingVideo, videoUploadError,
     detailLevel, detailLevelError, setDetailLevel,
+    narrationBrief, narrationBriefError, setNarrationBrief,
     slideCount, loadSlideCount,
     isAuto, isManual, isVideoUpload,
     load, onModeSelect, uploadPptx, uploadScriptFile, uploadVideo, flushScript,

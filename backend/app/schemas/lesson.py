@@ -1,10 +1,11 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.constants import (
     LESSON_TEXT_MAX_CHARS,
+    NARRATION_BRIEF_MAX_CHARS,
     POLZA_TTS_VOICES,
     YANDEX_TTS_PITCH_MAX,
     YANDEX_TTS_PITCH_MIN,
@@ -33,6 +34,17 @@ class LessonUpdate(BaseModel):
     status: LessonStatus | None = None
     creation_mode: CreationMode | None = None
     detail_level: DetailLevel | None = None
+    narration_brief: str | None = Field(default=None, max_length=NARRATION_BRIEF_MAX_CHARS)
+
+    @field_validator("narration_brief")
+    @classmethod
+    def _blank_brief_is_null(cls, v: str | None) -> str | None:
+        """Clearing the field in the UI sends "" — store NULL so the prompt
+        stays byte-identical to a lesson that never had a brief."""
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
 
 
 class LessonTextUpdate(BaseModel):
@@ -88,6 +100,7 @@ class LessonOut(BaseModel):
     hidden_by_author: bool = False
     creation_mode: CreationMode
     detail_level: DetailLevel
+    narration_brief: str | None = None
     duration_sec: int | None = None
     analyze_task_id: str | None = None
     video_task_id: str | None = None

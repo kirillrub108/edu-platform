@@ -89,6 +89,7 @@ const {
   pptxFile, uploading, uploadError, scriptFile, uploadingScript, scriptUploadError,
   videoFile, uploadingVideo, videoUploadError,
   detailLevel, detailLevelError, setDetailLevel, slideCount,
+  narrationBrief, narrationBriefError, setNarrationBrief,
   isAuto, isManual, isVideoUpload,
   load, onModeSelect, uploadPptx, uploadScriptFile, uploadVideo, flushScript,
 } = useLessonData(lessonId)
@@ -688,7 +689,10 @@ watch(lessonId, (newId, oldId) => {
                 :actual-duration-label="actualDurationLabel"
                 :has-content="slideCount > 0"
                 :error="detailLevelError"
+                :narration-brief="narrationBrief"
+                :brief-error="narrationBriefError"
                 @select="setDetailLevel"
+                @save-brief="setNarrationBrief"
               />
             </LessonUploadSection>
 

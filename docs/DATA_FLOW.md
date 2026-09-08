@@ -283,11 +283,19 @@
 > **до** кнопки «Запустить анализ», и смена уровня требует повторного анализа. См.
 > [DECISIONS.md](DECISIONS.md) §57.
 
+> **Бриф озвучки.** Там же, в карточке уровня, живёт свёрнутое поле «Уточнения для ИИ»:
+> `lesson.narration_brief` (свободный текст до `NARRATION_BRIEF_MAX_CHARS`, пишется тем же
+> `PUT /lessons/{id}`). Вторая ось той же ручки: уровень задаёт **сколько** текста, бриф —
+> **про что и как** (аудитория, акценты, терминология, чего не касаться). Применяется на том же
+> шаге и с тем же следствием — после смены нужен повторный анализ. См.
+> [DECISIONS.md](DECISIONS.md) §63.
+
 ### 6.2 Что делает воркер
 
 [tasks/vision_pipeline.py:analyze_presentation_task](../backend/app/tasks/vision_pipeline.py):
 
-1. `_set_status(analyzing)`.
+1. `_set_status(analyzing)`. Здесь же из строки урока читаются `detail_level` и
+   `narration_brief` — не из аргументов задачи, чтобы retry работал с актуальными значениями.
 2. **PPTX → PNG слайды** (тот же `convert_pptx_to_images`, тот же кеш).
 3. **Удаление старых SlideText:** `session.query(SlideText).filter(...).delete()`. Идёмпотентность для повторного анализа.
 4. **Сохранение PNG в storage и создание `SlideText` строк:**

@@ -117,6 +117,9 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                 raise RuntimeError(f"Lesson {lesson_id} not found")
             course_title = lesson.title or ""
             detail_level = lesson.detail_level
+            # Read here, not passed as a task argument: a retry must pick up the
+            # brief the lesson carries now, exactly like the detail level.
+            narration_brief = lesson.narration_brief
 
             module = session.get(Module, lesson.module_id)
             course = session.get(Course, module.course_id) if module else None
@@ -195,6 +198,7 @@ def analyze_presentation_task(self, lesson_id: str, pptx_relative_path: str) -> 
                     cancel_check=lambda: _cancel_requested(session, lesson_uuid),
                     lesson_id=lesson_id,
                     word_budgets=word_budgets,
+                    narration_brief=narration_brief,
                 )
             )
 

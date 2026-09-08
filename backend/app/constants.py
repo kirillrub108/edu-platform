@@ -129,6 +129,9 @@ MIN_NARRATION_LETTER_RATIO: float = 0.5
 # Ответы короче этого не проверяются на вырожденность — на нескольких словах
 # доля букв слишком шумная.
 DEGENERATE_CHECK_MIN_CHARS: int = 40
+# Свободные пожелания автора к озвучке (аудитория, акценты, терминология).
+# Единственный источник лимита: схема урока и фронтенд опираются на него.
+NARRATION_BRIEF_MAX_CHARS: int = 1000
 
 # Slide rendering
 SLIDE_DPI: int = 150  # indistinguishable from 300 DPI on 1080p, 4× smaller PNGs

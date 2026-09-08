@@ -161,6 +161,31 @@ async def test_regenerate_uses_vision_mock(
     assert body["edited_text"] is None
 
 
+async def test_regenerate_passes_lesson_brief_to_vision(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+    mock_vision: dict[str, Any],
+) -> None:
+    """A single-slide regen must follow the same author brief as a full analysis,
+    otherwise one slide drifts away from the direction the teacher set."""
+    from app.services import billing_service
+
+    course = await make_course(db_session, owner=teacher_user)
+    module = await make_module(db_session, course)
+    lesson = await make_lesson(db_session, module, narration_brief="Аудитория — 9 класс")
+    row = await make_slide_text(db_session, lesson, slide_number=1)
+    await billing_service.grant_credits(db_session, teacher_user.id, 5, "seed")
+
+    resp = await client.post(
+        f"/api/v1/lessons/{lesson.id}/slides/{row.id}/regenerate",
+        cookies=teacher_token,
+    )
+    assert resp.status_code == 200
+    assert mock_vision["narration_brief"] == "Аудитория — 9 класс"
+
+
 async def test_other_teacher_cannot_list_slides(
     client: AsyncClient,
     db_session: AsyncSession,

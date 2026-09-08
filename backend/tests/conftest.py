@@ -496,6 +496,8 @@ def mock_vision(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         # Per-slide word budgets the pipeline derived from the lesson's target
         # duration; None when the lesson has no target.
         "word_budgets": None,
+        # Author brief the caller passed down (analysis and single-slide regen).
+        "narration_brief": None,
     }
 
     async def _analyze_slide(
@@ -506,8 +508,10 @@ def mock_vision(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         previous_context: str = "",
         lesson_id: Any = None,
         word_budget: int | None = None,
+        narration_brief: str | None = None,
     ) -> str:
         state["analyze_calls"] += 1
+        state["narration_brief"] = narration_brief
         if state["analyze_raise"] is not None:
             raise state["analyze_raise"]
         return state["analyze_return"]
@@ -519,8 +523,10 @@ def mock_vision(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         cancel_check: Any = None,
         lesson_id: Any = None,
         word_budgets: list[int] | None = None,
+        narration_brief: str | None = None,
     ) -> list[str]:
         state["word_budgets"] = word_budgets
+        state["narration_brief"] = narration_brief
         # Mirror the real per-slide-boundary cancellation contract.
         if cancel_check is not None and cancel_check():
             raise vis_mod.AnalysisCancelled(0)

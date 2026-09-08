@@ -109,6 +109,9 @@ class Lesson(Base):
         server_default=DetailLevel.auto.value,
         nullable=False,
     )
+    # Free-form author notes (audience, accents, terminology, what to skip) fed
+    # to the vision LLM as data at analysis time; NULL = the prompt stays default.
+    narration_brief = Column(Text, nullable=True)
     duration_sec = Column(Integer, nullable=True)
     status = Column(
         SAEnum(LessonStatus, name="lesson_status"),
