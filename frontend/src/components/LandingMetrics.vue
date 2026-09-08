@@ -22,7 +22,7 @@
             <path d="M13 3 4 14h6l-1 7 9-11h-6z" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
           </svg>
         </div>
-        <div class="big" data-from="0" data-to="10" data-suffix="×">100×</div>
+        <div class="big" data-from="0" data-to="100" data-suffix="×">100×</div>
         <div class="cap">экономия времени против ручной записи</div>
       </div>
       <div class="stat">
