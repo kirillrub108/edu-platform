@@ -8,7 +8,7 @@ const waveBars = 46
 <template>
   <div class="hero">
     <h1 class="reveal">
-      Видеолекции из презентаций<span class="l2 grad-text">за минуты, а не часы</span>
+      Видеокурсы из презентаций<span class="l2 grad-text">за минуты, а не часы</span>
     </h1>
     <p class="lead reveal">
       Загрузите презентацию — ИИ проанализирует слайды, напишет закадровый текст и озвучит его
