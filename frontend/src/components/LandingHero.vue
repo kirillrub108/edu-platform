@@ -17,7 +17,10 @@ const waveBars = 46
     <div class="hero-cta reveal">
       <NuxtLink class="btn btn-primary" to="/register">Создать аккаунт</NuxtLink>
       <NuxtLink class="btn btn-ghost" to="/login">
-        <svg class="icon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+        <!-- Play glyph's ink sits off-center in its 24x24 box (bbox x:8-19), which
+             visually pushes icon+text right against the button's symmetric padding;
+             nudge left to optically re-center the content block. -->
+        <svg class="icon" style="margin-left: -3px" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
         Войти
       </NuxtLink>
     </div>

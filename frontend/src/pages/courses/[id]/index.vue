@@ -853,7 +853,7 @@ onMounted(async () => {
           :disabled="accessLoading"
           @click="setAccessMode('open')"
         >
-          Открытый доступ
+          Доступ по ссылке
         </button>
         <button
           class="px-4 py-2 rounded-lg border text-sm font-medium transition disabled:opacity-50"
