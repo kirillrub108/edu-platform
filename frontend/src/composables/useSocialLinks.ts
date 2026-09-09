@@ -1,4 +1,4 @@
-export type SocialKey = 'youtube' | 'rutube' | 'vk' | 'telegram' | 'instagram'
+export type SocialKey = 'youtube' | 'rutube' | 'vk' | 'telegram' | 'instagram' | 'max' | 'tiktok'
 
 export interface SocialLink {
   key: SocialKey
@@ -38,5 +38,17 @@ export const SOCIAL_LINKS: SocialLink[] = [
     label: 'Instagram',
     href: 'https://www.instagram.com/edllm.support/',
     brandColor: '#e1306c',
+  },
+  {
+    key: 'max',
+    label: 'Max',
+    href: 'https://max.ru/channel_edllm',
+    brandColor: '#7747ff',
+  },
+  {
+    key: 'tiktok',
+    label: 'TikTok',
+    href: 'https://www.tiktok.com/@edllm_lms',
+    brandColor: '#fe2c55',
   },
 ]
