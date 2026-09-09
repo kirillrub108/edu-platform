@@ -190,3 +190,45 @@ class CourseAccessGrantRead(BaseModel):
     email: str
     full_name: str | None = None
     created_at: datetime
+
+
+# Machine codes only — the human-readable wording lives in the frontend.
+RosterImportReason = Literal[
+    "invalid_email",
+    "duplicate_in_file",
+    "already_in_list",
+    "is_course_owner",
+    "not_registered",
+]
+
+
+class RosterColumnRef(BaseModel):
+    """Column the emails were read from — header text, or `A`/`B`/`C`."""
+
+    index: int
+    header: str
+
+
+class RosterColumnOption(RosterColumnRef):
+    samples: list[str]
+
+
+class RosterImportRow(BaseModel):
+    row: int  # 1-based, as the user sees it in Excel
+    raw_value: str
+    email: str | None = None
+    status: Literal["added", "skipped"]
+    reason: RosterImportReason | None = None
+
+
+class RosterImportReport(BaseModel):
+    """Per-row outcome of a bulk roster import. When the email column can't be
+    picked automatically nothing is written and `columns` asks the caller."""
+
+    needs_column_choice: bool = False
+    columns: list[RosterColumnOption] | None = None
+    detected_column: RosterColumnRef | None = None
+    total_rows: int = 0
+    added: int = 0
+    skipped: int = 0
+    results: list[RosterImportRow] = Field(default_factory=list)

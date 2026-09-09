@@ -154,6 +154,13 @@ MAX_DECOMPRESSED_DOCX_BYTES: int = 100 * 1024 * 1024  # 100 MB
 # Ready-made video uploaded directly to a lesson (no generation pipeline).
 MAX_VIDEO_UPLOAD_BYTES: int = 2 * 1024 * 1024 * 1024  # 2 GB
 
+# Bulk roster import: an .xlsx/.csv of student emails uploaded on a restricted
+# course. Parsed in-memory and discarded — nothing is stored, so these caps only
+# bound parse time and the size of the per-row report sent back.
+ROSTER_IMPORT_MAX_FILE_BYTES: int = 2 * 1024 * 1024  # 2 MB
+ROSTER_IMPORT_MAX_ROWS: int = 1000
+ROSTER_IMPORT_SAMPLE_VALUES: int = 3  # example values shown per column choice
+
 # Assignment attachments (teacher-set text tasks + student submissions). Files
 # are only STORED, never parsed server-side (avoids XXE/zip-bomb from office
 # docs). Students may attach anything on the whitelist (incl. video), but a

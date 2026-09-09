@@ -905,6 +905,8 @@ onMounted(async () => {
           </p>
         </form>
 
+        <CourseRosterImport :course-id="String(route.params.id)" @imported="loadGrants" />
+
         <div>
           <p class="text-sm text-gray-600 mb-2">Есть доступ ({{ grants.length }}):</p>
           <p v-if="grantsLoading" class="text-sm text-gray-500">Загрузка…</p>

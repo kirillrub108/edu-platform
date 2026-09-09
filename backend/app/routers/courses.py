@@ -2,13 +2,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile, status
 from redis.asyncio import Redis
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.constants import ROSTER_IMPORT_MAX_FILE_BYTES
 from app.database import get_db
 from app.dependencies import get_current_user, require_course_access, require_teacher
 from app.limiter import limiter
@@ -31,12 +32,14 @@ from app.schemas.course import (
     ModuleCreate,
     ModuleOut,
     ModuleUpdate,
+    RosterImportReport,
 )
 from app.schemas.lesson_material import CourseKnowledgeTreeRead
 from app.services import (
     course_access_service,
     course_service,
     lesson_material_service,
+    roster_import_service,
     visibility_service,
 )
 from app.services.storage_service import storage_service
@@ -523,6 +526,36 @@ async def add_access_grant(
         full_name=student.full_name,
         created_at=grant.created_at,
     )
+
+
+@router.post("/{course_id}/access-grants/import", response_model=RosterImportReport)
+@limiter.limit("5/minute")
+async def import_access_grants(
+    request: Request,
+    course_id: UUID,
+    file: UploadFile,
+    email_column: int | None = Form(default=None),
+    user: User = Depends(require_teacher),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Bulk-add students from an .xlsx/.csv of emails. Not an AI operation — no
+    credits, no gating beyond course ownership. The file is parsed in memory and
+    discarded; every address goes through the same grant path as the single add.
+    """
+    course = await _get_owned_course(course_id, user, db)
+    content = await file.read()
+    if len(content) > ROSTER_IMPORT_MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail=f"Файл слишком большой (максимум {ROSTER_IMPORT_MAX_FILE_BYTES // 1024**2} МБ)",
+        )
+    try:
+        return await roster_import_service.import_from_file(
+            db, redis, course, user, file.filename or "", content, email_column
+        )
+    except roster_import_service.RosterImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.delete("/{course_id}/access-grants/{student_id}", status_code=status.HTTP_204_NO_CONTENT)
