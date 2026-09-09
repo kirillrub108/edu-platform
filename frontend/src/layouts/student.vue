@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Menu, ArrowLeft, Play, FileText, HelpCircle, CheckCircle, Circle, Eye, LogOut } from 'lucide-vue-next'
+import { Menu, ArrowLeft, Play, FileText, HelpCircle, CheckCircle, Circle, Eye, LogOut, BookOpen } from 'lucide-vue-next'
 
 const route = useRoute()
 const studentStore = useStudentStore()
@@ -75,6 +75,8 @@ const navigateAndClose = (to: string) => {
   studentStore.sidebarOpen = false
   navigateTo(to)
 }
+
+const onKnowledgePage = computed(() => route.name === 'student-courses-courseId-knowledge')
 
 const lessonLink = (id: string) =>
   isPreview.value
@@ -292,6 +294,20 @@ onMounted(async () => {
               <div class="text-sm font-bold text-gray-900 px-2 mb-2">
                 {{ sidebarCourseTitle }}
               </div>
+
+              <!-- Course-wide knowledge base. Hidden in the teacher's preview:
+                   that route tree has no student pages of its own. -->
+              <button
+                v-if="!isPreview"
+                class="w-full text-left flex items-center gap-2 px-2 py-2 mb-3 rounded-lg text-sm transition"
+                :class="onKnowledgePage
+                  ? 'bg-violet-50 text-violet-700 font-medium'
+                  : 'text-gray-700 hover:bg-gray-50'"
+                @click="navigateAndClose(`/student/courses/${courseId}/knowledge`)"
+              >
+                <BookOpen class="w-3.5 h-3.5 flex-shrink-0" />
+                <span class="flex-1 truncate">База знаний</span>
+              </button>
 
               <div
                 v-for="mod in sidebarModules"

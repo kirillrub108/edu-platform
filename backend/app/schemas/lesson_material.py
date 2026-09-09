@@ -147,6 +147,9 @@ class CourseKnowledgeLessonRead(BaseModel):
     title: str
     order: int
     content_type: str
+    # Always true in a student's tree (a draft is pruned out entirely); present
+    # so the owner's view can mark the rows a student does not see.
+    is_published: bool
     materials: list[MaterialRead]
     notes: list[CourseKnowledgeNoteRead]
 
@@ -155,6 +158,7 @@ class CourseKnowledgeModuleRead(BaseModel):
     id: UUID
     title: str
     order: int
+    is_published: bool
     lessons: list[CourseKnowledgeLessonRead]
 
 

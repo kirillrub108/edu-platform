@@ -368,3 +368,116 @@ async def test_unenrolled_student_gets_403(
     _, _, lesson = await make_published_course_with_lesson(db_session, teacher_user)
     resp = await client.get(f"/api/v1/lessons/{lesson.id}/knowledge", cookies=student_token)
     assert resp.status_code == 403
+
+
+# ── Course-level aggregate ───────────────────────────────────────────────────
+
+
+async def _course_with_draft_and_published(db: AsyncSession, teacher: User):
+    """Published course → 3 modules: published/published, published/draft-lesson,
+    draft module. Every lesson carries one note so an empty tree cannot pass."""
+    course = await make_course(db, teacher, is_published=True)
+
+    open_module = await make_module(db, course, order=0)
+    open_lesson = await make_lesson(db, open_module, order=0)
+    draft_lesson = await make_lesson(db, open_module, order=1, is_published=False)
+
+    draft_module = await make_module(db, course, order=1, is_published=False)
+    hidden_lesson = await make_lesson(db, draft_module, order=0)
+
+    return course, open_lesson, draft_lesson, hidden_lesson
+
+
+def _lesson_ids(tree: dict) -> set[str]:
+    return {lesson["id"] for module in tree["modules"] for lesson in module["lessons"]}
+
+
+async def test_course_knowledge_hides_draft_module_and_lesson_from_student(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_user: User,
+    teacher_token: dict[str, str],
+    student_token: dict[str, str],
+) -> None:
+    course, open_lesson, draft_lesson, hidden_lesson = await _course_with_draft_and_published(
+        db_session, teacher_user
+    )
+    await make_enrollment(db_session, student_user, course)
+    for lesson in (open_lesson, draft_lesson, hidden_lesson):
+        assert (await _upload(client, lesson.id, teacher_token)).status_code == 201
+
+    resp = await client.get(f"/api/v1/courses/{course.id}/knowledge", cookies=student_token)
+    assert resp.status_code == 200
+    tree = resp.json()
+
+    # A draft lesson and a draft module's lesson are absent entirely — not even
+    # as an empty heading, so the tree never reveals that they exist.
+    assert _lesson_ids(tree) == {str(open_lesson.id)}
+    assert len(tree["modules"]) == 1
+    assert tree["can_edit"] is False
+    assert len(tree["modules"][0]["lessons"][0]["materials"]) == 1
+
+
+async def test_course_knowledge_gives_owner_everything_with_publish_flags(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    teacher_token: dict[str, str],
+) -> None:
+    course, open_lesson, draft_lesson, hidden_lesson = await _course_with_draft_and_published(
+        db_session, teacher_user
+    )
+    await client.post(
+        f"/api/v1/lessons/{draft_lesson.id}/notes",
+        json={"title": "Черновой конспект", "content": "тело, которого нет в агрегате"},
+        cookies=teacher_token,
+    )
+
+    resp = await client.get(f"/api/v1/courses/{course.id}/knowledge", cookies=teacher_token)
+    assert resp.status_code == 200
+    tree = resp.json()
+
+    assert tree["can_edit"] is True
+    assert _lesson_ids(tree) == {str(open_lesson.id), str(draft_lesson.id), str(hidden_lesson.id)}
+    # Deterministic order: modules then lessons by `order`.
+    assert [m["order"] for m in tree["modules"]] == [0, 1]
+    assert [m["is_published"] for m in tree["modules"]] == [True, False]
+    assert [lesson["order"] for lesson in tree["modules"][0]["lessons"]] == [0, 1]
+    assert [lesson["is_published"] for lesson in tree["modules"][0]["lessons"]] == [True, False]
+
+    note = tree["modules"][0]["lessons"][1]["notes"][0]
+    assert note["title"] == "Черновой конспект"
+    # Bodies are fetched per lesson — shipping them here would blow the payload up.
+    assert "content" not in note
+
+
+async def test_course_knowledge_is_403_for_unenrolled_student(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_token: dict[str, str],
+) -> None:
+    course, _, _ = await make_published_course_with_lesson(db_session, teacher_user)
+    resp = await client.get(f"/api/v1/courses/{course.id}/knowledge", cookies=student_token)
+    assert resp.status_code == 403
+
+
+async def test_course_knowledge_can_edit_only_for_the_owner(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    teacher_user: User,
+    student_user: User,
+    teacher_token: dict[str, str],
+    student_token: dict[str, str],
+) -> None:
+    """`can_edit` is the server's decision and tracks ownership — the same
+    course reads as editable for its owner and read-only for a student."""
+    course, _, _ = await make_published_course_with_lesson(db_session, teacher_user)
+    await make_enrollment(db_session, student_user, course)
+
+    owner = await client.get(f"/api/v1/courses/{course.id}/knowledge", cookies=teacher_token)
+    student = await client.get(f"/api/v1/courses/{course.id}/knowledge", cookies=student_token)
+
+    assert owner.json()["can_edit"] is True
+    assert student.json()["can_edit"] is False

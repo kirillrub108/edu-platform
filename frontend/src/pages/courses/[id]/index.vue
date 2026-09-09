@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Trash2, Archive, Eye, Send, Undo2 } from 'lucide-vue-next'
+import { Trash2, Archive, Eye, Send, Undo2, ClipboardList, BookOpen } from 'lucide-vue-next'
 
 definePageMeta({ middleware: ['auth', 'teacher'] })
 
@@ -494,7 +494,7 @@ onMounted(async () => {
   <div v-else-if="course" class="max-w-5xl">
 
     <!-- Header -->
-    <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-6">
+    <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-6">
       <div class="flex gap-4 min-w-0">
         <!-- Cover -->
         <div
@@ -550,8 +550,9 @@ onMounted(async () => {
         </div>
       </div>
 
-      <div class="flex flex-col items-stretch sm:items-end gap-2 w-full sm:w-auto">
-        <div class="flex flex-wrap justify-start sm:justify-end gap-2">
+      <div class="flex flex-col items-stretch lg:items-end gap-3 w-full lg:w-auto">
+        <!-- Group 1: view actions -->
+        <div class="flex flex-wrap justify-start lg:justify-end gap-2">
           <NuxtLink
             :to="previewCourseUrl"
             class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center inline-flex items-center gap-1.5 whitespace-nowrap flex-shrink-0"
@@ -562,21 +563,25 @@ onMounted(async () => {
           </NuxtLink>
           <NuxtLink
             :to="`/courses/${route.params.id}/gradebook`"
-            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center whitespace-nowrap flex-shrink-0"
+            class="px-3 py-1.5 border border-brand/30 rounded-lg text-sm font-medium text-brand bg-brand/10 hover:bg-brand/15 transition text-center inline-flex items-center gap-1 whitespace-nowrap flex-shrink-0"
           >
+            <ClipboardList class="w-3.5 h-3.5" />
             Журнал оценок
           </NuxtLink>
           <NuxtLink
             :to="`/courses/${route.params.id}/knowledge`"
-            class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition text-center whitespace-nowrap flex-shrink-0"
+            class="px-3 py-1.5 border border-brand/30 rounded-lg text-sm font-medium text-brand bg-brand/10 hover:bg-brand/15 transition text-center inline-flex items-center gap-1 whitespace-nowrap flex-shrink-0"
           >
+            <BookOpen class="w-3.5 h-3.5" />
             База знаний
           </NuxtLink>
+        </div>
 
-          <!-- Active course: publish toggle + archive -->
+        <!-- Group 2: publish/archive state actions -->
+        <div class="flex flex-wrap items-center justify-start lg:justify-end gap-2 pt-3 border-t border-gray-100 lg:w-auto w-full">
           <template v-if="!course.is_archived">
             <button
-              class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 sm:min-w-36 text-center whitespace-nowrap flex-shrink-0"
+              class="px-4 py-1.5 border rounded-lg text-sm hover:bg-gray-50 transition disabled:opacity-50 text-center whitespace-nowrap flex-shrink-0"
               :disabled="publishing"
               @click="togglePublish"
             >
@@ -621,16 +626,17 @@ onMounted(async () => {
           </UiButton>
         </div>
 
+        <!-- Group 3: status badge -->
         <span
           v-if="course.is_archived"
-          class="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+          class="text-xs text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full inline-flex items-center gap-1 self-start lg:self-end"
         >
           <Archive class="w-3 h-3" />
           В архиве<template v-if="course.days_until_purge != null"> · удалится через {{ course.days_until_purge }} дн.</template>
         </span>
         <span
           v-else-if="course.is_published"
-          class="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full"
+          class="text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full self-start lg:self-end"
         >
           опубликован
         </span>

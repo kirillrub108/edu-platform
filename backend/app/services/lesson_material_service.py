@@ -524,6 +524,7 @@ async def get_course_knowledge(
                 title=lesson.title,
                 order=lesson.order,
                 content_type=lesson.content_type.value,
+                is_published=lesson.is_published,
                 materials=[serialize_material(m, viewer_id) for m in materials[lesson.id]],
                 notes=[CourseKnowledgeNoteRead.model_validate(n) for n in notes[lesson.id]],
             )
@@ -532,7 +533,11 @@ async def get_course_knowledge(
         ]
         tree.append(
             CourseKnowledgeModuleRead(
-                id=module.id, title=module.title, order=module.order, lessons=lessons
+                id=module.id,
+                title=module.title,
+                order=module.order,
+                is_published=module.is_published,
+                lessons=lessons,
             )
         )
 

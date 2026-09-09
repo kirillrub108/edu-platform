@@ -16,6 +16,8 @@ export interface CourseKnowledgeLesson {
   title: string
   order: number
   content_type: string
+  /** Always true in a student's tree — a draft is pruned server-side. */
+  is_published: boolean
   materials: KnowledgeMaterial[]
   notes: CourseKnowledgeNote[]
 }
@@ -24,6 +26,7 @@ export interface CourseKnowledgeModule {
   id: string
   title: string
   order: number
+  is_published: boolean
   lessons: CourseKnowledgeLesson[]
 }
 
