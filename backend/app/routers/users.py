@@ -1,9 +1,8 @@
-"""Own profile/privacy settings, avatar upload, public profile read, and the
-account self-deletion entry point.
+"""Own profile/privacy settings, avatar upload and public profile read.
 
 Thin by construction: parse → authorize → one or two service calls → return.
-The privacy rule lives in profile_service, the deletion lifecycle in
-account_service; neither is re-derived here.
+The privacy rule lives in profile_service; it is not re-derived here. Account
+deletion lives on the auth router, next to the rest of the mailed-link flows.
 
 None of these endpoints touch an LLM/vision/TTS provider or the credit ledger,
 so they sit behind plain `get_current_user` and are intentionally absent from
@@ -12,15 +11,14 @@ AI_GATED_ENDPOINTS (same reasoning as routers/uploads.py, DECISIONS §50).
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants import AVATAR_ALLOWED_EXTS, AVATAR_MAX_BYTES
 from app.database import get_db
-from app.dependencies import get_current_token_payload, get_current_user, get_optional_user
+from app.dependencies import get_current_user, get_optional_user
 from app.limiter import limiter
 from app.models.user import User
-from app.schemas.auth import DeleteAccountRequest
 from app.schemas.user import (
     PrivacySettingsOut,
     PrivacyUpdate,
@@ -29,7 +27,6 @@ from app.schemas.user import (
     ProfileUpdate,
 )
 from app.services import account_service, file_validation_service, profile_service
-from app.services.auth_service import AuthService, get_auth_service
 
 router = APIRouter(prefix="/api/v1/users", tags=["users"])
 
@@ -152,26 +149,3 @@ async def read_profile(
     if not access.visible:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
     return await profile_service.get_profile(db, target, access)
-
-
-# ── Account deletion ─────────────────────────────────────────────────────────
-
-
-@router.post("/me/delete", status_code=status.HTTP_204_NO_CONTENT)
-@limiter.limit("3/minute")
-async def delete_my_account(
-    request: Request,
-    data: DeleteAccountRequest,
-    user: User = Depends(get_current_user),
-    payload: dict = Depends(get_current_token_payload),
-    service: AuthService = Depends(get_auth_service),
-    db: AsyncSession = Depends(get_db),
-) -> Response:
-    await account_service.delete_own_account(
-        db, service, user=user, password=data.password, access_payload=payload
-    )
-    # 204 has no body to attach cookies to, so the deletion Response is built
-    # here rather than via an injected `response` (same gotcha as /logout).
-    response = Response(status_code=status.HTTP_204_NO_CONTENT)
-    account_service.clear_auth_cookies(response)
-    return response

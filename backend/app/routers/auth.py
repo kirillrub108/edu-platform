@@ -19,6 +19,7 @@ from app.redis_client import get_redis
 from app.schemas.auth import (
     ChangeEmailRequest,
     ChangePasswordRequest,
+    ConfirmDeleteRequest,
     ConfirmEmailChangeRequest,
     ConfirmReleaseRequest,
     ForgotPasswordRequest,
@@ -181,27 +182,33 @@ async def refresh(
     return {}
 
 
+async def _revoke_access_cookie(request: Request, service: AuthService) -> None:
+    """Best-effort: blacklist the request's access token and revoke its refresh
+    family in Redis. Must not fail — clearing the cookies is the primary action
+    of every caller."""
+    access_cookie = request.cookies.get("access_token")
+    if not access_cookie:
+        return
+    try:
+        payload = decode_token(access_cookie, verify_exp=False)
+        if payload.get("type") == "access" and payload.get("jti"):
+            exp = datetime.fromtimestamp(int(payload["exp"]), tz=timezone.utc)
+            await service.logout(
+                payload["jti"],
+                exp,
+                user_id=payload.get("sub"),
+                family_id=payload.get("family_id"),
+            )
+    except Exception:
+        pass
+
+
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(
     request: Request,
     service: AuthService = Depends(get_auth_service),
 ) -> Response:
-    # Best-effort: blacklist the access token and revoke its refresh family in
-    # Redis. Must not fail — clearing cookies is the primary action.
-    access_cookie = request.cookies.get("access_token")
-    if access_cookie:
-        try:
-            payload = decode_token(access_cookie, verify_exp=False)
-            if payload.get("type") == "access" and payload.get("jti"):
-                exp = datetime.fromtimestamp(int(payload["exp"]), tz=timezone.utc)
-                await service.logout(
-                    payload["jti"],
-                    exp,
-                    user_id=payload.get("sub"),
-                    family_id=payload.get("family_id"),
-                )
-        except Exception:
-            pass
+    await _revoke_access_cookie(request, service)
     # Clear cookies on the response we actually return: FastAPI sends the
     # returned Response, so headers set on an injected `response` param would be
     # discarded. delete_cookie must therefore target this object.
@@ -377,6 +384,44 @@ async def change_password(
     tokens = await service.change_password(user, data.old_password, data.new_password)
     _set_auth_cookies(response, tokens.access_token, tokens.refresh_token)
     return {}
+
+
+# ── Account deletion / restore / email release (services/account_service.py) ──
+
+
+@router.post("/request-delete", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("3/minute")
+async def request_delete(
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> Response:
+    """Mail the logged-in user a one-time link that confirms deletion. Nothing
+    about the account changes here. A per-user Redis cooldown returns 429 on
+    rapid repeats (on top of the slowapi per-IP limit)."""
+    await account_service.request_account_deletion(db, redis, user)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/confirm-delete", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("5/minute")
+async def confirm_delete(
+    request: Request,
+    data: ConfirmDeleteRequest,
+    service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> Response:
+    """Anonymous: the token is the credential, so the link works from any device
+    or mail client. Burns it, soft-deletes the account and revokes every
+    session; failures are one opaque 400."""
+    await account_service.confirm_account_deletion(db, redis, service, data.token)
+    await _revoke_access_cookie(request, service)
+    # Same gotcha as /logout: cookies must be cleared on the returned Response.
+    response = Response(status_code=status.HTTP_204_NO_CONTENT)
+    _clear_auth_cookies(response)
+    return response
 
 
 # ── Account restore / email release (see services/account_service.py) ─────────

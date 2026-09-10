@@ -188,9 +188,16 @@ export const useAuthStore = defineStore('auth', () => {
   const updatePrivacy = (patch: Partial<PrivacySettings>) =>
     apiFetch<PrivacySettings>('/users/me/privacy', { method: 'PATCH', body: patch })
 
-  // Soft delete. The server clears the cookies, so the local session goes too.
-  const deleteAccount = async (password: string) => {
-    await apiFetch('/users/me/delete', { method: 'POST', body: { password } })
+  // Authenticated: mail a one-time confirmation link. Nothing about the
+  // account changes until that link is opened.
+  const requestAccountDeletion = async () => {
+    await apiFetch('/auth/request-delete', { method: 'POST' })
+  }
+
+  // Anonymous: the token is the credential. The server soft-deletes the account
+  // and clears the cookies, so the local session goes too.
+  const confirmAccountDeletion = async (token: string) => {
+    await apiFetch('/auth/confirm-delete', { method: 'POST', body: { token } })
     clearSession()
   }
 
@@ -250,7 +257,8 @@ export const useAuthStore = defineStore('auth', () => {
     deleteAvatar,
     fetchPrivacy,
     updatePrivacy,
-    deleteAccount,
+    requestAccountDeletion,
+    confirmAccountDeletion,
     restoreAccount,
     requestEmailRelease,
     confirmEmailRelease,

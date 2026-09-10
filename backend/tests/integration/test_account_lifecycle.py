@@ -57,20 +57,78 @@ async def _reload(db: AsyncSession, user_id: uuid.UUID) -> User | None:
     )
 
 
+def _mail_kwargs(mock_send_email, template_name: str) -> dict:
+    """kwargs of the enqueue for ``template_name``."""
+    for call in mock_send_email.call_args_list:
+        if call.kwargs.get("template_name") == template_name:
+            return call.kwargs
+    raise AssertionError(f"{template_name} was never enqueued")
+
+
+def _delete_token(mock_send_email) -> str:
+    url = _mail_kwargs(mock_send_email, "account_delete_confirm.html")["context"]["confirm_url"]
+    return url.split("token=")[1]
+
+
+async def _delete_account(client: AsyncClient, cookies: dict[str, str], mock_send_email) -> None:
+    """The whole mailed-link flow, as the UI drives it."""
+    resp = await client.post("/api/v1/auth/request-delete", cookies=cookies)
+    assert resp.status_code == 204, resp.text
+    resp = await client.post(
+        "/api/v1/auth/confirm-delete", json={"token": _delete_token(mock_send_email)}
+    )
+    assert resp.status_code == 204, resp.text
+
+
 # ── Deletion ─────────────────────────────────────────────────────────────────
 
 
-async def test_delete_requires_correct_password(
-    client: AsyncClient, db_session: AsyncSession
+async def test_request_delete_only_mails_a_link(
+    client: AsyncClient, db_session: AsyncSession, mock_send_email
 ) -> None:
     user = await _make_account(db_session)
     cookies = await _login(client, user)
 
-    resp = await client.post(
-        "/api/v1/users/me/delete", json={"password": "wrong-one"}, cookies=cookies
-    )
-    assert resp.status_code == 400
+    resp = await client.post("/api/v1/auth/request-delete", cookies=cookies)
 
+    assert resp.status_code == 204
+    kwargs = _mail_kwargs(mock_send_email, "account_delete_confirm.html")
+    assert kwargs["to"] == user.email
+    # Nothing happened to the account yet, and the session still works.
+    assert (await _reload(db_session, user.id)).deleted_at is None
+    assert (await client.get("/api/v1/auth/me", cookies=cookies)).status_code == 200
+
+
+async def test_request_delete_is_rejected_without_a_session(client: AsyncClient) -> None:
+    assert (await client.post("/api/v1/auth/request-delete")).status_code == 401
+
+
+async def test_second_request_within_the_cooldown_is_429(
+    client: AsyncClient, db_session: AsyncSession, mock_send_email
+) -> None:
+    user = await _make_account(db_session)
+    cookies = await _login(client, user)
+
+    assert (await client.post("/api/v1/auth/request-delete", cookies=cookies)).status_code == 204
+    resp = await client.post("/api/v1/auth/request-delete", cookies=cookies)
+
+    assert resp.status_code == 429
+    # Exactly one link was mailed, not two.
+    templates = [c.kwargs.get("template_name") for c in mock_send_email.call_args_list]
+    assert templates.count("account_delete_confirm.html") == 1
+
+
+async def test_request_delete_survives_a_broken_broker(
+    client: AsyncClient, db_session: AsyncSession, mock_send_email
+) -> None:
+    """The 204 is unconditional: a dead broker must not leak into the response."""
+    user = await _make_account(db_session)
+    cookies = await _login(client, user)
+    mock_send_email.side_effect = RuntimeError("broker down")
+
+    resp = await client.post("/api/v1/auth/request-delete", cookies=cookies)
+
+    assert resp.status_code == 204
     assert (await _reload(db_session, user.id)).deleted_at is None
 
 
@@ -81,10 +139,7 @@ async def test_delete_soft_deletes_and_keeps_email_occupied(
     email, user_id = user.email, user.id
     cookies = await _login(client, user)
 
-    resp = await client.post(
-        "/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies
-    )
-    assert resp.status_code == 204
+    await _delete_account(client, cookies, mock_send_email)
 
     row = await _reload(db_session, user_id)
     assert row.deleted_at is not None
@@ -95,9 +150,7 @@ async def test_delete_soft_deletes_and_keeps_email_occupied(
     assert row.full_name == "Иван Петров"
 
     # The restore link went out.
-    assert mock_send_email.called
-    kwargs = mock_send_email.call_args.kwargs
-    assert kwargs["template_name"] == "account_deleted.html"
+    kwargs = _mail_kwargs(mock_send_email, "account_deleted.html")
     assert kwargs["to"] == email
     assert "restore_url" in kwargs["context"]
 
@@ -108,29 +161,72 @@ async def test_delete_revokes_the_session(
     user = await _make_account(db_session)
     cookies = await _login(client, user)
 
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
 
     assert (await client.get("/api/v1/auth/me", cookies=cookies)).status_code == 401
 
 
-async def test_delete_is_idempotent(db_session: AsyncSession) -> None:
-    """A second delete on an already-deleted row is a no-op, not an error, and
-    must not move the deadline. Unreachable through the UI (the first call kills
-    the cookie), so it is asserted at the service."""
+async def test_delete_token_is_single_use(
+    client: AsyncClient, db_session: AsyncSession, mock_send_email
+) -> None:
+    user = await _make_account(db_session)
+    cookies = await _login(client, user)
+    await client.post("/api/v1/auth/request-delete", cookies=cookies)
+    token = _delete_token(mock_send_email)
+
+    first = await client.post("/api/v1/auth/confirm-delete", json={"token": token})
+    replay = await client.post("/api/v1/auth/confirm-delete", json={"token": token})
+
+    assert first.status_code == 204
+    assert replay.status_code == 400
+    assert replay.json()["detail"] == "invalid_or_expired"
+
+
+@pytest.mark.parametrize("token", ["", "not-a-token", "a.b.c"])
+async def test_confirm_delete_rejects_a_broken_token(client: AsyncClient, token: str) -> None:
+    resp = await client.post("/api/v1/auth/confirm-delete", json={"token": token})
+
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid_or_expired"
+
+
+async def test_confirm_delete_rejects_an_expired_token(
+    client: AsyncClient, db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = await _make_account(db_session)
+    token = account_service.generate_delete_token(str(user.id))
+    monkeypatch.setattr(account_service, "ACCOUNT_DELETE_TTL_SECONDS", -1)
+
+    resp = await client.post("/api/v1/auth/confirm-delete", json={"token": token})
+
+    assert resp.status_code == 400
+    assert (await _reload(db_session, user.id)).deleted_at is None
+
+
+async def test_confirm_delete_of_a_foreign_or_dead_account_is_opaque(
+    client: AsyncClient, db_session: AsyncSession, mock_send_email
+) -> None:
+    """A token minted before the account was deleted (the second of two mailed
+    links, say) fails like every other dead token — and so does one signed for a
+    user id that does not exist."""
+    user = await _make_account(db_session)
+    cookies = await _login(client, user)
+    await client.post("/api/v1/auth/request-delete", cookies=cookies)
+    stale = _delete_token(mock_send_email)
     from app.services.auth_service import soft_delete_user
 
-    user = await _make_account(db_session)
     soft_delete_user(user)
     await db_session.commit()
-    first_deleted_at = user.deleted_at
 
-    # Passing service=None proves the early return happens before any session
-    # or Redis work — a real second call would have blown up here otherwise.
-    await account_service.delete_own_account(
-        db_session, None, user=user, password=PASSWORD, access_payload={}
+    resp = await client.post("/api/v1/auth/confirm-delete", json={"token": stale})
+    foreign = await client.post(
+        "/api/v1/auth/confirm-delete",
+        json={"token": account_service.generate_delete_token(str(uuid.uuid4()))},
     )
 
-    assert (await _reload(db_session, user.id)).deleted_at == first_deleted_at
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "invalid_or_expired"
+    assert foreign.status_code == 400
 
 
 async def test_delete_blocked_while_a_lesson_is_generating(
@@ -143,9 +239,7 @@ async def test_delete_blocked_while_a_lesson_is_generating(
     await db_session.commit()
     cookies = await _login(client, user)
 
-    resp = await client.post(
-        "/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies
-    )
+    resp = await client.post("/api/v1/auth/request-delete", cookies=cookies)
 
     assert resp.status_code == 409
     assert resp.json()["detail"] == "lessons_in_progress"
@@ -160,7 +254,7 @@ async def test_login_of_deleted_account_returns_403_with_code(
 ) -> None:
     user = await _make_account(db_session)
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
 
     resp = await client.post("/api/v1/auth/login", json={"email": user.email, "password": PASSWORD})
 
@@ -177,7 +271,7 @@ async def test_wrong_password_on_deleted_account_stays_401(
     account enumeration: a guesser sees the same 401 as for any address."""
     user = await _make_account(db_session)
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
 
     deleted = await client.post(
         "/api/v1/auth/login", json={"email": user.email, "password": "not-the-password"}
@@ -195,7 +289,7 @@ async def test_register_with_occupied_email_returns_409_code(
 ) -> None:
     user = await _make_account(db_session)
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
 
     resp = await client.post(
         "/api/v1/auth/register",
@@ -221,7 +315,7 @@ async def test_delete_then_restore_by_credentials_then_login(
     user = await _make_account(db_session)
     user_id = user.id
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
 
     resp = await client.post(
         "/api/v1/auth/restore-account", json={"email": user.email, "password": PASSWORD}
@@ -242,7 +336,7 @@ async def test_restore_by_token_from_the_email(
     user = await _make_account(db_session)
     user_id = user.id
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
 
     restore_url = mock_send_email.call_args.kwargs["context"]["restore_url"]
     token = restore_url.split("token=", 1)[1]
@@ -258,7 +352,7 @@ async def test_restore_after_the_window_is_one_opaque_400(
 ) -> None:
     user = await _make_account(db_session)
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
 
     # Age the row past the restore window.
     row = await _reload(db_session, user.id)
@@ -298,7 +392,7 @@ async def test_release_email_is_always_204(
 
     user = await _make_account(db_session)
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
     mock_send_email.reset_mock()
 
     known = await client.post("/api/v1/auth/release-email", json={"email": user.email})
@@ -312,7 +406,7 @@ async def test_release_then_reregister_creates_a_new_account(
     user = await _make_account(db_session)
     email, old_id = user.email, user.id
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
 
     mock_send_email.reset_mock()
     await client.post("/api/v1/auth/release-email", json={"email": email})
@@ -349,7 +443,7 @@ async def test_release_token_is_single_use(
 ) -> None:
     user = await _make_account(db_session)
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
     mock_send_email.reset_mock()
     await client.post("/api/v1/auth/release-email", json={"email": user.email})
     token = mock_send_email.call_args.kwargs["context"]["release_url"].split("token=", 1)[1]
@@ -370,7 +464,7 @@ async def test_release_after_restore_does_not_anonymize(
     user = await _make_account(db_session)
     email, user_id = user.email, user.id
     cookies = await _login(client, user)
-    await client.post("/api/v1/users/me/delete", json={"password": PASSWORD}, cookies=cookies)
+    await _delete_account(client, cookies, mock_send_email)
 
     mock_send_email.reset_mock()
     await client.post("/api/v1/auth/release-email", json={"email": email})

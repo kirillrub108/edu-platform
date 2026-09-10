@@ -96,11 +96,11 @@ class ChangePasswordRequest(BaseModel):
     new_password: PasswordStr
 
 
-class DeleteAccountRequest(BaseModel):
-    """Re-authentication for self-deletion. The session cookie alone is not
-    enough for an action this destructive."""
+class ConfirmDeleteRequest(BaseModel):
+    """The one-time token from the deletion email. It is the only credential the
+    confirmation takes — see DECISIONS §61."""
 
-    password: str
+    token: str
 
 
 class RestoreAccountRequest(BaseModel):
@@ -146,7 +146,7 @@ __all__ = [
     "ForgotPasswordRequest",
     "ResetPasswordRequest",
     "ChangePasswordRequest",
-    "DeleteAccountRequest",
+    "ConfirmDeleteRequest",
     "RestoreAccountRequest",
     "ReleaseEmailRequest",
     "ConfirmReleaseRequest",

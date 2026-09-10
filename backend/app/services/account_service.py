@@ -1,9 +1,12 @@
 """Account lifecycle: self-deletion, the restore window, early email release,
 and the anonymization that replaces physical deletion at purge time.
 
-The shape of it (DECISIONS §59):
+The shape of it (DECISIONS §59, §61):
 
-    delete ──► soft-deleted, email still OCCUPIED, restorable for
+    request-delete ──► mailed link ──► confirm-delete
+                          │
+                          ▼
+               soft-deleted, email still OCCUPIED, restorable for
                SOFT_DELETE_PURGE_DAYS
                  ├─ restore (token from mail, or email+password) ──► active again
                  ├─ confirm-release (token from mail) ────────────► anonymized now
@@ -14,7 +17,7 @@ looks like", and it is deliberately pure: the async path here and the sync
 Celery purge task both call it, and neither can share a session with the other.
 File removal sits next to each call site rather than inside it.
 
-Both mailed links are stateless `itsdangerous` tokens with their own salts, the
+Every mailed link is a stateless `itsdangerous` token with its own salt, the
 same mechanism as email verification and unsubscribe — no new table.
 """
 
@@ -33,6 +36,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.constants import (
+    ACCOUNT_DELETE_COOLDOWN_SECONDS,
+    ACCOUNT_DELETE_PATH,
+    ACCOUNT_DELETE_TTL_SECONDS,
     ACCOUNT_RESTORE_PATH,
     ACCOUNT_RESTORE_TTL_SECONDS,
     ANONYMIZED_EMAIL_DOMAIN,
@@ -54,6 +60,7 @@ logger = structlog.get_logger()
 _RESTORE_SALT = "account-restore"
 _RELEASE_SALT = "email-release"
 _CHANGE_SALT = "email-change"
+_DELETE_SALT = "account-delete"
 
 # Argon2 never produces this, so it can never verify — and unlike a random hash
 # it is self-describing when someone reads the row.
@@ -160,8 +167,39 @@ async def burn_release_token(redis: Redis, token: str) -> bool:
     return bool(marked)
 
 
+def generate_delete_token(user_id: str) -> str:
+    return _serializer(_DELETE_SALT).dumps(user_id)
+
+
+def verify_delete_token(token: str) -> str:
+    try:
+        return _serializer(_DELETE_SALT).loads(token, max_age=ACCOUNT_DELETE_TTL_SECONDS)
+    except SignatureExpired:
+        raise ValueError("expired")
+    except BadSignature:
+        raise ValueError("invalid")
+
+
+def _delete_used_key(token: str) -> str:
+    return f"account_delete_used:{hashlib.sha256(token.encode()).hexdigest()}"
+
+
+async def burn_delete_token(redis: Redis, token: str) -> bool:
+    """Atomically mark a deletion token spent. False = already used."""
+    marked = await redis.set(_delete_used_key(token), "1", nx=True, ex=ACCOUNT_DELETE_TTL_SECONDS)
+    return bool(marked)
+
+
+def _delete_cooldown_key(user_id: str) -> str:
+    return f"account_delete_cooldown:{user_id}"
+
+
 def restore_url(token: str) -> str:
     return f"{settings.FRONTEND_URL}{ACCOUNT_RESTORE_PATH}?token={token}"
+
+
+def delete_confirm_url(token: str) -> str:
+    return f"{settings.FRONTEND_URL}{ACCOUNT_DELETE_PATH}?token={token}"
 
 
 def release_url(token: str) -> str:
@@ -212,52 +250,100 @@ def clear_auth_cookies(response: Response) -> None:
     response.delete_cookie("csrf_token", path="/")
 
 
-async def delete_own_account(
-    db: AsyncSession,
-    service: AuthService,
-    *,
-    user: User,
-    password: str,
-    access_payload: dict,
-) -> None:
-    """Soft-delete the caller's account and revoke every session.
+_OPAQUE_DELETE_ERROR = HTTPException(
+    status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_or_expired"
+)
 
-    Idempotent: a second call on an already-deleted row is a no-op (in practice
-    unreachable, since the first call invalidates the cookie).
+_LESSONS_IN_FLIGHT_ERROR = HTTPException(
+    status_code=status.HTTP_409_CONFLICT, detail="lessons_in_progress"
+)
+
+
+async def request_account_deletion(db: AsyncSession, redis: Redis, user: User) -> None:
+    """Mail the caller a one-time confirmation link. Nothing changes yet.
+
+    The link is the single proof of ownership for the whole flow: password
+    re-authentication cannot serve here because a social-only account has no
+    hash (DECISIONS §61). The account's own address is used even when it is not
+    verified — for an OAuth account it is the address the provider vouched for,
+    and it is the only channel we have.
     """
-    if user.deleted_at is not None:
-        return
-    if not user.hashed_password or not verify_password(password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="Неверный текущий пароль"
-        )
     # Generation in flight: the Celery task would keep writing to a row we are
-    # about to hide, and the reserved credits are still owed back.
+    # about to hide, and the reserved credits are still owed back. Checked here
+    # for an immediate answer, and again on confirm — one may start in between.
     if await _has_lessons_in_flight(db, user):
+        raise _LESSONS_IN_FLIGHT_ERROR
+    if await redis.exists(_delete_cooldown_key(str(user.id))):
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="lessons_in_progress",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Письмо уже отправлено. Подождите перед повторной отправкой.",
         )
+
+    _enqueue_delete_confirmation_email(user)
+    await redis.set(_delete_cooldown_key(str(user.id)), "1", ex=ACCOUNT_DELETE_COOLDOWN_SECONDS)
+
+
+async def confirm_account_deletion(
+    db: AsyncSession, redis: Redis, service: AuthService, token: str
+) -> None:
+    """Burn the mailed token, soft-delete the account and revoke every session.
+
+    Every token failure — tampered, expired, replayed, pointing at a row that is
+    already gone — collapses into one opaque 400, like the restore paths.
+
+    Requesting the link twice leaves both tokens live: they are stateless and
+    burned independently, and the second one dies on the `deleted_at` check
+    below the moment the first is spent.
+    """
+    try:
+        user_id = verify_delete_token(token)
+    except ValueError:
+        raise _OPAQUE_DELETE_ERROR
+    if not await burn_delete_token(redis, token):
+        raise _OPAQUE_DELETE_ERROR
+    try:
+        user = await get_user_including_deleted(db, UUID(user_id))
+    except ValueError:
+        raise _OPAQUE_DELETE_ERROR
+    if user is None or user.deleted_at is not None:
+        raise _OPAQUE_DELETE_ERROR
+    if await _has_lessons_in_flight(db, user):
+        raise _LESSONS_IN_FLIGHT_ERROR
 
     email = user.email
     full_name = user.full_name
     soft_delete_user(user)
     await db.commit()
 
+    # Every refresh family dies here; the access tokens still in browsers are
+    # inert on their own, because the global soft-delete filter makes their user
+    # unresolvable. The route additionally blacklists the caller's own jti.
     await service.logout_all_sessions(str(user.id))
-    jti = access_payload.get("jti")
-    exp = access_payload.get("exp")
-    if jti and exp:
-        # The `exp` claim is an epoch int; logout() blacklists until a datetime.
-        await service.logout(
-            jti,
-            datetime.fromtimestamp(int(exp), tz=timezone.utc),
-            user_id=str(user.id),
-            family_id=access_payload.get("family_id"),
-        )
 
     _enqueue_deletion_email(user, email=email, full_name=full_name)
     logger.info("account_soft_deleted", user_id=str(user.id))
+
+
+def _enqueue_delete_confirmation_email(user: User) -> None:
+    """Auth mail goes straight to the queue, like verification and reset. A
+    broker failure must not fail the request — the user simply gets no link and
+    can ask again once the cooldown lapses."""
+    from app.tasks.email_pipeline import send_email
+
+    try:
+        send_email.delay(
+            to=user.email,
+            subject="Подтвердите удаление аккаунта — Edllm",
+            template_name="account_delete_confirm.html",
+            context={
+                "full_name": user.full_name or "",
+                "confirm_url": delete_confirm_url(generate_delete_token(str(user.id))),
+                "ttl_minutes": ACCOUNT_DELETE_TTL_SECONDS // 60,
+                "restore_days": SOFT_DELETE_PURGE_DAYS,
+            },
+        )
+    except Exception:
+        logger.warning("account_delete_email_enqueue_failed", user_id=str(user.id), exc_info=True)
 
 
 def _enqueue_deletion_email(user: User, *, email: str, full_name: str | None) -> None:

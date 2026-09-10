@@ -147,30 +147,38 @@ const submit = async () => {
 // ── Удаление аккаунта ────────────────────────────────────────────────────────
 
 const RESTORE_DAYS = 30
+// Совпадает с ACCOUNT_DELETE_COOLDOWN_SECONDS на бэкенде: пока он не истёк,
+// повторный запрос вернёт 429.
+const DELETE_LINK_COOLDOWN_SECONDS = 60
 
 const confirmingDelete = ref(false)
-const deletePassword = ref('')
 const deleteError = ref<string | null>(null)
-const deleting = ref(false)
+const deleteLinkSent = ref(false)
+const sendingDeleteLink = ref(false)
+const { remaining: deleteCooldown, start: startDeleteCooldown, triggerFrom429 } =
+  useRateLimitCooldown()
 
-const deleteAccount = async () => {
+const requestDeleteLink = async () => {
+  if (sendingDeleteLink.value || deleteCooldown.value > 0) return
   deleteError.value = null
-  deleting.value = true
+  sendingDeleteLink.value = true
   try {
-    await auth.deleteAccount(deletePassword.value)
-    await navigateTo('/login?deleted=1')
+    await auth.requestAccountDeletion()
+    deleteLinkSent.value = true
+    startDeleteCooldown(DELETE_LINK_COOLDOWN_SECONDS)
   } catch (e: unknown) {
     const err = e as { response?: { status?: number }; data?: { detail?: string } }
-    if (err?.data?.detail === 'lessons_in_progress') {
+    if (err?.response?.status === 429) {
+      triggerFrom429(e)
+      deleteError.value = 'Письмо уже отправлено. Подождите перед повторной отправкой.'
+    } else if (err?.data?.detail === 'lessons_in_progress') {
       deleteError.value =
         'Идёт генерация урока. Дождитесь её завершения или отмените, затем повторите.'
-    } else if (err?.response?.status === 400) {
-      deleteError.value = 'Неверный пароль.'
     } else {
-      deleteError.value = err?.data?.detail ?? 'Не удалось удалить аккаунт.'
+      deleteError.value = err?.data?.detail ?? 'Не удалось отправить письмо. Попробуйте позже.'
     }
   } finally {
-    deleting.value = false
+    sendingDeleteLink.value = false
   }
 }
 </script>
@@ -392,6 +400,7 @@ const deleteAccount = async () => {
           восстановить по ссылке из письма или по email и паролю. Всё это время адрес остаётся
           занятым; освободить его раньше можно отдельной ссылкой из письма.
           После {{ RESTORE_DAYS }} дней данные обезличиваются безвозвратно.
+          Подтверждение удаления придёт на почту аккаунта — {{ user?.email }}.
         </p>
 
         <UiButton
@@ -403,14 +412,17 @@ const deleteAccount = async () => {
           Удалить аккаунт
         </UiButton>
 
-        <form v-else class="space-y-4" @submit.prevent="deleteAccount">
-          <UiInput
-            v-model="deletePassword"
-            label="Подтвердите паролем"
-            type="password"
-            placeholder="••••••••"
-            autocomplete="current-password"
-          />
+        <div v-else class="space-y-4">
+          <p
+            v-if="deleteLinkSent"
+            class="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800"
+          >
+            <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Письмо отправлено на {{ user?.email }}. Перейдите по ссылке из письма, чтобы
+              подтвердить удаление — она действует 30 минут.
+            </span>
+          </p>
 
           <p
             v-if="deleteError"
@@ -422,18 +434,22 @@ const deleteAccount = async () => {
 
           <div class="flex gap-2">
             <UiButton
-              type="submit"
+              type="button"
               variant="danger"
-              :loading="deleting"
-              :disabled="!deletePassword"
+              :loading="sendingDeleteLink"
+              :disabled="deleteCooldown > 0"
+              @click="requestDeleteLink"
             >
-              {{ deleting ? 'Удаление…' : 'Да, удалить аккаунт' }}
+              <template v-if="sendingDeleteLink">Отправка…</template>
+              <template v-else-if="deleteCooldown > 0">Подождите {{ deleteCooldown }} с</template>
+              <template v-else-if="deleteLinkSent">Отправить письмо ещё раз</template>
+              <template v-else>Отправить письмо для подтверждения</template>
             </UiButton>
             <UiButton type="button" variant="ghost" @click="confirmingDelete = false">
               Отмена
             </UiButton>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   </div>

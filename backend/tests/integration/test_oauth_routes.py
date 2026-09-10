@@ -13,10 +13,12 @@ from httpx import AsyncClient
 from sqlalchemy import func, select
 
 from app.config import settings
-from app.constants import CONSENT_POLICY_VERSION
+from app.constants import ACCOUNT_PENDING_DELETION_CODE, CONSENT_POLICY_VERSION
 from app.models.oauth_account import OAuthAccount
 from app.models.user import User, UserRole
 from app.services import oauth_service
+from app.services.account_service import anonymize_user_fields
+from app.services.auth_service import soft_delete_user
 
 pytestmark = pytest.mark.integration
 
@@ -463,3 +465,81 @@ async def test_password_login_on_passwordless_account_is_401(
     resp = await client.post("/api/v1/auth/login", json={"email": email, "password": "whatever123"})
     assert resp.status_code == 401
     assert resp.json()["detail"] == "Invalid credentials"
+
+
+# -- soft-deleted accounts (the 30-day restore window) ------------------------
+
+
+async def test_callback_known_identity_of_deleted_account_offers_restore(
+    client: AsyncClient, db_session: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Branch A: the identity is known but its owner is inside the restore
+    window. Social sign-in must not resurrect it."""
+    email, sub = _email(), _sub()
+    user = User(email=email, hashed_password=None, role=UserRole.teacher, email_verified=True)
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(
+        OAuthAccount(user_id=user.id, provider="google", provider_user_id=sub, email=email)
+    )
+    soft_delete_user(user)
+    await db_session.flush()
+
+    _stub_provider(monkeypatch, _google_info(email, sub))
+    resp = await _callback(client, await _begin(client))
+
+    assert resp.status_code == 302
+    assert _reason(resp) == ACCOUNT_PENDING_DELETION_CODE
+    assert "access_token" not in resp.cookies
+    await db_session.refresh(user)
+    assert user.deleted_at is not None
+
+
+async def test_callback_email_of_deleted_account_does_not_register_again(
+    client: AsyncClient, db_session: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Branch B without an identity row: the mailbox is still occupied by the
+    deleted account, so we must neither create a second user (unique violation)
+    nor sign the old one back in."""
+    email, sub = _email(), _sub()
+    user = User(email=email, hashed_password=None, role=UserRole.teacher, email_verified=True)
+    db_session.add(user)
+    await db_session.flush()
+    soft_delete_user(user)
+    await db_session.flush()
+
+    _stub_provider(monkeypatch, _google_info(email, sub))
+    resp = await _callback(client, await _begin(client))
+
+    assert resp.status_code == 302
+    assert _reason(resp) == ACCOUNT_PENDING_DELETION_CODE
+    assert "oauth_pending" not in resp.headers["location"]
+    rows = (
+        await db_session.scalars(
+            select(User).where(User.email == email).execution_options(include_deleted=True)
+        )
+    ).all()
+    assert len(rows) == 1
+
+
+async def test_callback_anonymized_account_is_disabled_not_restorable(
+    client: AsyncClient, db_session: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Past the window the row is a tombstone: offering restore would send the
+    user to a link that can only fail."""
+    email, sub = _email(), _sub()
+    user = User(email=email, hashed_password=None, role=UserRole.teacher, email_verified=True)
+    db_session.add(user)
+    await db_session.flush()
+    db_session.add(
+        OAuthAccount(user_id=user.id, provider="google", provider_user_id=sub, email=email)
+    )
+    soft_delete_user(user)
+    anonymize_user_fields(user)
+    await db_session.flush()
+
+    _stub_provider(monkeypatch, _google_info(email, sub))
+    resp = await _callback(client, await _begin(client))
+
+    assert resp.status_code == 302
+    assert _reason(resp) == "account_disabled"

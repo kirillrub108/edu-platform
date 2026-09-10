@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.constants import (
+    ACCOUNT_PENDING_DELETION_CODE,
     CONSENT_POLICY_VERSION,
     OAUTH_HTTP_TIMEOUT_SECONDS,
     OAUTH_PENDING_TICKET_TTL_SECONDS,
@@ -50,6 +51,7 @@ from app.models.user import User, UserRole
 from app.schemas.auth import is_disposable_domain
 from app.schemas.oauth import OAuthProfile, PendingTicket, StartedFlow
 from app.services import profile_service
+from app.services.account_service import is_anonymized
 
 logger = structlog.get_logger()
 
@@ -290,11 +292,31 @@ def _refresh_avatar(user: User, profile: OAuthProfile) -> None:
 
 
 async def _user_by_email(db: AsyncSession, email: str) -> User | None:
+    """The account holding ``email``, soft-deleted rows included.
+
+    include_deleted on purpose: a deleted account keeps its address for the
+    restore window, so the filtered lookup would report the mailbox as free and
+    send us into branch C, where the insert dies on the unique index. Seeing the
+    row lets `_assert_usable` answer with the restore path instead.
+    """
     # func.lower on the column too: pre-existing rows may hold a mixed-case address.
-    return await db.scalar(select(User).where(func.lower(User.email) == email))
+    return await db.scalar(
+        select(User).where(func.lower(User.email) == email).execution_options(include_deleted=True)
+    )
 
 
 def _assert_usable(user: User) -> None:
+    """Refuse a social sign-in that would resurrect or unlock a dead account.
+
+    A soft-deleted one gets its own reason code: the SPA turns it into the
+    existing "restore your account" call to action rather than a dead end.
+    """
+    if user.deleted_at is not None:
+        # An anonymized row is past its restore window; offering recovery there
+        # would send the user to a link that can only fail.
+        if is_anonymized(user):
+            raise OAuthError("account_disabled")
+        raise OAuthError(ACCOUNT_PENDING_DELETION_CODE)
     if not user.is_active:
         raise OAuthError("account_disabled")
 
@@ -310,9 +332,12 @@ async def resolve_user(db: AsyncSession, profile: OAuthProfile) -> User | None:
         )
     )
     if identity is not None:
-        # select() (not db.get) so the global soft-delete filter applies: a
-        # soft-deleted account must not be resurrected by a social login.
-        user = await db.scalar(select(User).where(User.id == identity.user_id))
+        # include_deleted so a soft-deleted owner is recognised rather than
+        # looking like a dangling identity — _assert_usable then refuses it with
+        # the restore code. A social login must never resurrect the account.
+        user = await db.scalar(
+            select(User).where(User.id == identity.user_id).execution_options(include_deleted=True)
+        )
         if user is None:
             raise OAuthError("account_disabled")
         _assert_usable(user)

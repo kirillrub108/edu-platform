@@ -1,9 +1,14 @@
 /**
  * Client-side cooldown after a 429 from a rate-limited auth endpoint
- * (/auth/register, /auth/login). Prefers the server's Retry-After header;
+ * (/auth/register, /auth/login), or after an action the server throttles for a
+ * known period (`start`, used by the account-deletion mail button).
+ * Prefers the server's Retry-After header;
  * main.py's rate_limit_exceeded_handler doesn't currently send one, so this
  * falls back to a fixed cooldown — see docs/DECISIONS.md §60.
  */
+// Explicit vue imports (not the Nuxt auto-import) so the composable can be
+// exercised straight from vitest — same as useMobileMenu.
+import { onScopeDispose, ref } from 'vue'
 
 const FALLBACK_COOLDOWN_SECONDS = 30
 
@@ -39,5 +44,5 @@ export const useRateLimitCooldown = () => {
     if (timer) clearInterval(timer)
   })
 
-  return { remaining, triggerFrom429 }
+  return { remaining, start, triggerFrom429 }
 }

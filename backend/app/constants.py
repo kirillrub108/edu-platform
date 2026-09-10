@@ -887,9 +887,17 @@ ACCOUNT_RESTORE_TTL_SECONDS: int = SOFT_DELETE_PURGE_DAYS * 24 * 60 * 60
 # Lifetime of the "release my address early" link. Short: it destroys the
 # ability to restore, so a stale link in an archived mailbox must not still fire.
 EMAIL_RELEASE_TTL_SECONDS: int = 60 * 60 * 24  # 24h
-# SPA routes for the two mailed links.
+# Lifetime of the "confirm my deletion" link. Short: it is the only proof of
+# ownership behind a destructive action, so a link left in a mailbox must not
+# stay armed.
+ACCOUNT_DELETE_TTL_SECONDS: int = 60 * 30  # 30m
+# Min seconds between two deletion-link requests for the same user (Redis
+# cooldown, enforced on top of the slowapi per-IP limit).
+ACCOUNT_DELETE_COOLDOWN_SECONDS: int = 60
+# SPA routes for the three mailed links.
 ACCOUNT_RESTORE_PATH: str = "/restore-account"
 EMAIL_RELEASE_PATH: str = "/release-email"
+ACCOUNT_DELETE_PATH: str = "/confirm-delete"
 # Tombstone address written by anonymize_user_fields. .invalid is reserved by
 # RFC 2606 and can never be a real mailbox, so it cannot collide with a sign-up.
 ANONYMIZED_EMAIL_DOMAIN: str = "deleted.invalid"

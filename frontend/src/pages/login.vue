@@ -54,16 +54,23 @@ if (route.query.deleted === '1') {
   justDeleted.value = true
 }
 
-if (route.query.oauth === '0') {
-  const reason = route.query.reason as string | undefined
-  error.value = (reason && OAUTH_REASONS[reason]) || 'Не удалось войти через провайдера'
-}
-
 // Set when the password was right but the account is inside its restore
 // window: the server only says so after proving the password, so showing the
 // recovery CTA here leaks nothing.
 const pendingDeletionUntil = ref<string | null>(null)
 const showRestoreCta = ref(false)
+
+if (route.query.oauth === '0') {
+  const reason = route.query.reason as string | undefined
+  if (reason === PENDING_DELETION_CODE) {
+    // Провайдер подтвердил владение адресом, но аккаунт удалён: предлагаем тот
+    // же путь восстановления, что и после входа по паролю. Срок не показываем —
+    // сюда его не передаём, чтобы не раскрывать состояние аккаунта в URL.
+    showRestoreCta.value = true
+  } else {
+    error.value = (reason && OAUTH_REASONS[reason]) || 'Не удалось войти через провайдера'
+  }
+}
 
 const submit = async () => {
   if (loading.value || cooldownRemaining.value > 0) return
