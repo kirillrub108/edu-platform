@@ -10,6 +10,13 @@ export interface UserOut {
   created_at: string
   /** Single computed field: uploaded avatar wins, else the provider's. */
   avatar_url: string | null
+  /**
+   * Delivery failure for this address, from /auth/me only (MeOut server-side).
+   * Never present on the UserOut embedded in a course owner — a student must
+   * not learn that their teacher's mailbox is bouncing.
+   */
+  email_bounced_at?: string | null
+  email_bounce_reason?: string | null
 }
 
 export type OAuthProvider = 'google' | 'yandex'
@@ -31,6 +38,9 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserOut | null>(null)
   const isAuthenticated = computed(() => !!user.value)
   const isEmailVerified = computed(() => !!user.value?.email_verified)
+  // Takes precedence over the verify prompt in the header: re-sending to an
+  // address that bounces is pointless, so the user is steered to change it.
+  const isEmailBounced = computed(() => !!user.value?.email_bounced_at)
 
   // Global "verify your email" prompt. Opened by useAiGuard when an unverified
   // user clicks an AI action, or by the AppHeader badge. The modal itself is
@@ -203,10 +213,24 @@ export const useAuthStore = defineStore('auth', () => {
     await apiFetch('/auth/confirm-release', { method: 'POST', body: { token } })
   }
 
+  // Authenticated: mail a confirmation link to the NEW address. Nothing about
+  // the account changes until that link is opened, so a typo is harmless.
+  const changeEmail = async (newEmail: string) => {
+    await apiFetch('/auth/change-email', { method: 'POST', body: { new_email: newEmail } })
+  }
+
+  // Anonymous: the server applies the address and revokes every session, so the
+  // local one is gone too — the page sends the user to /login afterwards.
+  const confirmEmailChange = async (token: string) => {
+    await apiFetch('/auth/confirm-email-change', { method: 'POST', body: { token } })
+    clearSession()
+  }
+
   return {
     user,
     isAuthenticated,
     isEmailVerified,
+    isEmailBounced,
     verifyPromptOpen,
     openVerifyPrompt,
     closeVerifyPrompt,
@@ -230,5 +254,7 @@ export const useAuthStore = defineStore('auth', () => {
     restoreAccount,
     requestEmailRelease,
     confirmEmailRelease,
+    changeEmail,
+    confirmEmailChange,
   }
 })

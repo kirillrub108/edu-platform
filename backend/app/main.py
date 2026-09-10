@@ -45,6 +45,7 @@ from app.routers import (
     tts,
     uploads,
     users,
+    webhooks_email,
 )
 from app.services import course_stream, yookassa_service
 
@@ -399,6 +400,7 @@ app.include_router(lesson_materials.router)
 app.include_router(notifications.router)
 app.include_router(system.router)
 app.include_router(tts.router)
+app.include_router(webhooks_email.router)
 
 
 @app.get("/", tags=["meta"])

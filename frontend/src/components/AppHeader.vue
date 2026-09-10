@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import {
-  LogOut, Menu, X, MailWarning, Coins, Settings, Bug,
+  LogOut, Menu, X, MailWarning, MailX, Coins, Settings, Bug,
   LayoutDashboard, BarChart3, Wallet, BookOpen, ClipboardList, FileQuestion, ChevronDown, Share2,
   type LucideIcon,
 } from 'lucide-vue-next'
 
 const auth = useAuthStore()
-const { user, isAuthenticated, isEmailVerified } = storeToRefs(auth)
+const { user, isAuthenticated, isEmailVerified, isEmailBounced } = storeToRefs(auth)
 const { logout, openVerifyPrompt } = auth
 
 const billing = useBillingStore()
@@ -97,8 +97,17 @@ const handleLogout = () => {
           <Coins class="w-3.5 h-3.5" />
           {{ available }}
         </NuxtLink>
+        <NuxtLink
+          v-if="user && isEmailBounced"
+          to="/account?tab=security"
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-rose-700 bg-rose-50 border border-rose-200 hover:bg-rose-100 transition"
+          :title="`Письмо на ${user.email} не доставлено — смените адрес`"
+        >
+          <MailX class="w-3.5 h-3.5" />
+          Письмо не доставлено
+        </NuxtLink>
         <button
-          v-if="user && !isEmailVerified"
+          v-else-if="user && !isEmailVerified"
           type="button"
           class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 hover:bg-amber-100 transition"
           title="Подтвердите email, чтобы открыть AI-функции"
@@ -232,8 +241,17 @@ const handleLogout = () => {
           </nav>
 
           <div class="mt-auto p-2 border-t border-gray-100 flex flex-col gap-0.5">
+            <NuxtLink
+              v-if="isAuthenticated && user && isEmailBounced"
+              to="/account?tab=security"
+              class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 transition text-left"
+              @click="close"
+            >
+              <MailX class="w-5 h-5 shrink-0" />
+              <span class="min-w-0">Письмо не доставлено</span>
+            </NuxtLink>
             <button
-              v-if="isAuthenticated && user && !isEmailVerified"
+              v-else-if="isAuthenticated && user && !isEmailVerified"
               type="button"
               class="flex items-center gap-3 px-3 min-h-[44px] rounded-xl text-sm font-medium text-amber-700 bg-amber-50 hover:bg-amber-100 transition text-left"
               @click="handleVerifyPrompt"

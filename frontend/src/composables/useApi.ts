@@ -31,6 +31,11 @@ function mapPydanticMessage(item: Pydantic422Item): string {
     const max = ctx?.max_length
     return typeof max === 'number' ? `Максимум ${max} символов` : 'Слишком длинное значение'
   }
+  if (type === 'value_error' && msg.includes('disposable_email_not_allowed')) {
+    // Must precede the generic "mentions email" branch below, which would
+    // otherwise swallow this into "Некорректный email".
+    return 'Одноразовые почтовые адреса не поддерживаются'
+  }
   if (type === 'value_error' && (msg.includes('@') || msg.toLowerCase().includes('email'))) {
     return 'Некорректный email'
   }
@@ -48,6 +53,15 @@ const KNOWN_DETAIL_RU: Record<string, string> = {
   account_disabled: 'Аккаунт отключён. Обратитесь в поддержку',
   account_conflict: 'К этому email уже привязан другой аккаунт провайдера',
   password_not_set: 'У аккаунта нет пароля — задайте его через «Забыли пароль?»',
+  // Deliverability 422s. Kept distinct from the disposable-domain message: one
+  // means "this domain cannot receive mail at all", the other "we don't accept
+  // throwaway inboxes", and telling a user the wrong one sends them in circles.
+  undeliverable_email_domain:
+    'На этот домен письма не доходят — у него нет почтовых серверов. Проверьте адрес.',
+  email_suppressed:
+    'Письма на этот адрес не доставляются. Укажите другой.',
+  email_unchanged: 'Это ваш текущий адрес.',
+  invalid_or_expired: 'Ссылка недействительна или устарела.',
 }
 
 function mapGeneralError(err: unknown): string {

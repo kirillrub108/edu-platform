@@ -42,6 +42,19 @@ class UserOut(UserBase):
         return self.avatar_external_url
 
 
+class MeOut(UserOut):
+    """The signed-in user's own view of themselves — /auth/me only.
+
+    Delivery state is deliberately NOT on UserOut: that schema is embedded in
+    CourseOut.owner, so anything added there is served to every student who can
+    see the course. Whether a teacher's mailbox is bouncing is the teacher's
+    business.
+    """
+
+    email_bounced_at: datetime | None = None
+    email_bounce_reason: str | None = None
+
+
 # ── Own settings (/users/me/*) ───────────────────────────────────────────────
 
 

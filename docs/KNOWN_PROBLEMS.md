@@ -405,6 +405,50 @@ Studio + SpeechKit v3, удаления контейнера `silero-tts` из c
 |---|---|---|
 | [DECISIONS.md](DECISIONS.md) §26 | «Polling вместо SSE» | прогресс стримится по SSE, поллинг — fallback (отмечено в ARCHITECTURE §7); запись сохранена как история решения |
 
+## Доставка почты: подавление и MX-проверка
+
+### `DNS_RESOLVERS` пустой → проверка домена на регистрации не отсеивает ничего
+
+- **Где:** [backend/app/services/email_deliverability_service.py](../backend/app/services/email_deliverability_service.py), [backend/app/config.py](../backend/app/config.py) (`DNS_RESOLVERS`).
+- **Что не так:** внутри Docker `/etc/resolv.conf` указывает на встроенный резолвер 127.0.0.11.
+  На несуществующий домен он отвечает SERVFAIL (или таймаутом), а не NXDOMAIN. SERVFAIL у нас
+  fail-open, поэтому с пустым `DNS_RESOLVERS` `casdsa@dsa.da` регистрируется как ни в чём не
+  бывало. Измерено: через 127.0.0.11 → `LifetimeTimeout`/`NoNameservers`, через 1.1.1.1 → NXDOMAIN.
+- **Почему не сделано иначе:** считать SERVFAIL отказом нельзя — временно сломанные NS живого
+  домена стоили бы владельцу регистрации. См. [DECISIONS §66](DECISIONS.md).
+- **Что делать:** держать `DNS_RESOLVERS` заполненным в `.env` и `.env.prod` (в `.env.example`
+  стоит `1.1.1.1,8.8.8.8`). При выкате на прод проверить, что исходящий UDP/53 к ним открыт —
+  иначе проверка тихо деградирует в fail-open и это будет видно только по WARNING
+  `email_domain_dns_unavailable` в логах.
+
+### Кеш вердикта по домену не инвалидируется
+
+- **Где:** [backend/app/services/email_deliverability_service.py](../backend/app/services/email_deliverability_service.py) (`domain_accepts_mail`), [backend/app/constants.py](../backend/app/constants.py) (`DNS_DOMAIN_CACHE_TTL_SECONDS`).
+- **Что не так:** отрицательный вердикт живёт в Redis час. Домен, у которого MX появился только
+  что, всё это время получает 422 — сбросить можно лишь удалением ключа `email_domain_mx:<домен>`.
+- **Почему не критично:** час, и это домен, у которого на момент проверки не было ни MX, ни A.
+- **Фикс по запросу:** более короткий TTL для отрицательных вердиктов, чем для положительных.
+
+### Снять подавление можно только руками
+
+- **Где:** [backend/app/services/email_suppression_service.py](../backend/app/services/email_suppression_service.py), таблица `email_suppressions`.
+- **Что не так:** адрес, попавший в подавление, выходит оттуда только по событию
+  `email.delivered` — но писем туда больше не отправляется, так что события не будет. Нет ни
+  админ-эндпоинта, ни CLI (в отличие от `app.scripts.grant_credits` для кредитов).
+- **Обход:** `DELETE FROM email_suppressions WHERE email = '...'` плюс обнуление
+  `users.email_bounced_at` / `email_bounce_reason`.
+- **Фикс по запросу:** команда вида `python -m app.scripts.unsuppress <email>` по образцу
+  `grant_credits`. Учесть: жалобу (`complaint`) снимать вручную — сознательное решение,
+  автоматически она не снимается никогда ([DECISIONS §66](DECISIONS.md)).
+
+### Null MX (RFC 7505) не распознаётся
+
+- **Где:** [backend/app/services/email_deliverability_service.py](../backend/app/services/email_deliverability_service.py) (`_resolve_has_mail_host`).
+- **Что не так:** домен, который явно объявил «почту не принимаю» одной MX-записью с целью `.`,
+  считается пригодным — проверяется только непустота ответа.
+- **Почему не критично:** так объявляют себя в основном служебные домены, на которые никто не
+  регистрируется; отсев всё равно отработает по вебхуку после первого письма.
+
 ---
 
 ## Карта приоритетов

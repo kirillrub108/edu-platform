@@ -102,6 +102,16 @@ class Settings(BaseSettings):
     EMAIL_PROVIDER: str = "resend"
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "Edllm <no-reply@edllm.app>"
+    # Svix signing secret for the Resend delivery webhook ("whsec_..."). Empty
+    # disables the endpoint (503) the same way an empty ADMIN_API_TOKEN closes
+    # the admin routes — see routers/webhooks_email.py.
+    RESEND_WEBHOOK_SECRET: str = ""
+    # Recursive resolvers for the sign-up MX/A probe, comma-separated; empty
+    # uses /etc/resolv.conf. Worth setting: inside a Docker network resolv.conf
+    # points at the embedded stub (127.0.0.11), which answers SERVFAIL rather
+    # than NXDOMAIN for a non-existent domain — and SERVFAIL is "unknown", so
+    # the probe fails open and catches nothing. See email_deliverability_service.
+    DNS_RESOLVERS: str = ""
     # Public origin of the SPA — used to build verify/redirect/lesson links.
     FRONTEND_URL: str = "http://localhost:3000"
 

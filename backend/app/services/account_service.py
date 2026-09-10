@@ -36,6 +36,8 @@ from app.constants import (
     ACCOUNT_RESTORE_PATH,
     ACCOUNT_RESTORE_TTL_SECONDS,
     ANONYMIZED_EMAIL_DOMAIN,
+    EMAIL_CHANGE_PATH,
+    EMAIL_CHANGE_TTL_SECONDS,
     EMAIL_RELEASE_PATH,
     EMAIL_RELEASE_TTL_SECONDS,
     PROFILE_DELETED_USER_NAME,
@@ -44,13 +46,14 @@ from app.constants import (
 from app.models.course import Course
 from app.models.lesson import Lesson, LessonStatus, Module
 from app.models.user import User
-from app.services import profile_service
+from app.services import email_deliverability_service, profile_service
 from app.services.auth_service import AuthService, soft_delete_user, verify_password
 
 logger = structlog.get_logger()
 
 _RESTORE_SALT = "account-restore"
 _RELEASE_SALT = "email-release"
+_CHANGE_SALT = "email-change"
 
 # Argon2 never produces this, so it can never verify — and unlike a random hash
 # it is self-describing when someone reads the row.
@@ -386,3 +389,131 @@ async def confirm_email_release(db: AsyncSession, redis: Redis, token: str) -> N
     profile_service.drop_avatar_file(user.id)
     await db.commit()
     logger.info("account_anonymized_on_release", user_id=str(user.id))
+
+
+# ── Email change ─────────────────────────────────────────────────────────────
+
+_OPAQUE_CHANGE_ERROR = HTTPException(
+    status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_or_expired"
+)
+
+# The old address is never notified. It is, by the premise of this feature, an
+# address our mail does not reach — a "your email was changed" warning sent
+# there would bounce like everything else. See DECISIONS §60.
+
+
+def generate_email_change_token(user_id: str, current_email: str, new_email: str) -> str:
+    """Sign the move. `old` pins the token to the address the account had when
+    it was minted, which is what makes a superseded token unusable: request a
+    second change (or confirm the first) and every earlier token stops matching.
+    """
+    return _serializer(_CHANGE_SALT).dumps(
+        {"uid": user_id, "old": current_email.lower(), "new": new_email.lower()}
+    )
+
+
+def verify_email_change_token(token: str) -> tuple[str, str, str]:
+    """(user_id, old_email, new_email) from a valid token. ValueError otherwise."""
+    try:
+        payload = _serializer(_CHANGE_SALT).loads(token, max_age=EMAIL_CHANGE_TTL_SECONDS)
+    except SignatureExpired:
+        raise ValueError("expired")
+    except BadSignature:
+        raise ValueError("invalid")
+    if not isinstance(payload, dict):
+        raise ValueError("invalid")
+    uid, old, new = payload.get("uid"), payload.get("old"), payload.get("new")
+    if not isinstance(uid, str) or not isinstance(old, str) or not isinstance(new, str):
+        raise ValueError("invalid")
+    return uid, old, new
+
+
+def _change_used_key(token: str) -> str:
+    return f"email_change_used:{hashlib.sha256(token.encode()).hexdigest()}"
+
+
+async def burn_change_token(redis: Redis, token: str) -> bool:
+    """Atomically mark a change token spent. False = already used."""
+    marked = await redis.set(_change_used_key(token), "1", nx=True, ex=EMAIL_CHANGE_TTL_SECONDS)
+    return bool(marked)
+
+
+def email_change_url(token: str) -> str:
+    return f"{settings.FRONTEND_URL}{EMAIL_CHANGE_PATH}?mode=change&token={token}"
+
+
+async def _email_taken(db: AsyncSession, email: str, *, exclude_id: UUID) -> bool:
+    """True if any account other than `exclude_id` holds `email`. Sees through
+    the soft-delete filter: a deleted-but-restorable account still occupies its
+    address, so handing it to someone else would break that restore."""
+    holder = await db.scalar(
+        select(User.id)
+        .where(func.lower(User.email) == email.lower(), User.id != exclude_id)
+        .execution_options(include_deleted=True)
+    )
+    return holder is not None
+
+
+async def request_email_change(db: AsyncSession, redis: Redis, user: User, new_email: str) -> None:
+    """Validate the target address and mail it a confirmation link.
+
+    Nothing about the account changes here — the address only moves once the
+    link is clicked, so an unreachable target leaves the user exactly where they
+    were rather than locking them out.
+    """
+    if new_email.lower() == user.email.lower():
+        raise HTTPException(status_code=409, detail="email_unchanged")
+    if await _email_taken(db, new_email, exclude_id=user.id):
+        raise HTTPException(status_code=409, detail="Email already registered")
+    # Same gate registration uses: suppression list, then MX/A. Raises 422.
+    await email_deliverability_service.assert_deliverable(db, redis, new_email)
+
+    from app.tasks.email_pipeline import send_email
+
+    token = generate_email_change_token(str(user.id), user.email, new_email)
+    try:
+        send_email.delay(
+            to=new_email,
+            subject="Подтвердите новый email — Edllm",
+            template_name="change_email.html",
+            context={
+                "full_name": user.full_name or "",
+                "new_email": new_email,
+                "confirm_url": email_change_url(token),
+            },
+        )
+    except Exception:
+        logger.warning("email_change_enqueue_failed", user_id=str(user.id), exc_info=True)
+
+
+async def confirm_email_change(db: AsyncSession, redis: Redis, token: str) -> User:
+    """Apply the move: new address, verified, bounce flags cleared.
+
+    Every token failure collapses to one 400 — a distinct "already used" would
+    tell an attacker holding a stale link that it once worked.
+    """
+    try:
+        user_id, old_email, new_email = verify_email_change_token(token)
+    except ValueError:
+        raise _OPAQUE_CHANGE_ERROR
+    if not await burn_change_token(redis, token):
+        raise _OPAQUE_CHANGE_ERROR
+    try:
+        user = await db.scalar(select(User).where(User.id == UUID(user_id)))
+    except ValueError:
+        raise _OPAQUE_CHANGE_ERROR
+    if user is None or user.email.lower() != old_email:
+        # Address already moved on: this token predates a later change.
+        raise _OPAQUE_CHANGE_ERROR
+    if await _email_taken(db, new_email, exclude_id=user.id):
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    user.email = new_email
+    user.email_verified = True
+    # The bounce belonged to the address being left behind. Its suppression row
+    # stays (that mailbox is still dead) — only the account's warning clears.
+    user.email_bounced_at = None
+    user.email_bounce_reason = None
+    await db.commit()
+    logger.info("email_changed", user_id=str(user.id))
+    return user

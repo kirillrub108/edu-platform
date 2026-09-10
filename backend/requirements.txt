@@ -37,3 +37,7 @@ prometheus-client>=0.20
 boto3>=1.34
 sse-starlette>=1.6.1
 disposable-email-domains>=0.0.245
+# MX/A deliverability probe on sign-up. stdlib has no MX resolver, and this
+# is the only maintained one with a native asyncio API (dns.asyncresolver),
+# so the lookup does not need a threadpool hop off the event loop.
+dnspython==2.7.0

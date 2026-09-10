@@ -4,7 +4,7 @@ from disposable_email_domains import blocklist
 from pydantic import AfterValidator, BaseModel, EmailStr, Field, model_validator
 
 from app.models.user import UserRole
-from app.schemas.user import UserOut
+from app.schemas.user import MeOut, UserOut
 
 
 def _reject_blank_password(value: str) -> str:
@@ -112,6 +112,24 @@ class RestoreAccountRequest(BaseModel):
     password: str | None = None
 
 
+class ChangeEmailRequest(BaseModel):
+    """The new address only. Syntax and the disposable-domain block are shared
+    with registration; suppression and DNS are checked in the service, since
+    both need I/O a Pydantic validator must not do."""
+
+    new_email: EmailStr
+
+    @model_validator(mode="after")
+    def _reject_disposable_email(self) -> "ChangeEmailRequest":
+        if is_disposable_domain(self.new_email.split("@")[-1]):
+            raise ValueError("disposable_email_not_allowed")
+        return self
+
+
+class ConfirmEmailChangeRequest(BaseModel):
+    token: str
+
+
 class ReleaseEmailRequest(BaseModel):
     email: EmailStr
 
@@ -132,6 +150,9 @@ __all__ = [
     "RestoreAccountRequest",
     "ReleaseEmailRequest",
     "ConfirmReleaseRequest",
+    "ChangeEmailRequest",
+    "ConfirmEmailChangeRequest",
     "UserOut",
+    "MeOut",
     "is_disposable_domain",
 ]

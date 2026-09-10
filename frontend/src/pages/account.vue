@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { AlertCircle, CheckCircle2, TriangleAlert } from 'lucide-vue-next'
+import { AlertCircle, CheckCircle2, MailX, TriangleAlert } from 'lucide-vue-next'
+import { parseApiError } from '~/composables/useApi'
 import type { ProfileVisibility } from '~/stores/auth'
 import { NOTIFICATION_CATEGORIES } from '~/stores/notifications'
 
@@ -19,7 +20,9 @@ const TABS = [
   { id: 'danger', label: 'Удаление аккаунта' },
 ]
 const route = useRoute()
-const tab = ref(route.query.tab === 'privacy' ? 'privacy' : 'profile')
+const tab = ref(
+  TABS.some((t) => t.id === route.query.tab) ? String(route.query.tab) : 'profile',
+)
 
 onMounted(() => notifications.fetchSettings())
 
@@ -81,6 +84,37 @@ const confirm = ref('')
 const error = ref<string | null>(null)
 const success = ref(false)
 const loading = ref(false)
+
+// ── Смена email ──────────────────────────────────────────────────────────────
+// Nothing changes here until the link mailed to the new address is opened, so
+// the success state is "письмо отправлено", not "адрес изменён".
+const { isEmailBounced } = storeToRefs(auth)
+const newEmail = ref('')
+const emailError = ref<string | null>(null)
+const emailSentTo = ref<string | null>(null)
+const savingEmail = ref(false)
+
+const submitEmail = async () => {
+  emailError.value = null
+  emailSentTo.value = null
+  const address = newEmail.value.trim()
+  if (!address) {
+    emailError.value = 'Укажите новый адрес.'
+    return
+  }
+  savingEmail.value = true
+  try {
+    await auth.changeEmail(address)
+    emailSentTo.value = address
+    newEmail.value = ''
+  } catch (e: unknown) {
+    const parsed = parseApiError(e)
+    emailError.value =
+      parsed.general || parsed.fields.new_email || 'Не удалось отправить письмо. Попробуйте позже.'
+  } finally {
+    savingEmail.value = false
+  }
+}
 
 const submit = async () => {
   error.value = null
@@ -214,6 +248,51 @@ const deleteAccount = async () => {
 
       <!-- Безопасность -->
       <template v-else-if="tab === 'security'">
+        <div class="mb-6 rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
+          <h2 class="mb-1 text-base font-semibold text-gray-900">Смена email</h2>
+          <p class="mb-4 text-sm text-gray-500">
+            Текущий адрес: <span class="font-medium text-gray-700">{{ user?.email }}</span>.
+            Письмо с подтверждением придёт на новый адрес — до перехода по ссылке ничего не изменится.
+          </p>
+
+          <p
+            v-if="isEmailBounced"
+            class="mb-4 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700"
+          >
+            <MailX class="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Письма на текущий адрес не доставляются. Укажите другой — иначе вы не получите
+              подтверждение почты и уведомления.
+            </span>
+          </p>
+
+          <form class="space-y-4" @submit.prevent="submitEmail">
+            <UiInput
+              v-model="newEmail"
+              label="Новый email"
+              type="email"
+              placeholder="you@example.com"
+              autocomplete="email"
+              :error="emailError ?? undefined"
+            />
+
+            <p
+              v-if="emailSentTo"
+              class="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700"
+            >
+              <CheckCircle2 class="mt-0.5 h-4 w-4 shrink-0" />
+              <span>
+                Письмо отправлено на {{ emailSentTo }}. Откройте ссылку из письма, чтобы
+                завершить смену — после этого нужно будет войти заново.
+              </span>
+            </p>
+
+            <UiButton type="submit" variant="primary" size="lg" block :loading="savingEmail">
+              {{ savingEmail ? 'Отправка…' : 'Отправить подтверждение' }}
+            </UiButton>
+          </form>
+        </div>
+
         <div class="rounded-2xl border border-gray-100 bg-white p-6 sm:p-8 shadow-soft">
           <h2 class="mb-4 text-base font-semibold text-gray-900">Смена пароля</h2>
           <form class="space-y-4" @submit.prevent="submit">

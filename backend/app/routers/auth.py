@@ -17,9 +17,12 @@ from app.limiter import limiter
 from app.models.user import User
 from app.redis_client import get_redis
 from app.schemas.auth import (
+    ChangeEmailRequest,
     ChangePasswordRequest,
+    ConfirmEmailChangeRequest,
     ConfirmReleaseRequest,
     ForgotPasswordRequest,
+    MeOut,
     ReleaseEmailRequest,
     ResetPasswordRequest,
     RestoreAccountRequest,
@@ -28,7 +31,12 @@ from app.schemas.auth import (
     UserRegister,
     VerifyEmailRequest,
 )
-from app.services import account_service, email_token_service, password_reset_service
+from app.services import (
+    account_service,
+    email_deliverability_service,
+    email_token_service,
+    password_reset_service,
+)
 from app.services.auth_service import (
     AuthService,
     decode_token,
@@ -123,7 +131,14 @@ async def register(
     request: Request,
     data: UserRegister,
     service: AuthService = Depends(get_auth_service),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ) -> User:
+    # Before the row exists: a domain with no MX/A, or an address already known
+    # to bounce, means the verification mail cannot arrive — so there is no
+    # point creating an account that can never be verified. 422, fail-open on a
+    # DNS outage (see email_deliverability_service).
+    await email_deliverability_service.assert_deliverable(db, redis, data.email)
     user = await service.register(
         email=data.email,
         password=data.password,
@@ -208,8 +223,10 @@ async def logout_all(
     return response
 
 
-@router.get("/me", response_model=UserOut)
+@router.get("/me", response_model=MeOut)
 async def me(user: User = Depends(get_current_user)) -> User:
+    """MeOut, not UserOut: it adds the delivery-failure fields, which must not
+    ride along on the shared schema embedded in CourseOut.owner."""
     return user
 
 
@@ -277,6 +294,7 @@ async def verify_email_post(
 async def resend_verification(
     request: Request,
     user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
     redis: Redis = Depends(get_redis),
 ) -> Response:
     """Re-send the verification email to the logged-in user. Already-verified
@@ -284,6 +302,9 @@ async def resend_verification(
     on rapid repeats (on top of the slowapi per-IP limit)."""
     if user.email_verified:
         raise HTTPException(status_code=400, detail="Email already verified")
+    # Re-sending to a bouncing address just burns another delivery attempt; the
+    # SPA turns this 422 into "change your address" instead.
+    await email_deliverability_service.assert_deliverable(db, redis, user.email)
     if await email_token_service.under_cooldown(redis, str(user.id)):
         raise HTTPException(
             status_code=429,
@@ -408,3 +429,44 @@ async def confirm_release(
     by a flag: the hash and the email the restore paths match on are gone."""
     await account_service.confirm_email_release(db, redis, data.token)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/change-email", status_code=status.HTTP_204_NO_CONTENT)
+@limiter.limit("3/minute")
+async def change_email(
+    request: Request,
+    data: ChangeEmailRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+) -> Response:
+    """Authenticated (cookie + CSRF, via get_current_user): mail a confirmation
+    link to the NEW address. Nothing changes until that link is clicked, so a
+    typo cannot lock anyone out. 409 if the address is taken or unchanged, 422
+    if it is undeliverable."""
+    await account_service.request_email_change(db, redis, user, data.new_email)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/confirm-email-change", status_code=status.HTTP_200_OK)
+@limiter.limit("5/minute")
+async def confirm_email_change(
+    request: Request,
+    response: Response,
+    data: ConfirmEmailChangeRequest,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    service: AuthService = Depends(get_auth_service),
+) -> dict:
+    """Anonymous: burn the one-time token, move the address, mark it verified.
+
+    Every refresh family is then revoked — the email IS the login identifier, so
+    the old sessions were issued against an identity that no longer exists — and
+    this browser's cookies are cleared too, since revoking a family leaves an
+    already-issued access token valid until it expires (same as reset-password).
+    No CSRF: the single-use signed token is the proof.
+    """
+    user = await account_service.confirm_email_change(db, redis, data.token)
+    await service.logout_all_sessions(str(user.id))
+    _clear_auth_cookies(response)
+    return {"email": user.email, "email_verified": True}

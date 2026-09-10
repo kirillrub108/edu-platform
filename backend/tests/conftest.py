@@ -120,6 +120,12 @@ def _set_database_url(
 
     _notif_mod.SyncSession = _vp_mod.SyncSession
 
+    # email_pipeline too — it reads the suppression list before sending and
+    # writes it from the Resend webhook task.
+    import app.tasks.email_pipeline as _email_mod
+
+    _email_mod.SyncSession = _vp_mod.SyncSession
+
     # 2a) usage_service builds its private sync engine lazily on first record;
     # drop anything cached so it re-reads the rebound settings/URL.
     import app.services.usage_service as _usage_mod

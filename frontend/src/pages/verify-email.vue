@@ -17,11 +17,16 @@ const REASONS: Record<string, string> = {
   expired: 'Ссылка устарела. Запросите новое письмо.',
   used: 'Эта ссылка уже была использована.',
   invalid: 'Ссылка недействительна. Запросите новое письмо.',
+  invalid_or_expired: 'Ссылка недействительна или устарела. Запросите смену email заново.',
 }
 
 const dashboardLink = computed(() =>
   auth.user?.role === 'student' ? '/student/dashboard' : '/dashboard',
 )
+
+// The same page serves the email-change confirmation (?mode=change): identical
+// three states, only the endpoint and the copy differ — not worth a second page.
+const isChange = computed(() => route.query.mode === 'change')
 
 const verify = async () => {
   const raw = route.query.token
@@ -32,14 +37,22 @@ const verify = async () => {
     return
   }
   try {
-    await apiFetch('/auth/verify-email', { method: 'POST', body: { token } })
-    // Refresh user so the badge clears and AI unlocks without a re-login.
-    await auth.fetchMe()
+    if (isChange.value) {
+      // The server revokes every session, so there is nothing left to refresh —
+      // the user signs in again with the new address.
+      await auth.confirmEmailChange(token)
+    } else {
+      await apiFetch('/auth/verify-email', { method: 'POST', body: { token } })
+      // Refresh user so the badge clears and AI unlocks without a re-login.
+      await auth.fetchMe()
+    }
     state.value = 'success'
   } catch (e: any) {
     state.value = 'error'
     const reason = e?.data?.detail as string | undefined
-    errorText.value = (reason && REASONS[reason]) || 'Не удалось подтвердить email.'
+    errorText.value =
+      (reason && REASONS[reason]) ||
+      (isChange.value ? 'Не удалось сменить email.' : 'Не удалось подтвердить email.')
   }
 }
 
@@ -67,31 +80,43 @@ onMounted(verify)
     <div class="bg-white rounded-2xl border border-gray-100 shadow-soft p-8 w-full max-w-md text-center space-y-4">
       <template v-if="state === 'verifying'">
         <Loader2 class="w-10 h-10 text-violet-500 mx-auto animate-spin" />
-        <h1 class="text-lg font-semibold text-gray-900">Подтверждаем email…</h1>
+        <h1 class="text-lg font-semibold text-gray-900">
+          {{ isChange ? 'Меняем email…' : 'Подтверждаем email…' }}
+        </h1>
       </template>
 
       <template v-else-if="state === 'success'">
         <CheckCircle2 class="w-12 h-12 text-emerald-500 mx-auto" />
-        <h1 class="text-lg font-semibold text-gray-900">Email подтверждён</h1>
-        <p class="text-sm text-gray-500">Теперь доступны все AI-функции.</p>
+        <h1 class="text-lg font-semibold text-gray-900">
+          {{ isChange ? 'Email изменён' : 'Email подтверждён' }}
+        </h1>
+        <p class="text-sm text-gray-500">
+          {{
+            isChange
+              ? 'Все сессии завершены — войдите с новым адресом.'
+              : 'Теперь доступны все AI-функции.'
+          }}
+        </p>
         <NuxtLink
-          :to="auth.isAuthenticated ? dashboardLink : '/login'"
+          :to="!isChange && auth.isAuthenticated ? dashboardLink : '/login'"
           class="inline-block px-5 py-2.5 rounded-xl text-sm font-medium bg-violet-700 hover:bg-violet-600 text-white shadow-sm transition"
         >
-          {{ auth.isAuthenticated ? 'В личный кабинет' : 'Войти' }}
+          {{ !isChange && auth.isAuthenticated ? 'В личный кабинет' : 'Войти' }}
         </NuxtLink>
       </template>
 
       <template v-else>
         <XCircle class="w-12 h-12 text-rose-500 mx-auto" />
-        <h1 class="text-lg font-semibold text-gray-900">Не удалось подтвердить</h1>
+        <h1 class="text-lg font-semibold text-gray-900">
+          {{ isChange ? 'Не удалось сменить email' : 'Не удалось подтвердить' }}
+        </h1>
         <p class="text-sm text-gray-500">{{ errorText }}</p>
 
         <div v-if="resendMessage" class="text-sm text-violet-700">{{ resendMessage }}</div>
 
         <div class="flex flex-col gap-2 pt-1">
           <button
-            v-if="auth.isAuthenticated"
+            v-if="auth.isAuthenticated && !isChange"
             type="button"
             :disabled="resending"
             class="px-5 py-2.5 rounded-xl text-sm font-medium bg-violet-700 hover:bg-violet-600 text-white shadow-sm transition disabled:opacity-50"

@@ -30,9 +30,15 @@ pytestmark = pytest.mark.integration
 _VERIFIED_GATES = {require_verified_email, require_verified_teacher}
 _HTTP_METHODS = {"GET", "POST", "PUT", "PATCH", "DELETE"}
 # Celery enqueues that are infrastructure, not gated AI operations.
-# process_yookassa_payment settles a paid YooKassa webhook (server-to-server,
-# no cookie auth, no AI) — it must NOT be in AI_GATED_ENDPOINTS.
-_INFRA_TASKS = ("send_email", "process_yookassa_payment")
+# process_yookassa_payment settles a paid YooKassa webhook and
+# handle_email_delivery_event records a Resend bounce/complaint — both are
+# server-to-server provider callbacks with no cookie auth and no AI, so neither
+# may be in AI_GATED_ENDPOINTS.
+_INFRA_TASKS = (
+    "send_email",
+    "process_yookassa_payment",
+    "handle_email_delivery_event",
+)
 # AI Celery endpoints intentionally NOT behind the gate (see docs/DECISIONS.md):
 # student quiz grading must work for unverified students.
 _EXCLUDED_TASKS = ("grade_attempt_task",)

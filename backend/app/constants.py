@@ -759,6 +759,28 @@ EMAIL_VERIFY_RESEND_COOLDOWN_SECONDS: int = 60
 EMAIL_SEND_MAX_RETRIES: int = 3
 EMAIL_SEND_RETRY_BACKOFF: int = 5  # base seconds; Celery grows it exponentially
 
+# ── Delivery feedback: Resend webhook + address deliverability ───────────────
+# How far the svix-timestamp may drift from our clock before the signature is
+# rejected. Svix's own recommendation; also what bounds a captured-request replay.
+RESEND_WEBHOOK_TOLERANCE_SECONDS: int = 5 * 60
+# How long a processed svix-id stays remembered so Resend's redelivery of the
+# SAME event is a full no-op (not a second hit). Comfortably longer than Resend's
+# retry schedule.
+EMAIL_EVENT_DEDUP_TTL_SECONDS: int = 60 * 60 * 24
+
+# Lifetime of the signed email-change token (itsdangerous max_age). Shorter than
+# verification: it re-points the login identifier, so a stale link must not fire.
+EMAIL_CHANGE_TTL_SECONDS: int = 60 * 60 * 2  # 2h
+# SPA route that consumes the mailed change-confirmation token.
+EMAIL_CHANGE_PATH: str = "/verify-email"
+
+# Per-lookup budget for the MX/A deliverability probe. Deliberately small: it
+# sits in the registration request path and its failure mode is fail-open.
+DNS_RESOLVE_TIMEOUT_SECONDS: float = 3.0
+# Redis TTL for a resolved domain verdict, keyed by domain. Bounded so a domain
+# that gains DNS records later stops being rejected within the hour.
+DNS_DOMAIN_CACHE_TTL_SECONDS: int = 60 * 60
+
 # Notifications (product email subsystem — see services/notification_service.py).
 # Auth mail (verification / password reset) does NOT go through it.
 # Dedup window per (user, event, entity): a repeat inside it is dropped. Also what

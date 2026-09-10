@@ -76,6 +76,11 @@ class User(Base):
     # signed verification link; content-creating teacher endpoints are gated on
     # this via require_verified_teacher. Existing users are backfilled to True.
     email_verified = Column(Boolean, server_default="false", nullable=False, default=False)
+    # Last known hard bounce / spam complaint for THIS address, mirrored from
+    # email_suppressions so the SPA can warn the owner without a join. Cleared
+    # on a delivered event for the same address and on a successful email change.
+    email_bounced_at = Column(DateTime(timezone=True), nullable=True)
+    email_bounce_reason = Column(String(32), nullable=True)
     # Product-notification preferences (see services/notification_service.py).
     # One column per NotificationCategory — the enum's value IS the column name.
     # Default on: a user who never visits the settings page still gets told when

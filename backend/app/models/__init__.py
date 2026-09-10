@@ -15,6 +15,7 @@ from app.models.credit import (
     CreditPlan,
     CreditTransaction,
 )
+from app.models.email_suppression import EmailSuppression, SuppressionReason
 from app.models.enrollment import Enrollment, LessonProgress
 from app.models.generation_usage import GenerationUsage
 from app.models.lesson import (
@@ -79,6 +80,8 @@ __all__ = [
     "Payment",
     "PaymentStatus",
     "GenerationUsage",
+    "EmailSuppression",
+    "SuppressionReason",
     "UsageCounter",
     "Assignment",
     "AssignmentSubmission",
